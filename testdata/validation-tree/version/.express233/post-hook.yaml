@@ -1,0 +1,11 @@
+version: 1
+steps:
+  - when: 'os == "windows"'
+    run: scripts/restart.ps1
+    shell: powershell
+  - when: 'os == "linux"'
+    run: scripts/restart.sh
+    shell: bash
+  - else: true
+    run: scripts/restart.sh
+    shell: bash

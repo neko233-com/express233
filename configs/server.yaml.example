@@ -1,0 +1,42 @@
+# express233-server 中央配置（按租户隔离，路径：data/tenants/<slug>/server.yaml）
+# replacements 的键 = 配置文件名（basename），无视目录树
+# 版本包内每种配置文件名只能出现一次（.yaml/.yml/.json/.properties）
+#
+# YAML/JSON 支持嵌套部分覆盖（只写需要改的字段）；.properties 可用嵌套或 dotted 键。
+# 覆盖结构必须与目标文件格式一致（application.yaml 用 YAML 对象，不能混用 properties 扁平语法）。
+
+servers:
+  game-logic-01:
+    replacements:
+      game.properties:
+        server.id: game-logic-01
+        server.port: "9001"
+        db.host: db-ecs-a.internal
+      application.yaml:
+        mysql:
+          url: jdbc:mysql://db-ecs-a.internal:3306/game
+          password: "{{MYSQL_PASSWORD}}"
+        game:
+          serverId: game-logic-01
+          listenPort: 9001
+    post_hook: scripts/restart-{{SERVER_ID}}.sh
+    post_hook_env:
+      SERVER_ID: game-logic-01
+      INSTANCE_INDEX: "1"
+
+  game-logic-02:
+    replacements:
+      game.properties:
+        server.id: game-logic-02
+        server.port: "9002"
+      application.yaml:
+        mysql:
+          url: jdbc:mysql://db-ecs-b.internal:3306/game
+          password: "{{MYSQL_PASSWORD}}"
+        game:
+          serverId: game-logic-02
+          listenPort: 9002
+    post_hook: scripts/restart-{{SERVER_ID}}.sh
+    post_hook_env:
+      SERVER_ID: game-logic-02
+      INSTANCE_INDEX: "2"

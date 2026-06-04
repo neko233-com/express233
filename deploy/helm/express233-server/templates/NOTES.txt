@@ -1,0 +1,11 @@
+express233-server 已部署。
+
+  控制台: http://127.0.0.1:23380/  （默认 root/root，请尽快修改）
+  API 文档: /docs/
+  OpenAPI:  /api/openapi.yaml
+
+获取 Service URL:
+  kubectl get svc {{ include "express233-server.fullname" . }} -n {{ .Release.Namespace }}
+
+Helm 升级:
+  helm upgrade {{ .Release.Name }} ./deploy/helm/express233-server -n {{ .Release.Namespace }}

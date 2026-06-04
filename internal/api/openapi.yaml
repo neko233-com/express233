@@ -1,0 +1,552 @@
+openapi: 3.0.3
+info:
+  title: express233-server API
+  description: |
+    游戏逻辑服拉模式部署中央服务 API。
+
+    - **管理端**：Cookie 会话（`POST /api/login`）
+     - **节点端**：拉取 Token（`token` 查询参数）
+  version: 1.0.0
+servers:
+  - url: http://localhost:23380
+    description: 本地开发
+
+tags:
+  - name: health
+  - name: auth
+  - name: admin
+  - name: projects
+  - name: pull
+
+paths:
+  /healthz:
+    get:
+      tags: [health]
+      summary: 健康检查
+      responses:
+        "200":
+          description: ok
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: ok
+
+  /api/login:
+    post:
+      tags: [auth]
+      summary: 登录
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string, format: password }
+      responses:
+        "200":
+          description: 成功，Set-Cookie 会话
+        "401":
+          $ref: "#/components/responses/Error"
+
+  /api/me:
+    get:
+      tags: [auth]
+      summary: 当前用户
+      security: [{ cookieAuth: [] }]
+      responses:
+        "200":
+          description: OK
+
+  /api/server-ids:
+    get:
+      tags: [admin]
+      summary: 列出 server.yaml 中 server_id
+      security: [{ cookieAuth: [] }]
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  server_ids:
+                    type: array
+                    items: { type: string }
+
+  /api/server-yaml:
+    get:
+      tags: [admin]
+      summary: 读取 server.yaml
+      security: [{ cookieAuth: [] }]
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  content: { type: string }
+    put:
+      tags: [admin]
+      summary: 保存 server.yaml（仅管理员）
+      security: [{ cookieAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content: { type: string }
+      responses:
+        "204":
+          description: 已保存
+
+  /api/deploy/preview:
+    get:
+      tags: [admin]
+      summary: 预览 server_id 配置变更（可预览草稿版本）
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/project"
+        - $ref: "#/components/parameters/version"
+        - $ref: "#/components/parameters/server_id"
+      responses:
+        "200":
+          description: 变更预览
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PreviewReport"
+
+  /api/deploy/diff:
+    get:
+      tags: [admin]
+      summary: 对比两版本在 server_id 下的有效配置差异
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/project"
+        - name: from
+          in: query
+          required: true
+          schema: { type: string }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string }
+        - $ref: "#/components/parameters/server_id"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VersionDiffReport"
+
+  /api/projects:
+    get:
+      tags: [projects]
+      summary: 项目列表
+      security: [{ cookieAuth: [] }]
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Project"
+    post:
+      tags: [projects]
+      summary: 创建项目
+      security: [{ cookieAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+      responses:
+        "201":
+          description: 已创建
+
+  /api/projects/{id}/versions:
+    get:
+      tags: [projects]
+      summary: 版本列表
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Version"
+    post:
+      tags: [projects]
+      summary: 创建草稿版本
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, description: 版本号 }
+      responses:
+        "201":
+          description: 已创建
+
+  /api/projects/{id}/versions/{ver}/submit-review:
+    post:
+      tags: [projects]
+      summary: 提交审批（draft/rejected → pending_review）
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: ver
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 已进入待审批
+
+  /api/projects/{id}/versions/{ver}/reject:
+    post:
+      tags: [projects]
+      summary: 驳回审批（pending_review → rejected，仅 admin）
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: ver
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 已驳回
+
+  /api/projects/{id}/versions/{ver}/publish:
+    post:
+      tags: [projects]
+      summary: 正式发布（不可再改，仅 admin；允许 draft 或 pending_review）
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: ver
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 已发布
+
+  /api/projects/{id}/versions/{ver}/files:
+    post:
+      tags: [projects]
+      summary: 上传文件或 zip（自动解压）
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: ver
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                path:
+                  type: string
+                  description: 可选相对路径
+      responses:
+        "200":
+          description: 已上传
+
+  /api/pull:
+    get:
+      tags: [pull]
+      summary: 拉取已发布版本（tar.gz）
+      parameters:
+        - $ref: "#/components/parameters/token"
+        - $ref: "#/components/parameters/project"
+        - $ref: "#/components/parameters/server_id"
+        - name: version
+          in: query
+          schema: { type: string }
+          description: 省略则取最新已发布
+      responses:
+        "200":
+          description: application/gzip 包
+          content:
+            application/gzip:
+              schema:
+                type: string
+                format: binary
+
+  /api/pull/preview:
+    get:
+      tags: [pull]
+      summary: 预览配置变更（节点 token）
+      parameters:
+        - $ref: "#/components/parameters/token"
+        - $ref: "#/components/parameters/project"
+        - $ref: "#/components/parameters/server_id"
+        - name: version
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PreviewReport"
+
+  /api/pull/diff:
+    get:
+      tags: [pull]
+      summary: 对比两版本配置差异（节点 token）
+      parameters:
+        - $ref: "#/components/parameters/token"
+        - $ref: "#/components/parameters/project"
+        - name: from
+          in: query
+          required: true
+          schema: { type: string }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string }
+        - $ref: "#/components/parameters/server_id"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VersionDiffReport"
+
+  /api/pull/server-ids:
+    get:
+      tags: [pull]
+      summary: 列出 server_id（节点 token）
+      parameters:
+        - $ref: "#/components/parameters/token"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  server_ids:
+                    type: array
+                    items: { type: string }
+
+  /api/pull/versions:
+    get:
+      tags: [pull]
+      summary: 列出项目已发布版本
+      parameters:
+        - $ref: "#/components/parameters/token"
+        - $ref: "#/components/parameters/project"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  project: { type: string }
+                  versions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Version"
+
+  /metrics:
+    get:
+      tags: [health]
+      summary: Prometheus 指标
+      responses:
+        "200":
+          description: text/plain metrics
+
+  /api/status:
+    get:
+      tags: [admin]
+      summary: 系统状态摘要
+      security: [{ cookieAuth: [] }]
+      responses:
+        "200":
+          description: OK
+
+  /api/audit-logs:
+    get:
+      tags: [admin]
+      summary: 操作审计（管理员）
+      security: [{ cookieAuth: [] }]
+      responses:
+        "200":
+          description: 审计列表
+
+  /api/projects/{id}/versions/{ver}/validate:
+    get:
+      tags: [projects]
+      summary: 发布前检查
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: ver, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 检查结果
+
+  /api/projects/{id}/versions/{ver}/download:
+    get:
+      tags: [projects]
+      summary: 下载已发布版本原始包
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: ver, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: application/gzip
+
+  /api/me/password:
+    post:
+      tags: [auth]
+      summary: 修改当前用户密码
+      security: [{ cookieAuth: [] }]
+      responses:
+        "204":
+          description: 已更新
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: express233_session
+  parameters:
+    token:
+      name: token
+      in: query
+      required: true
+      schema: { type: string }
+    project:
+      name: project
+      in: query
+      required: true
+      schema: { type: string }
+    version:
+      name: version
+      in: query
+      required: true
+      schema: { type: string }
+    server_id:
+      name: server_id
+      in: query
+      required: true
+      schema: { type: string }
+  responses:
+    Error:
+      description: 错误
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string }
+  schemas:
+    Project:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        created_at: { type: string }
+    Version:
+      type: object
+      properties:
+        version: { type: string }
+        status: { type: string, enum: [draft, pending_review, rejected, published] }
+        created_at: { type: string }
+        published_at: { type: string }
+    VersionDiffReport:
+      type: object
+      properties:
+        project: { type: string }
+        from_version: { type: string }
+        to_version: { type: string }
+        server_id: { type: string }
+        files:
+          type: array
+          items:
+            type: object
+            properties:
+              basename: { type: string }
+              keys:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    key: { type: string }
+                    from: { type: string }
+                    to: { type: string }
+                    change: { type: string, enum: [added, removed, modified] }
+    PreviewReport:
+      type: object
+      properties:
+        project: { type: string }
+        version: { type: string }
+        server_id: { type: string }
+        post_hook: { type: string }
+        files:
+          type: array
+          items:
+            type: object
+            properties:
+              basename: { type: string }
+              paths:
+                type: array
+                items: { type: string }
+              changes:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    key: { type: string }
+                    before: { type: string }
+                    after: { type: string }
+                    action: { type: string, enum: [replace, add, unchanged] }

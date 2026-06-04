@@ -1,0 +1,6 @@
+/bin/
+*.exe
+*.db
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "express233-server.fullname" . }}
+  labels:
+    {{- include "express233-server.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "express233-server.labels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "express233-server.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: server
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - "-addr"
+            - ":23380"
+            - "-data"
+            - "/data"
+          ports:
+            - name: http
+              containerPort: 23380
+          env:
+            - name: EXPRESS233_DATA
+              value: {{ .Values.env.EXPRESS233_DATA | quote }}
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "express233-server.fullname" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}

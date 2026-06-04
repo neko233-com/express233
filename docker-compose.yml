@@ -1,0 +1,20 @@
+services:
+  express233-server:
+    build:
+      context: .
+      args:
+        VERSION: dev
+    ports:
+      - "23380:23380"
+    volumes:
+      - express233-data:/data
+    environment:
+      EXPRESS233_DATA: /data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:23380/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  express233-data:

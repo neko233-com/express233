@@ -1,0 +1,8 @@
+server:
+  name: game-srv-02
+  zone: cn-east
+mysql:
+  host: db-srv-02.internal
+  port: 3306
+  database: game_srv_02
+  user: game

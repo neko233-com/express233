@@ -1,0 +1,5 @@
+# server_id,dest_dir  （dest 可省略，使用 --dest 默认值）
+# 同一 ECS 多实例：不同 server_id + 不同目录 + server.yaml 里不同 port/db
+game-logic-001,/opt/game/logic-001
+game-logic-002,/opt/game/logic-002
+game-logic-003,/opt/game/logic-003

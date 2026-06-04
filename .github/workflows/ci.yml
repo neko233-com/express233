@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26.x"
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: Unit tests
+        run: go test ./... -count=1 -coverprofile=coverage.out
+        if: matrix.os == 'ubuntu-latest'
+
+      - name: Unit tests (race)
+        run: go test ./... -count=1 -race
+        if: matrix.os == 'ubuntu-latest'
+
+      - name: Unit tests
+        run: go test ./... -count=1
+        if: matrix.os != 'ubuntu-latest'
+
+      - name: Upload coverage
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+
+  build:
+    name: build binaries
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Build with version metadata
+        env:
+          VERSION: 0.0.0-ci.${{ github.run_number }}
+          COMMIT: ${{ github.sha }}
+          DATE: ${{ github.event.head_commit.timestamp || 'ci' }}
+        run: |
+          LDFLAGS="-s -w \
+            -X github.com/neko233-com/express233/internal/version.Version=${VERSION} \
+            -X github.com/neko233-com/express233/internal/version.Commit=${COMMIT} \
+            -X github.com/neko233-com/express233/internal/version.Date=${DATE}"
+          go build -ldflags "${LDFLAGS}" -o bin/express233 ./cmd/express233
+          go build -ldflags "${LDFLAGS}" -o bin/express233-server ./cmd/express233-server
+          ./bin/express233 version
+          ./bin/express233-server -version
+
+      - name: Smoke test server + API
+        run: bash scripts/ci-smoke.sh
+
+      - name: Health check
+        run: |
+          ./bin/express233-server -data /tmp/ex233-ci &
+          pid=$!
+          sleep 1
+          curl -fsS http://127.0.0.1:23380/healthz | grep -q ok
+          kill $pid
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-amd64-ci-binaries
+          path: bin/
+
+  scripts:
+    name: validate scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ShellCheck
+        uses: rhysd/action-shellcheck@v1
+        with:
+          pattern: "scripts/*.sh"
+
+      - name: Bash syntax
+        run: |
+          bash -n scripts/install.sh
+          bash -n scripts/install-server.sh
+          bash -n scripts/deploy-on-host.sh
+          bash -n scripts/ci-smoke.sh
+          bash -n scripts/backup-data.sh
+          bash -n scripts/restore-data.sh

@@ -1,0 +1,8 @@
+server:
+  name: template-name
+  zone: cn-east
+mysql:
+  host: db.template.local
+  port: 3306
+  database: game_tpl
+  user: game

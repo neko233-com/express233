@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>express233 控制台</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="inviteBanner" class="panel hidden">
+    <h3>项目邀请</h3>
+    <p id="inviteBannerText"></p>
+    <button type="button" id="btnAcceptInvite">接受邀请并加入项目</button>
+  </div>
+  <div id="login" class="panel">
+    <h1>express233</h1>
+    <p>默认账号 root / root</p>
+    <input id="user" placeholder="用户名" value="root" />
+    <input id="pass" type="password" placeholder="密码" value="root" />
+    <button id="btnLogin">登录</button>
+    <p id="loginErr" class="err"></p>
+  </div>
+
+  <div id="app" class="hidden">
+    <header>
+      <strong>express233-server</strong>
+      <a href="/docs/" target="_blank" rel="noopener">API 文档</a>
+      <span id="who"></span>
+      <button id="btnLogout">退出</button>
+    </header>
+    <nav>
+      <button data-tab="projects" class="active">项目</button>
+      <button data-tab="server">server.yaml</button>
+      <button data-tab="users" class="admin-only hidden">账号</button>
+      <button data-tab="audit" class="admin-only hidden">审计</button>
+    </nav>
+
+    <section id="tab-projects">
+      <div class="row">
+        <input id="newProject" placeholder="新项目名称" />
+        <button id="btnAddProject">创建项目</button>
+        <button id="btnDelProject" class="danger hidden">删除当前项目</button>
+      </div>
+      <div class="grid">
+        <div>
+          <h3>项目</h3>
+          <ul id="projectList"></ul>
+        </div>
+        <div>
+          <h3>版本 <span id="curProject"></span></h3>
+          <div class="row">
+            <input id="newVersion" placeholder="版本号 e.g. 1.0.0" />
+            <button id="btnAddVersion" class="project-write">新建草稿</button>
+          </div>
+          <ul id="versionList"></ul>
+          <div id="versionDetail" class="hidden">
+            <p>状态: <span id="verStatus"></span> | 创建: <span id="verCreated"></span> | 发布: <span id="verPublished"></span></p>
+            <button id="btnValidate">发布前检查</button>
+            <button id="btnSubmitReview" class="project-write hidden">提交审批</button>
+            <button id="btnRejectReview" class="project-write hidden">驳回审批</button>
+            <button id="btnPublish" class="project-write hidden">正式发布</button>
+            <a id="btnDownloadVer" class="btn-link hidden" href="#" target="_blank">下载版本包</a>
+            <button id="btnDeleteVersion" class="danger project-write">删除版本（二次确认）</button>
+            <p class="hint">配置文件（.yaml/.json/.properties）<strong>文件名全局唯一</strong>，无视目录树；server.yaml 按文件名做替换。</p>
+            <h4>上传文件 / 拖拽 .zip</h4>
+            <input type="file" id="fileInput" class="project-write" multiple />
+            <ul id="fileList"></ul>
+            <h4>拉取预览（按 server_id）</h4>
+            <div class="row">
+              <input id="verPreviewServerId" list="serverIdList" placeholder="server_id" />
+              <button id="btnVerPreview" type="button">预览配置变更</button>
+            </div>
+            <div id="validateResult"></div>
+            <div class="preview-split">
+              <div class="preview-keys">
+                <p class="hint">左侧：键级变更；右侧：替换后完整文件（随 server_id 自动刷新）</p>
+                <div id="verPreviewTable"></div>
+              </div>
+              <div class="preview-rendered">
+                <div id="verPreviewRenderedTabs" class="rendered-tabs"></div>
+                <pre id="verPreviewRenderedBody" class="rendered-body">选择 server_id 后显示替换后的配置文件全文</pre>
+              </div>
+            </div>
+            <h4>版本差异（相对另一版本）</h4>
+            <div class="row">
+              <input id="diffFromVer" placeholder="对比版本 from" />
+              <button type="button" id="btnVersionDiff">生成 diff</button>
+            </div>
+            <div id="versionDiffOut"></div>
+            <h4>团队与邀请</h4>
+            <div id="projectTeam" class="hidden">
+              <p class="hint">项目管理员可邀请成员；<strong>只读</strong>成员仅可查看/预览/拉取，<strong>管理员</strong>可上传与发布。</p>
+              <div class="row project-write">
+                <select id="inviteRole">
+                  <option value="viewer">只读成员</option>
+                  <option value="admin">项目管理员</option>
+                </select>
+                <button type="button" id="btnCreateInvite">生成邀请链接</button>
+              </div>
+              <input id="inviteUrl" class="cmdbox" readonly placeholder="邀请链接" />
+              <ul id="memberList"></ul>
+            </div>
+            <h4>节点部署命令</h4>
+            <p class="hint">复制到 SSH 主机执行（需已安装 express233 CLI 并配置 TOKEN）</p>
+            <pre id="deployCmd" class="cmdbox"></pre>
+            <button type="button" id="btnCopyDeploy">复制命令</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-server" class="hidden">
+      <h3>server.yaml（replacements 键 = 配置文件名 basename）</h3>
+      <textarea id="serverYaml" rows="24"></textarea>
+      <div class="row">
+        <button id="btnSaveYaml">保存</button>
+        <input id="previewServerId" list="serverIdList" placeholder="server_id" />
+        <datalist id="serverIdList"></datalist>
+        <input id="previewProject" placeholder="project" />
+        <input id="previewVersion" placeholder="version" />
+        <button id="btnPreview">预览配置变更 diff</button>
+      </div>
+      <div id="previewOut"></div>
+    </section>
+
+    <section id="tab-audit" class="hidden admin-only">
+      <h3>操作审计</h3>
+      <button type="button" id="btnReloadAudit">刷新</button>
+      <table class="preview-table" id="auditTable">
+        <thead><tr><th>时间</th><th>用户</th><th>动作</th><th>详情</th><th>IP</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section id="tab-users" class="hidden admin-only">
+      <h3>修改我的密码</h3>
+      <div class="row">
+        <input id="myOldPass" type="password" placeholder="当前密码" />
+        <input id="myNewPass" type="password" placeholder="新密码" />
+        <button type="button" id="btnChangeMyPass">更新密码</button>
+      </div>
+      <div class="row">
+        <input id="newUser" placeholder="用户名" />
+        <input id="newUserPass" type="password" placeholder="密码" />
+        <select id="newUserRole">
+          <option value="viewer">viewer（只读）</option>
+          <option value="operator">operator（上传/提交审批）</option>
+          <option value="admin">admin</option>
+        </select>
+        <label><input type="checkbox" id="newUserAdmin" /> 兼容：勾选等同 admin</label>
+        <button id="btnAddUser">创建账号</button>
+      </div>
+      <table id="userTable"><thead><tr><th>ID</th><th>用户</th><th>Token</th><th>操作</th></tr></thead><tbody></tbody></table>
+    </section>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

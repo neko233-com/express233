@@ -1,0 +1,6 @@
+apiVersion: v2
+name: express233-server
+description: Central server for express233 pull-based game server deployment
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

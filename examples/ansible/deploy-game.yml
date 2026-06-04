@@ -1,0 +1,49 @@
+---
+# 在 inventory 中为每台逻辑服定义：
+#   express233_server_id=game-logic-042
+#   express233_dest=/opt/game/logic-042
+#
+# 一行拉取（与 scripts/deploy-on-host.sh 等价）
+
+- name: Deploy game logic via express233 pull
+  hosts: game_logic
+  gather_facts: false
+  vars:
+    express233_central: "http://10.0.0.1:23380"
+    express233_project: "mygame"
+    express233_token: "{{ lookup('env', 'EXPRESS233_TOKEN') }}"
+    express233_version: "" # 空 = 最新已发布
+
+  tasks:
+    - name: Ensure express233 CLI installed
+      ansible.builtin.shell: |
+        command -v express233 || curl -fsSL https://raw.githubusercontent.com/neko233-com/express233/main/scripts/install.sh | bash
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Optional preview
+      when: express233_preview | default(false) | bool
+      ansible.builtin.command: >
+        express233 preview
+        --server {{ express233_central }}
+        --project {{ express233_project }}
+        --server-id {{ express233_server_id }}
+        --token {{ express233_token }}
+        {{ '--version ' + express233_version if express233_version else '' }}
+      environment:
+        EXPRESS233_SERVER: "{{ express233_central }}"
+        EXPRESS233_TOKEN: "{{ express233_token }}"
+
+    - name: Pull deploy
+      ansible.builtin.command: >
+        express233 deploy
+        --server {{ express233_central }}
+        --project {{ express233_project }}
+        --server-id {{ express233_server_id }}
+        --token {{ express233_token }}
+        --dest {{ express233_dest }}
+        {{ '--version ' + express233_version if express233_version else '' }}
+      environment:
+        EXPRESS233_SERVER: "{{ express233_central }}"
+        EXPRESS233_TOKEN: "{{ express233_token }}"

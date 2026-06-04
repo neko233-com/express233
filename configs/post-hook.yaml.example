@@ -1,0 +1,13 @@
+# 放入版本包：.express233/post-hook.yaml
+# 拉取解压后按本机 OS 执行第一个匹配的 step（支持 if/else）
+version: 1
+steps:
+  - when: 'os == "windows"'
+    run: run/run.cmd
+    shell: cmd
+  - when: 'os == "linux"'
+    run: run/run.sh
+    shell: bash
+  - else: true
+    run: run/run.sh
+    shell: bash

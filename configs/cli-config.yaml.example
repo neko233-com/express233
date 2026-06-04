@@ -1,0 +1,5 @@
+# ~/.express233/config.yaml
+server: http://10.0.0.1:23380
+token: your_pull_token_here
+project: mygame
+default_dest: /opt/game

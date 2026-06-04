@@ -1,0 +1,28 @@
+servers:
+  game-srv-01:
+    replacements:
+      application.yaml:
+        server:
+          name: game-srv-01
+        mysql:
+          host: db-srv-01.internal
+          database: game_srv_01
+      game.properties:
+        server.name: game-srv-01
+        mysql.url: jdbc:mysql://db-srv-01.internal:3306/game_srv_01
+    post_hook_env:
+      SERVER_ID: game-srv-01
+
+  game-srv-02:
+    replacements:
+      application.yaml:
+        server:
+          name: game-srv-02
+        mysql:
+          host: db-srv-02.internal
+          database: game_srv_02
+      game.properties:
+        server.name: game-srv-02
+        mysql.url: jdbc:mysql://db-srv-02.internal:3306/game_srv_02
+    post_hook_env:
+      SERVER_ID: game-srv-02
