@@ -1,5 +1,21 @@
-const api = (path, opts = {}) =>
-  fetch(path, { credentials: "include", ...opts }).then(async (r) => {
+const TOKEN_KEY = "express233_jwt";
+
+const getToken = () => localStorage.getItem(TOKEN_KEY);
+const setToken = (t) => {
+  if (t) localStorage.setItem(TOKEN_KEY, t);
+  else localStorage.removeItem(TOKEN_KEY);
+};
+
+const api = (path, opts = {}) => {
+  const headers = { ...(opts.headers || {}) };
+  const t = getToken();
+  if (t) headers.Authorization = `Bearer ${t}`;
+  return fetch(path, { credentials: "include", ...opts, headers }).then(async (r) => {
+    if (r.status === 401) {
+      setToken(null);
+      showLogin();
+      throw new Error("请先登录");
+    }
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
       throw new Error(j.error || r.statusText);
@@ -7,9 +23,11 @@ const api = (path, opts = {}) =>
     if (r.status === 204) return null;
     return r.json();
   });
+};
 
 let state = {
   projects: [],
+  projectFilter: "",
   projectId: null,
   projectName: null,
   version: null,
@@ -19,28 +37,22 @@ let state = {
   tenantSlug: null,
   projectRole: null,
   pendingInviteToken: null,
+  globalView: "workspace",
+  projectTab: "versions",
 };
 
-async function init() {
-  try {
-    const me = await api("/api/me");
-    state.isAdmin = me.is_admin;
-    state.role = me.role || (me.is_admin ? "admin" : "viewer");
-    state.tenantSlug = me.tenant_slug || null;
-    showApp(me.username);
-  } catch {
-    document.getElementById("login").classList.remove("hidden");
-  }
-  await parseInviteHash();
+function showLogin() {
+  document.getElementById("login").classList.remove("hidden");
+  document.getElementById("app").classList.add("hidden");
 }
 
 function showApp(username) {
   document.getElementById("login").classList.add("hidden");
   document.getElementById("app").classList.remove("hidden");
   const who = document.getElementById("who");
-  who.textContent = state.tenantSlug
-    ? `${username} @ ${state.tenantSlug}`
-    : username;
+  who.textContent = state.tenantSlug ? `${username} @ ${state.tenantSlug}` : username;
+  const av = document.querySelector(".user-avatar");
+  if (av && username) av.textContent = username.charAt(0).toUpperCase();
   if (state.isAdmin) {
     document.querySelectorAll(".admin-only").forEach((el) => el.classList.remove("hidden"));
     loadUsers();
@@ -49,17 +61,67 @@ function showApp(username) {
   if (state.isAdmin || state.role === "operator") {
     document.querySelectorAll(".operator-only").forEach((el) => el.classList.remove("hidden"));
   }
+  setGlobalView("workspace");
   loadProjects();
   loadServerYaml();
   loadServerIDs();
   parseInviteHash();
 }
 
+function setGlobalView(view) {
+  state.globalView = view;
+  document.querySelectorAll(".sidebar-nav-item[data-global]").forEach((b) => {
+    b.classList.toggle("active", b.dataset.global === view);
+  });
+  document.getElementById("globalServer").classList.toggle("hidden", view !== "server");
+  document.getElementById("globalSettings").classList.toggle("hidden", view !== "settings");
+  const inProject = view === "workspace" && state.projectId;
+  document.getElementById("projectWorkspace").classList.toggle("hidden", !inProject);
+  document.getElementById("emptyProject").classList.toggle("hidden", inProject || view !== "workspace");
+}
+
+function setProjectTab(tab) {
+  state.projectTab = tab;
+  document.querySelectorAll(".project-tab").forEach((b) => {
+    b.classList.toggle("active", b.dataset.ptab === tab);
+  });
+  ["versions", "preview", "team", "deploy", "diff"].forEach((t) => {
+    const el = document.getElementById("ptab-" + t);
+    if (el) el.classList.toggle("hidden", t !== tab);
+  });
+}
+
+function setVersionStatusBadge(status) {
+  const el = document.getElementById("verStatus");
+  if (!el) return;
+  el.textContent = status || "—";
+  el.className = "badge";
+  if (status === "published") el.classList.add("badge-ok");
+  else if (status === "draft") el.classList.add("badge-draft");
+  else if (status === "pending_review") el.classList.add("badge-warn");
+}
+
+async function init() {
+  const saved = getToken();
+  try {
+    const me = await api("/api/me");
+    if (me.token) setToken(me.token);
+    state.isAdmin = me.is_admin;
+    state.role = me.role || (me.is_admin ? "admin" : "viewer");
+    state.tenantSlug = me.tenant_slug || null;
+    showApp(me.username);
+  } catch {
+    if (saved) setToken(null);
+    showLogin();
+  }
+  await parseInviteHash();
+}
+
 async function loadServerIDs() {
   try {
     const d = await api("/api/server-ids");
     const dl = document.getElementById("serverIdList");
-    dl.innerHTML = (d.server_ids || []).map((id) => `<option value="${escapeHtml(id)}">`).join("");
+    if (dl) dl.innerHTML = (d.server_ids || []).map((id) => `<option value="${escapeHtml(id)}">`).join("");
   } catch (_) {}
 }
 
@@ -89,6 +151,7 @@ document.getElementById("btnLogin").onclick = async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username: u, password: p }),
     });
+    if (me.token) setToken(me.token);
     state.isAdmin = me.is_admin;
     state.role = me.role || (me.is_admin ? "admin" : "viewer");
     state.tenantSlug = me.tenant_slug || null;
@@ -99,31 +162,58 @@ document.getElementById("btnLogin").onclick = async () => {
 };
 
 document.getElementById("btnLogout").onclick = async () => {
-  await api("/api/logout", { method: "POST" });
-  location.reload();
+  try {
+    await api("/api/logout", { method: "POST" });
+  } catch (_) {}
+  setToken(null);
+  location.href = "/";
 };
 
-document.querySelectorAll("nav button").forEach((btn) => {
+document.querySelectorAll(".sidebar-nav-item[data-global]").forEach((btn) => {
   btn.onclick = () => {
-    document.querySelectorAll("nav button").forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    ["projects", "server", "users", "audit"].forEach((t) => {
-      document.getElementById("tab-" + t).classList.toggle("hidden", t !== btn.dataset.tab);
-    });
+    if (btn.dataset.global === "workspace") setGlobalView("workspace");
+    else if (btn.dataset.global === "server") setGlobalView("server");
+    else if (btn.dataset.global === "settings") setGlobalView("settings");
   };
 });
 
+document.querySelectorAll(".project-tab").forEach((btn) => {
+  btn.onclick = () => setProjectTab(btn.dataset.ptab);
+});
+
+document.querySelectorAll("#settingsTabs .seg-tab").forEach((btn) => {
+  btn.onclick = () => {
+    document.querySelectorAll("#settingsTabs .seg-tab").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById("stab-users").classList.toggle("hidden", btn.dataset.stab !== "users");
+    document.getElementById("stab-audit").classList.toggle("hidden", btn.dataset.stab !== "audit");
+  };
+});
+
+document.getElementById("projectSearch")?.addEventListener("input", (e) => {
+  state.projectFilter = e.target.value.trim().toLowerCase();
+  renderProjectList();
+});
+
+function renderProjectList() {
+  const ul = document.getElementById("projectList");
+  if (!ul) return;
+  ul.innerHTML = "";
+  const q = state.projectFilter;
+  state.projects
+    .filter((p) => !q || p.name.toLowerCase().includes(q))
+    .forEach((p) => {
+      const li = document.createElement("li");
+      li.textContent = p.name;
+      li.onclick = () => selectProject(p);
+      if (p.id === state.projectId) li.classList.add("selected");
+      ul.appendChild(li);
+    });
+}
+
 async function loadProjects() {
   state.projects = await api("/api/projects");
-  const ul = document.getElementById("projectList");
-  ul.innerHTML = "";
-  state.projects.forEach((p) => {
-    const li = document.createElement("li");
-    li.textContent = p.name;
-    li.onclick = () => selectProject(p);
-    if (p.id === state.projectId) li.classList.add("selected");
-    ul.appendChild(li);
-  });
+  renderProjectList();
 }
 
 function canWriteProject() {
@@ -134,9 +224,7 @@ function updateProjectWriteUI() {
   const w = canWriteProject();
   document.querySelectorAll(".project-write").forEach((el) => {
     el.classList.toggle("hidden", !w);
-    if (el.tagName === "INPUT" || el.tagName === "BUTTON") {
-      el.disabled = !w;
-    }
+    if (el.tagName === "INPUT" || el.tagName === "BUTTON") el.disabled = !w;
   });
   const fileInput = document.getElementById("fileInput");
   if (fileInput) fileInput.disabled = !w;
@@ -145,19 +233,11 @@ function updateProjectWriteUI() {
 async function loadProjectTeam() {
   const box = document.getElementById("projectTeam");
   if (!box || !state.projectId) return;
-  box.classList.remove("hidden");
   try {
     const members = await api(`/api/projects/${state.projectId}/members`);
     const ul = document.getElementById("memberList");
     ul.innerHTML = members
-      .map(
-        (m) =>
-          `<li>${escapeHtml(m.username)} <code>${escapeHtml(m.role)}</code>${
-            canWriteProject() && m.role !== "admin"
-              ? ""
-              : ""
-          }</li>`
-      )
+      .map((m) => `<li>${escapeHtml(m.username)} <span class="badge">${escapeHtml(m.role)}</span></li>`)
       .join("");
   } catch (e) {
     console.warn(e);
@@ -173,16 +253,19 @@ async function selectProject(p) {
   document.getElementById("btnDelProject")?.classList.toggle("hidden", !canWriteProject());
   updateProjectWriteUI();
   loadProjectTeam();
+  setGlobalView("workspace");
+  setProjectTab(state.projectTab || "versions");
   await loadProjects();
   const versions = await api(`/api/projects/${p.id}/versions`);
   const ul = document.getElementById("versionList");
   ul.innerHTML = "";
   versions.forEach((v) => {
     const li = document.createElement("li");
-    li.textContent = `${v.version} [${v.status}]`;
+    li.textContent = `${v.version} · ${v.status}`;
     li.onclick = () => selectVersion(v);
     ul.appendChild(li);
   });
+  document.getElementById("versionDetail").classList.add("hidden");
 }
 
 function updateReviewButtons(status) {
@@ -201,9 +284,9 @@ async function selectVersion(v) {
   state.version = v.version;
   state.versionStatus = v.status;
   document.getElementById("versionDetail").classList.remove("hidden");
-  document.getElementById("verStatus").textContent = v.status;
+  setVersionStatusBadge(v.status);
   document.getElementById("verCreated").textContent = v.created_at;
-  document.getElementById("verPublished").textContent = v.published_at || "-";
+  document.getElementById("verPublished").textContent = v.published_at || "—";
   document.getElementById("btnPublish").disabled = v.status === "published";
   document.getElementById("btnValidate").disabled = v.status === "published";
   updateReviewButtons(v.status);
@@ -220,20 +303,17 @@ async function selectVersion(v) {
   document.getElementById("previewVersion").value = v.version;
   const files = await api(`/api/projects/${state.projectId}/versions/${v.version}/files`);
   const fl = document.getElementById("fileList");
-  fl.innerHTML = files.map((f) => `<li>${f}</li>`).join("");
+  fl.innerHTML = files.map((f) => `<li>${escapeHtml(f)}</li>`).join("");
   try {
     const cfg = await api(`/api/projects/${state.projectId}/versions/${v.version}/config-files`);
     const dup = Object.entries(cfg.duplicates || {}).filter(([, n]) => n > 1);
     if (dup.length) {
-      fl.innerHTML += `<li class="warn">重复配置名: ${dup.map(([b]) => b).join(", ")}</li>`;
-    }
-    if (cfg.files?.length) {
-      fl.innerHTML += `<li class="hint">配置文件: ${cfg.files.map((x) => x.basename).join(", ")}</li>`;
+      fl.innerHTML += `<li class="warn">重复: ${dup.map(([b]) => b).join(", ")}</li>`;
     }
   } catch (_) {}
   document.getElementById("verPreviewTable").innerHTML = "";
   document.getElementById("verPreviewRenderedTabs").innerHTML = "";
-  document.getElementById("verPreviewRenderedBody").textContent = "选择 server_id 后显示替换后的配置文件全文";
+  document.getElementById("verPreviewRenderedBody").textContent = "选择 server_id";
   updateDeployCmd();
   tryAutoPreviewOnVersionSelect();
 }
@@ -257,35 +337,31 @@ async function runDeployPreviewAuto() {
   try {
     const d = await fetchDeployPreview(state.projectName, state.version, sid);
     renderPreviewReport(d, document.getElementById("verPreviewTable"));
-  } catch (_) {
-    /* 输入过程中 server_id 可能尚未存在 */
-  }
+  } catch (_) {}
 }
 
 function renderPreviewReport(report, container) {
-  let html = `<p><strong>${report.project}</strong> / ${report.version} / server_id=<code>${report.server_id}</code></p>`;
+  let html = `<p class="hint"><strong>${escapeHtml(report.project)}</strong> / ${escapeHtml(report.version)} / <code>${escapeHtml(report.server_id)}</code></p>`;
   (report.warnings || []).forEach((w) => {
-    html += `<p class="warn">⚠ ${w}</p>`;
+    html += `<p class="warn">⚠ ${escapeHtml(w)}</p>`;
   });
-  if (!report.files || report.files.length === 0) {
+  if (!report.files?.length) {
     html += "<p>无 replacements 或未匹配配置文件</p>";
   } else {
-    html += `<table class="preview-table"><thead><tr><th>配置文件</th><th>路径</th><th>键</th><th>变更前</th><th>变更后</th><th>动作</th></tr></thead><tbody>`;
+    html += `<table class="preview-table"><thead><tr><th>文件</th><th>路径</th><th>键</th><th>前</th><th>后</th><th></th></tr></thead><tbody>`;
     for (const f of report.files) {
       const path = (f.paths && f.paths[0]) || "—";
       for (const c of f.changes || []) {
         const cls =
           c.action === "add" ? "action-add" : c.action === "unchanged" ? "action-unchanged" : "action-replace";
-        html += `<tr><td>${f.basename}</td><td><code>${path}</code></td><td>${c.key}</td><td>${escapeHtml(c.before || "")}</td><td>${escapeHtml(c.after || "")}</td><td class="${cls}">${c.action}</td></tr>`;
+        html += `<tr><td>${escapeHtml(f.basename)}</td><td><code>${escapeHtml(path)}</code></td><td>${escapeHtml(c.key)}</td><td>${escapeHtml(c.before || "")}</td><td>${escapeHtml(c.after || "")}</td><td class="${cls}">${c.action}</td></tr>`;
       }
     }
     html += "</tbody></table>";
   }
-  if (report.post_hook) {
-    html += `<p>post_hook: <code>${report.post_hook}</code></p>`;
-  }
+  if (report.post_hook) html += `<p class="hint">post_hook: <code>${escapeHtml(report.post_hook)}</code></p>`;
   if (report.post_hook_plan?.length) {
-    html += `<p>post_hook 计划: ${report.post_hook_plan.map((x) => `<code>${escapeHtml(x)}</code>`).join(" ")}</p>`;
+    html += `<p class="hint">计划: ${report.post_hook_plan.map((x) => `<code>${escapeHtml(x)}</code>`).join(" ")}</p>`;
   }
   container.innerHTML = html;
   renderRenderedFiles(report.rendered_files || []);
@@ -339,7 +415,7 @@ document.getElementById("btnVerPreview").onclick = async () => {
     alert(e.message);
   }
 };
-// 版本选中后若已填 server_id 则自动预览
+
 function tryAutoPreviewOnVersionSelect() {
   const sid = document.getElementById("verPreviewServerId")?.value.trim();
   if (sid) scheduleDeployPreview();
@@ -349,8 +425,7 @@ document.getElementById("btnDelProject").onclick = async () => {
   if (!state.projectId || !confirm("删除项目及所有版本？")) return;
   await api(`/api/projects/${state.projectId}`, { method: "DELETE" });
   state.projectId = null;
-  document.getElementById("versionDetail").classList.add("hidden");
-  loadProjects();
+  setGlobalView("workspace");
 };
 
 document.getElementById("btnAddProject").onclick = async () => {
@@ -392,61 +467,49 @@ document.getElementById("btnValidate").onclick = async () => {
 
 document.getElementById("btnSubmitReview")?.addEventListener("click", async () => {
   if (!state.projectId || !state.version) return;
-  try {
-    await api(`/api/projects/${state.projectId}/versions/${encodeURIComponent(state.version)}/submit-review`, {
-      method: "POST",
-    });
-    selectProject({ id: state.projectId, name: state.projectName });
-  } catch (e) {
-    alert(e.message);
-  }
-});
-
-document.getElementById("btnRejectReview")?.addEventListener("click", async () => {
-  if (!state.projectId || !state.version || !confirm("驳回该版本审批？")) return;
-  await api(`/api/projects/${state.projectId}/versions/${encodeURIComponent(state.version)}/reject`, {
+  await api(`/api/projects/${state.projectId}/versions/${encodeURIComponent(state.version)}/submit-review`, {
     method: "POST",
   });
   selectProject({ id: state.projectId, name: state.projectName });
 });
 
-document.getElementById("btnPublish").onclick = async () => {
-  if (!confirm("发布后不可修改，仅可整版本删除。确认发布？")) return;
-  await api(`/api/projects/${state.projectId}/versions/${state.version}/publish`, { method: "POST" });
+document.getElementById("btnRejectReview")?.addEventListener("click", async () => {
+  if (!state.projectId || !state.version || !confirm("驳回？")) return;
+  await api(`/api/projects/${state.projectId}/versions/${encodeURIComponent(state.version)}/reject`, { method: "POST" });
   selectProject({ id: state.projectId, name: state.projectName });
+});
+
+document.getElementById("btnPublish").onclick = async () => {
+  if (!confirm("发布后不可修改。确认？")) return;
+  const ver = state.version;
+  await api(`/api/projects/${state.projectId}/versions/${encodeURIComponent(ver)}/publish`, { method: "POST" });
+  await selectProject({ id: state.projectId, name: state.projectName });
+  const versions = await api(`/api/projects/${state.projectId}/versions`);
+  const published = versions.find((v) => v.version === ver);
+  if (published) await selectVersion(published);
 };
 
 document.getElementById("btnVersionDiff")?.addEventListener("click", async () => {
   const from = document.getElementById("diffFromVer")?.value.trim();
   const sid = document.getElementById("verPreviewServerId")?.value.trim();
   if (!state.projectName || !state.version || !from || !sid) {
-    alert("填写对比版本 from 与 server_id");
+    alert("填写 from 与 server_id");
     return;
   }
-  try {
-    const q = new URLSearchParams({
-      project: state.projectName,
-      from,
-      to: state.version,
-      server_id: sid,
-    });
-    const d = await api("/api/deploy/diff?" + q);
-    renderVersionDiff(d, document.getElementById("versionDiffOut"));
-  } catch (e) {
-    alert(e.message);
-  }
+  const q = new URLSearchParams({ project: state.projectName, from, to: state.version, server_id: sid });
+  const d = await api("/api/deploy/diff?" + q);
+  renderVersionDiff(d, document.getElementById("versionDiffOut"));
 });
 
 function renderVersionDiff(report, container) {
   if (!container) return;
-  let html = `<p>${escapeHtml(report.from_version)} → ${escapeHtml(report.to_version)} / server_id=<code>${escapeHtml(report.server_id)}</code></p>`;
+  let html = `<p>${escapeHtml(report.from_version)} → ${escapeHtml(report.to_version)}</p>`;
   if (!report.files?.length) {
-    html += "<p>无差异</p>";
-    container.innerHTML = html;
+    container.innerHTML = html + "<p>无差异</p>";
     return;
   }
   for (const f of report.files) {
-    html += `<h5>${escapeHtml(f.basename)}</h5><table class="preview-table"><thead><tr><th>键</th><th>变更</th><th>from</th><th>to</th></tr></thead><tbody>`;
+    html += `<h4>${escapeHtml(f.basename)}</h4><table class="preview-table"><thead><tr><th>键</th><th></th><th>from</th><th>to</th></tr></thead><tbody>`;
     for (const k of f.keys || []) {
       html += `<tr><td>${escapeHtml(k.key)}</td><td>${escapeHtml(k.change)}</td><td>${escapeHtml(k.from || "")}</td><td>${escapeHtml(k.to || "")}</td></tr>`;
     }
@@ -456,10 +519,9 @@ function renderVersionDiff(report, container) {
 }
 
 document.getElementById("btnDeleteVersion").onclick = async () => {
-  if (!confirm("确定删除整个版本？此操作不可恢复。")) return;
-  if (!confirm("再次确认：删除版本 " + state.version)) return;
+  if (!confirm("删除版本 " + state.version + "？")) return;
+  if (!confirm("再次确认删除")) return;
   await api(`/api/projects/${state.projectId}/versions/${state.version}?confirm=yes`, { method: "DELETE" });
-  document.getElementById("versionDetail").classList.add("hidden");
   selectProject({ id: state.projectId, name: state.projectName });
 };
 
@@ -468,14 +530,18 @@ async function uploadFiles(files) {
     const fd = new FormData();
     fd.append("file", file);
     fd.append("path", file.name);
+    const headers = {};
+    const t = getToken();
+    if (t) headers.Authorization = `Bearer ${t}`;
     const r = await fetch(`/api/projects/${state.projectId}/versions/${state.version}/files`, {
       method: "POST",
       credentials: "include",
+      headers,
       body: fd,
     });
     if (!r.ok) throw new Error(await r.text());
   }
-  selectVersion({ version: state.version });
+  selectVersion({ version: state.version, status: state.versionStatus, created_at: "", published_at: "" });
 }
 
 document.getElementById("fileInput").onchange = async (e) => {
@@ -487,21 +553,23 @@ document.getElementById("fileInput").onchange = async (e) => {
 };
 
 const dropZone = document.getElementById("versionDetail");
-dropZone.addEventListener("dragover", (e) => {
-  e.preventDefault();
-  dropZone.classList.add("drag");
-});
-dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag"));
-dropZone.addEventListener("drop", async (e) => {
-  e.preventDefault();
-  dropZone.classList.remove("drag");
-  if (!state.version) return;
-  try {
-    await uploadFiles(e.dataTransfer.files);
-  } catch (err) {
-    alert(err.message);
-  }
-});
+if (dropZone) {
+  dropZone.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    dropZone.classList.add("drag");
+  });
+  dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag"));
+  dropZone.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    dropZone.classList.remove("drag");
+    if (!state.version) return;
+    try {
+      await uploadFiles(e.dataTransfer.files);
+    } catch (err) {
+      alert(err.message);
+    }
+  });
+}
 
 async function loadServerYaml() {
   const d = await api("/api/server-yaml");
@@ -526,12 +594,8 @@ document.getElementById("btnPreview").onclick = async () => {
     alert("填写 project / version / server_id");
     return;
   }
-  try {
-    const d = await fetchDeployPreview(project, version, serverId);
-    renderPreviewReport(d, document.getElementById("previewOut"));
-  } catch (e) {
-    alert(e.message);
-  }
+  const d = await fetchDeployPreview(project, version, serverId);
+  renderPreviewReport(d, document.getElementById("previewOut"));
 };
 
 async function loadUsers() {
@@ -540,9 +604,9 @@ async function loadUsers() {
   tbody.innerHTML = "";
   users.forEach((u) => {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${u.id}</td><td>${u.username}</td><td><code>${u.token}</code></td>
-      <td><button data-id="${u.id}" class="refresh">刷新 Token</button>
-      <button data-id="${u.id}" class="del">删除</button></td>`;
+    tr.innerHTML = `<td>${u.id}</td><td>${escapeHtml(u.username)}</td><td><code>${escapeHtml(u.token)}</code></td>
+      <td><button data-id="${u.id}" class="btn btn-secondary btn-sm refresh">刷新 Token</button>
+      <button data-id="${u.id}" class="btn btn-danger btn-sm del">删除</button></td>`;
     tbody.appendChild(tr);
   });
   tbody.querySelectorAll(".refresh").forEach((b) => {
@@ -576,36 +640,28 @@ document.getElementById("btnAddUser").onclick = async () => {
 
 async function loadAuditLogs() {
   if (!state.isAdmin) return;
-  try {
-    const rows = await api("/api/audit-logs");
-    const tbody = document.querySelector("#auditTable tbody");
-    tbody.innerHTML = rows
-      .map(
-        (r) =>
-          `<tr><td>${r.at}</td><td>${escapeHtml(r.username)}</td><td>${escapeHtml(r.action)}</td><td>${escapeHtml(r.detail)}</td><td>${escapeHtml(r.ip || "")}</td></tr>`
-      )
-      .join("");
-  } catch (e) {
-    console.warn(e);
-  }
+  const rows = await api("/api/audit-logs");
+  const tbody = document.querySelector("#auditTable tbody");
+  tbody.innerHTML = rows
+    .map(
+      (r) =>
+        `<tr><td>${escapeHtml(r.at)}</td><td>${escapeHtml(r.username)}</td><td>${escapeHtml(r.action)}</td><td>${escapeHtml(r.detail)}</td><td>${escapeHtml(r.ip || "")}</td></tr>`
+    )
+    .join("");
 }
 
 document.getElementById("btnReloadAudit")?.addEventListener("click", loadAuditLogs);
 
 document.getElementById("btnChangeMyPass")?.addEventListener("click", async () => {
-  try {
-    await api("/api/me/password", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        old_password: document.getElementById("myOldPass").value,
-        new_password: document.getElementById("myNewPass").value,
-      }),
-    });
-    alert("密码已更新");
-  } catch (e) {
-    alert(e.message);
-  }
+  await api("/api/me/password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      old_password: document.getElementById("myOldPass").value,
+      new_password: document.getElementById("myNewPass").value,
+    }),
+  });
+  alert("密码已更新");
 });
 
 async function parseInviteHash() {
@@ -621,9 +677,7 @@ async function parseInviteHash() {
     const text = document.getElementById("inviteBannerText");
     if (!banner || !text) return;
     banner.classList.remove("hidden");
-    text.textContent = `邀请加入项目「${info.project_name}」，角色：${
-      info.role === "admin" ? "项目管理员（读写）" : "只读成员"
-    }${info.expired ? "（已过期）" : ""}`;
+    text.textContent = `邀请加入「${info.project_name}」· ${info.role === "admin" ? "管理员" : "只读"}${info.expired ? "（已过期）" : ""}`;
     document.getElementById("btnAcceptInvite").disabled = !!info.expired;
   } catch (e) {
     alert("邀请无效: " + e.message);
@@ -639,35 +693,28 @@ document.getElementById("btnAcceptInvite")?.addEventListener("click", async () =
     state.pendingInviteToken = null;
     location.hash = "";
     document.getElementById("inviteBanner")?.classList.add("hidden");
-    alert("已加入项目: " + p.name);
     await loadProjects();
+    const found = state.projects.find((x) => x.name === p.name);
+    if (found) selectProject(found);
   } catch (e) {
-    if (e.message.includes("login") || e.message.includes("401")) {
-      alert("请先登录后再接受邀请");
-      document.getElementById("login").classList.remove("hidden");
-    } else {
-      alert(e.message);
-    }
+    alert(e.message);
+    if (e.message.includes("登录")) showLogin();
   }
 });
 
 document.getElementById("btnCreateInvite")?.addEventListener("click", async () => {
   if (!state.projectId) return;
   const role = document.getElementById("inviteRole")?.value || "viewer";
-  try {
-    const d = await api(`/api/projects/${state.projectId}/invites`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ role, valid_hours: 168 }),
-    });
-    const el = document.getElementById("inviteUrl");
-    if (el) {
-      el.value = d.url;
-      navigator.clipboard.writeText(d.url);
-      alert("邀请链接已复制到剪贴板");
-    }
-  } catch (e) {
-    alert(e.message);
+  const d = await api(`/api/projects/${state.projectId}/invites`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ role, valid_hours: 168 }),
+  });
+  const el = document.getElementById("inviteUrl");
+  if (el) {
+    el.value = d.url;
+    navigator.clipboard.writeText(d.url);
+    alert("已复制邀请链接");
   }
 });
 

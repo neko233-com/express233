@@ -10,6 +10,8 @@ services:
       - express233-data:/data
     environment:
       EXPRESS233_DATA: /data
+      EXPRESS233_ADDR: ":23380"
+    command: ["-addr", ":23380", "-data", "/data"]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:23380/healthz"]
       interval: 10s

@@ -1,4 +1,10 @@
 /bin/
+.data/
+.data-test-bind/
+.visual-e2e-data/
+test/visual/node_modules/
+test/visual/test-results/
+test/visual/playwright-report/
 *.exe
 *.db
 .DS_Store

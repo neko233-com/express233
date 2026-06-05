@@ -72,11 +72,25 @@ replacements:
 
 ## 本地脚本
 
+**仓库根目录（Windows 双击 / 命令行）：**
+
+| 脚本 | 说明 |
+|------|------|
+| [run-server.cmd](run-server.cmd) / [run-server.sh](run-server.sh) | 启动中央服 `:23380` |
+| [test-server.cmd](test-server.cmd) / [test-server.sh](test-server.sh) | `go test ./...` |
+| [build-all.cmd](build-all.cmd) / [build-all.sh](build-all.sh) | 构建 CLI + Server 到 `bin/` |
+| [git-deploy.cmd](git-deploy.cmd) / [git-deploy.sh](git-deploy.sh) | 本地模拟 CI（vet/测试/构建/冒烟）；`git-deploy.cmd --push` 再推送 |
+| [visual-e2e.cmd](visual-e2e.cmd) / [visual-e2e.sh](visual-e2e.sh) | **浏览器全流程**（Playwright）；**不参与发布/ git-deploy** |
+
+可视化验收技能：[.cursor/skills/express233-visual-verify/SKILL.md](.cursor/skills/express233-visual-verify/SKILL.md)
+
+**子目录（同上逻辑）：**
+
 | 目录 | 说明 |
 |------|------|
 | [run/run.sh](run/run.sh) / [run/run.cmd](run/run.cmd) | 启动 `express233-server`（`:23380`，数据目录 `EXPRESS233_DATA` 或 `.data`） |
 | [test/test.sh](test/test.sh) / [test/test.cmd](test/test.cmd) | 运行 `go test ./...` |
-| [deploy-github/deploy-github.sh](deploy-github/deploy-github.sh) / [.cmd](deploy-github/deploy-github.cmd) | 本地模拟 CI：vet、测试、构建 |
+| [deploy-github/deploy-github.sh](deploy-github/deploy-github.sh) / [.cmd](deploy-github/deploy-github.cmd) | 本地模拟 CI：vet、测试、构建、冒烟（需 Git Bash 跑 smoke） |
 
 ## 项目协作与邀请
 
@@ -110,6 +124,8 @@ make lint       # 需本地安装 golangci-lint
 make run-server # :23380 root/root
 ```
 
+`run-server` 会设置 `EXPRESS233_WEB_DIR=internal/api/web`：开发时修改 `html`/`css`/`js` 后刷新浏览器即可，无需重启 Go 进程。
+
 ## GitHub Actions
 
 | Workflow | 触发 | 作用 |
@@ -125,6 +141,7 @@ make run-server # :23380 root/root
 
 ## 文档
 
+- [AGENTS.md](AGENTS.md) — Agent 指南与 **New API 暗黑 UI** 规范
 - [configs/server.yaml.example](configs/server.yaml.example) — 嵌套 `replacements`（按配置文件 basename）
 - [configs/post-hook.yaml.example](configs/post-hook.yaml.example) — 拉取后处理（`when: os == ...` / `else`）
 - 校验夹具：`testdata/validation-tree/`（双服、树形配置、拉取替换与 post-hook 集成测试）

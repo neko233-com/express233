@@ -1,157 +1,273 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>express233 控制台</title>
+  <meta name="color-scheme" content="dark" />
+  <title>express233</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <div id="inviteBanner" class="panel hidden">
-    <h3>项目邀请</h3>
+  <div id="inviteBanner" class="invite-banner hidden">
+    <span class="invite-icon" aria-hidden="true">!</span>
     <p id="inviteBannerText"></p>
-    <button type="button" id="btnAcceptInvite">接受邀请并加入项目</button>
-  </div>
-  <div id="login" class="panel">
-    <h1>express233</h1>
-    <p>默认账号 root / root</p>
-    <input id="user" placeholder="用户名" value="root" />
-    <input id="pass" type="password" placeholder="密码" value="root" />
-    <button id="btnLogin">登录</button>
-    <p id="loginErr" class="err"></p>
+    <button type="button" id="btnAcceptInvite" class="btn btn-primary btn-sm">接受邀请</button>
   </div>
 
-  <div id="app" class="hidden">
-    <header>
-      <strong>express233-server</strong>
-      <a href="/docs/" target="_blank" rel="noopener">API 文档</a>
-      <span id="who"></span>
-      <button id="btnLogout">退出</button>
-    </header>
-    <nav>
-      <button data-tab="projects" class="active">项目</button>
-      <button data-tab="server">server.yaml</button>
-      <button data-tab="users" class="admin-only hidden">账号</button>
-      <button data-tab="audit" class="admin-only hidden">审计</button>
-    </nav>
-
-    <section id="tab-projects">
-      <div class="row">
-        <input id="newProject" placeholder="新项目名称" />
-        <button id="btnAddProject">创建项目</button>
-        <button id="btnDelProject" class="danger hidden">删除当前项目</button>
-      </div>
-      <div class="grid">
-        <div>
-          <h3>项目</h3>
-          <ul id="projectList"></ul>
+  <div id="login" class="login-screen" data-testid="login-panel">
+    <div class="login-bg" aria-hidden="true"></div>
+    <div class="login-card">
+      <div class="login-brand">
+        <div class="login-logo" aria-hidden="true">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
         </div>
-        <div>
-          <h3>版本 <span id="curProject"></span></h3>
-          <div class="row">
-            <input id="newVersion" placeholder="版本号 e.g. 1.0.0" />
-            <button id="btnAddVersion" class="project-write">新建草稿</button>
+        <h1>express233</h1>
+        <p class="login-sub">游戏逻辑服 · 拉模式部署中央控制台</p>
+      </div>
+      <label class="field">
+        <span>用户名</span>
+        <input id="user" class="input" autocomplete="username" value="root" placeholder="root" />
+      </label>
+      <label class="field">
+        <span>密码</span>
+        <input id="pass" class="input" type="password" autocomplete="current-password" value="root" placeholder="••••••" />
+      </label>
+      <button id="btnLogin" type="button" class="btn btn-primary btn-block" data-testid="login-submit">登录</button>
+      <p id="loginErr" class="err"></p>
+      <p class="login-hint">默认账号 root / root</p>
+    </div>
+  </div>
+
+  <div id="app" class="app-shell hidden" data-testid="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-brand-row">
+        <div class="brand-mark" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/></svg>
+        </div>
+        <span class="brand-name">express233</span>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="section-label">项目</div>
+        <div class="search-wrap">
+          <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input id="projectSearch" type="search" placeholder="搜索项目…" class="search-input" />
+        </div>
+        <div class="new-project-row">
+          <input id="newProject" type="text" placeholder="新项目名称" class="input input-sm" data-testid="new-project-input" />
+          <button type="button" id="btnAddProject" class="btn btn-primary btn-sm" data-testid="add-project" title="创建项目">+</button>
+        </div>
+      </div>
+
+      <ul id="projectList" class="project-list" data-testid="project-list"></ul>
+
+      <nav class="sidebar-nav">
+        <div class="section-label">导航</div>
+        <button type="button" class="sidebar-nav-item active" data-global="workspace">
+          <svg class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          <span>工作区</span>
+        </button>
+        <button type="button" class="sidebar-nav-item" data-global="server">
+          <svg class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+          <span>server.yaml</span>
+        </button>
+        <button type="button" class="sidebar-nav-item admin-only hidden" data-global="settings">
+          <svg class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <span>系统设置</span>
+        </button>
+        <a class="sidebar-nav-item sidebar-link" href="/docs/" target="_blank" rel="noopener">
+          <svg class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+          <span>API 文档</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="user-chip">
+          <span class="user-avatar" aria-hidden="true">R</span>
+          <span id="who" class="user-label" data-testid="whoami"></span>
+        </div>
+        <button type="button" id="btnLogout" class="btn btn-ghost btn-sm">退出</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div id="emptyProject" class="empty-state">
+        <div class="empty-icon" aria-hidden="true">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+        </div>
+        <h2>选择项目</h2>
+        <p>在左侧选择或创建项目，管理版本包与 server_id 配置替换。</p>
+      </div>
+
+      <div id="globalServer" class="global-panel hidden">
+        <header class="page-header">
+          <h1>server.yaml</h1>
+          <p class="subtitle">replacements 键 = 配置文件 basename（无视目录树）</p>
+        </header>
+        <div class="card">
+          <textarea id="serverYaml" rows="22" class="code-editor" data-testid="server-yaml-editor"></textarea>
+          <div class="toolbar">
+            <button type="button" id="btnSaveYaml" class="btn btn-primary">保存</button>
+            <input id="previewServerId" list="serverIdList" placeholder="server_id" class="input" />
+            <datalist id="serverIdList"></datalist>
+            <input id="previewProject" placeholder="project" class="input" />
+            <input id="previewVersion" placeholder="version" class="input" />
+            <button type="button" id="btnPreview" class="btn btn-secondary">预览 diff</button>
           </div>
-          <ul id="versionList"></ul>
-          <div id="versionDetail" class="hidden">
-            <p>状态: <span id="verStatus"></span> | 创建: <span id="verCreated"></span> | 发布: <span id="verPublished"></span></p>
-            <button id="btnValidate">发布前检查</button>
-            <button id="btnSubmitReview" class="project-write hidden">提交审批</button>
-            <button id="btnRejectReview" class="project-write hidden">驳回审批</button>
-            <button id="btnPublish" class="project-write hidden">正式发布</button>
-            <a id="btnDownloadVer" class="btn-link hidden" href="#" target="_blank">下载版本包</a>
-            <button id="btnDeleteVersion" class="danger project-write">删除版本（二次确认）</button>
-            <p class="hint">配置文件（.yaml/.json/.properties）<strong>文件名全局唯一</strong>，无视目录树；server.yaml 按文件名做替换。</p>
-            <h4>上传文件 / 拖拽 .zip</h4>
-            <input type="file" id="fileInput" class="project-write" multiple />
-            <ul id="fileList"></ul>
-            <h4>拉取预览（按 server_id）</h4>
-            <div class="row">
-              <input id="verPreviewServerId" list="serverIdList" placeholder="server_id" />
-              <button id="btnVerPreview" type="button">预览配置变更</button>
+          <div id="previewOut" class="card-inner"></div>
+        </div>
+      </div>
+
+      <div id="globalSettings" class="global-panel hidden admin-only">
+        <header class="page-header">
+          <h1>系统设置</h1>
+          <nav class="seg-tabs" id="settingsTabs">
+            <button type="button" class="seg-tab active" data-stab="users">账号</button>
+            <button type="button" class="seg-tab" data-stab="audit">审计</button>
+          </nav>
+        </header>
+        <div id="stab-users" class="card">
+          <h3 class="card-title">账号</h3>
+          <div class="toolbar">
+            <input id="myOldPass" type="password" placeholder="当前密码" class="input" />
+            <input id="myNewPass" type="password" placeholder="新密码" class="input" />
+            <button type="button" id="btnChangeMyPass" class="btn btn-primary">更新密码</button>
+          </div>
+          <h3 class="card-title">创建账号</h3>
+          <div class="toolbar">
+            <input id="newUser" placeholder="用户名" class="input" />
+            <input id="newUserPass" type="password" placeholder="密码" class="input" />
+            <select id="newUserRole" class="input">
+              <option value="viewer">viewer</option>
+              <option value="operator">operator</option>
+              <option value="admin">admin</option>
+            </select>
+            <label class="check-label"><input type="checkbox" id="newUserAdmin" /> admin</label>
+            <button type="button" id="btnAddUser" class="btn btn-primary">创建</button>
+          </div>
+          <div class="table-wrap">
+            <table id="userTable" class="data-table"><thead><tr><th>ID</th><th>用户</th><th>Token</th><th></th></tr></thead><tbody></tbody></table>
+          </div>
+        </div>
+        <div id="stab-audit" class="card hidden">
+          <div class="toolbar">
+            <button type="button" id="btnReloadAudit" class="btn btn-secondary btn-sm">刷新</button>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="auditTable">
+              <thead><tr><th>时间</th><th>用户</th><th>动作</th><th>详情</th><th>IP</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div id="projectWorkspace" class="workspace hidden">
+        <header class="workspace-header">
+          <div class="workspace-title">
+            <h1 id="curProject" data-testid="cur-project">—</h1>
+            <button type="button" id="btnDelProject" class="btn btn-danger btn-sm hidden">删除项目</button>
+          </div>
+          <nav class="project-tabs" role="tablist">
+            <button type="button" class="project-tab active" data-ptab="versions">版本</button>
+            <button type="button" class="project-tab" data-ptab="preview">拉取预览</button>
+            <button type="button" class="project-tab" data-ptab="team">团队</button>
+            <button type="button" class="project-tab" data-ptab="deploy">部署</button>
+            <button type="button" class="project-tab" data-ptab="diff">差异</button>
+          </nav>
+        </header>
+
+        <div id="ptab-versions" class="ptab-panel">
+          <div class="split-versions">
+            <div class="card version-sidebar">
+              <div class="card-title-row">
+                <span class="card-title">版本列表</span>
+              </div>
+              <div class="toolbar compact">
+                <input id="newVersion" placeholder="1.0.0" class="input" data-testid="new-version-input" />
+                <button type="button" id="btnAddVersion" class="btn btn-primary btn-sm project-write" data-testid="add-version">新建</button>
+              </div>
+              <ul id="versionList" class="version-list" data-testid="version-list"></ul>
             </div>
-            <div id="validateResult"></div>
+            <div id="versionDetail" class="card version-detail hidden" data-testid="version-detail">
+              <div class="meta-row">
+                <span class="badge" id="verStatus" data-testid="ver-status">—</span>
+                <span class="meta">创建 <span id="verCreated"></span></span>
+                <span class="meta">发布 <span id="verPublished">—</span></span>
+              </div>
+              <div class="toolbar wrap project-write">
+                <button type="button" id="btnValidate" class="btn btn-secondary btn-sm" data-testid="validate-version">发布前检查</button>
+                <button type="button" id="btnSubmitReview" class="btn btn-secondary btn-sm hidden">提交审批</button>
+                <button type="button" id="btnRejectReview" class="btn btn-secondary btn-sm hidden">驳回</button>
+                <button type="button" id="btnPublish" class="btn btn-primary btn-sm project-write hidden" data-testid="publish-version">正式发布</button>
+                <a id="btnDownloadVer" class="btn btn-secondary btn-sm hidden" href="#" target="_blank" data-testid="download-version">下载</a>
+                <button type="button" id="btnDeleteVersion" class="btn btn-danger btn-sm project-write">删除版本</button>
+              </div>
+              <div id="validateResult" data-testid="validate-result"></div>
+              <p class="hint">配置文件 basename 全局唯一；server.yaml 按文件名替换。</p>
+              <h3 class="card-title">文件</h3>
+              <label class="upload-zone project-write">
+                <input type="file" id="fileInput" multiple data-testid="file-input" />
+                <span>点击或拖拽上传 / zip</span>
+              </label>
+              <ul id="fileList" class="file-list" data-testid="file-list"></ul>
+            </div>
+          </div>
+        </div>
+
+        <div id="ptab-preview" class="ptab-panel hidden">
+          <div class="card">
+            <div class="toolbar">
+              <input id="verPreviewServerId" list="serverIdList" placeholder="server_id" class="input" data-testid="preview-server-id" />
+              <button type="button" id="btnVerPreview" class="btn btn-primary btn-sm" data-testid="preview-submit">刷新预览</button>
+            </div>
             <div class="preview-split">
               <div class="preview-keys">
-                <p class="hint">左侧：键级变更；右侧：替换后完整文件（随 server_id 自动刷新）</p>
-                <div id="verPreviewTable"></div>
+                <div class="panel-label">键级变更</div>
+                <div id="verPreviewTable" data-testid="preview-table"></div>
               </div>
               <div class="preview-rendered">
+                <div class="panel-label">替换后全文</div>
                 <div id="verPreviewRenderedTabs" class="rendered-tabs"></div>
-                <pre id="verPreviewRenderedBody" class="rendered-body">选择 server_id 后显示替换后的配置文件全文</pre>
+                <pre id="verPreviewRenderedBody" class="rendered-body" data-testid="preview-rendered-body">选择 server_id</pre>
               </div>
             </div>
-            <h4>版本差异（相对另一版本）</h4>
-            <div class="row">
-              <input id="diffFromVer" placeholder="对比版本 from" />
-              <button type="button" id="btnVersionDiff">生成 diff</button>
+          </div>
+        </div>
+
+        <div id="ptab-team" class="ptab-panel hidden">
+          <div id="projectTeam" class="card">
+            <div class="toolbar project-write">
+              <select id="inviteRole" class="input">
+                <option value="viewer">只读成员</option>
+                <option value="admin">项目管理员</option>
+              </select>
+              <button type="button" id="btnCreateInvite" class="btn btn-primary btn-sm">生成邀请链接</button>
+            </div>
+            <input id="inviteUrl" class="cmdbox" readonly />
+            <ul id="memberList" class="member-list"></ul>
+          </div>
+        </div>
+
+        <div id="ptab-deploy" class="ptab-panel hidden">
+          <div class="card">
+            <p class="hint">复制到 SSH 主机执行</p>
+            <pre id="deployCmd" class="cmdbox" data-testid="deploy-cmd"></pre>
+            <button type="button" id="btnCopyDeploy" class="btn btn-secondary btn-sm">复制命令</button>
+          </div>
+        </div>
+
+        <div id="ptab-diff" class="ptab-panel hidden">
+          <div class="card">
+            <div class="toolbar">
+              <input id="diffFromVer" placeholder="对比版本 from" class="input" />
+              <button type="button" id="btnVersionDiff" class="btn btn-primary btn-sm">生成 diff</button>
             </div>
             <div id="versionDiffOut"></div>
-            <h4>团队与邀请</h4>
-            <div id="projectTeam" class="hidden">
-              <p class="hint">项目管理员可邀请成员；<strong>只读</strong>成员仅可查看/预览/拉取，<strong>管理员</strong>可上传与发布。</p>
-              <div class="row project-write">
-                <select id="inviteRole">
-                  <option value="viewer">只读成员</option>
-                  <option value="admin">项目管理员</option>
-                </select>
-                <button type="button" id="btnCreateInvite">生成邀请链接</button>
-              </div>
-              <input id="inviteUrl" class="cmdbox" readonly placeholder="邀请链接" />
-              <ul id="memberList"></ul>
-            </div>
-            <h4>节点部署命令</h4>
-            <p class="hint">复制到 SSH 主机执行（需已安装 express233 CLI 并配置 TOKEN）</p>
-            <pre id="deployCmd" class="cmdbox"></pre>
-            <button type="button" id="btnCopyDeploy">复制命令</button>
           </div>
         </div>
       </div>
-    </section>
-
-    <section id="tab-server" class="hidden">
-      <h3>server.yaml（replacements 键 = 配置文件名 basename）</h3>
-      <textarea id="serverYaml" rows="24"></textarea>
-      <div class="row">
-        <button id="btnSaveYaml">保存</button>
-        <input id="previewServerId" list="serverIdList" placeholder="server_id" />
-        <datalist id="serverIdList"></datalist>
-        <input id="previewProject" placeholder="project" />
-        <input id="previewVersion" placeholder="version" />
-        <button id="btnPreview">预览配置变更 diff</button>
-      </div>
-      <div id="previewOut"></div>
-    </section>
-
-    <section id="tab-audit" class="hidden admin-only">
-      <h3>操作审计</h3>
-      <button type="button" id="btnReloadAudit">刷新</button>
-      <table class="preview-table" id="auditTable">
-        <thead><tr><th>时间</th><th>用户</th><th>动作</th><th>详情</th><th>IP</th></tr></thead>
-        <tbody></tbody>
-      </table>
-    </section>
-
-    <section id="tab-users" class="hidden admin-only">
-      <h3>修改我的密码</h3>
-      <div class="row">
-        <input id="myOldPass" type="password" placeholder="当前密码" />
-        <input id="myNewPass" type="password" placeholder="新密码" />
-        <button type="button" id="btnChangeMyPass">更新密码</button>
-      </div>
-      <div class="row">
-        <input id="newUser" placeholder="用户名" />
-        <input id="newUserPass" type="password" placeholder="密码" />
-        <select id="newUserRole">
-          <option value="viewer">viewer（只读）</option>
-          <option value="operator">operator（上传/提交审批）</option>
-          <option value="admin">admin</option>
-        </select>
-        <label><input type="checkbox" id="newUserAdmin" /> 兼容：勾选等同 admin</label>
-        <button id="btnAddUser">创建账号</button>
-      </div>
-      <table id="userTable"><thead><tr><th>ID</th><th>用户</th><th>Token</th><th>操作</th></tr></thead><tbody></tbody></table>
-    </section>
+    </main>
   </div>
   <script src="/app.js"></script>
 </body>

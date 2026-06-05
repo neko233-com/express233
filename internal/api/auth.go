@@ -64,11 +64,7 @@ func (ss *sessionStore) delete(id string) {
 const sessionCookie = "express233_session"
 
 func (s *Server) currentSession(r *http.Request) (session, bool) {
-	c, err := r.Cookie(sessionCookie)
-	if err != nil {
-		return session{}, false
-	}
-	return s.sessions.get(c.Value)
+	return s.sessionFromRequest(r)
 }
 
 func (s *Server) setSessionCookie(w http.ResponseWriter, id string) {

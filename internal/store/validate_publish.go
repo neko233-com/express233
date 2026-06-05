@@ -15,6 +15,7 @@ type PublishValidation struct {
 }
 
 // ValidateBeforePublish 检查版本是否可发布。
+// 不包含浏览器可视化 E2E（test/visual、visual-e2e.cmd）；发布 API 亦不会触发 Playwright。
 func (s *Store) ValidateBeforePublish(tenantID int64, projectName string, projectID int64, version string, sf *config.ServerFile) (*PublishValidation, error) {
 	out := &PublishValidation{OK: true}
 	root, err := s.VersionDir(tenantID, projectName, version)

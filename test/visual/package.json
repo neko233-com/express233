@@ -1,0 +1,14 @@
+{
+  "name": "express233-visual-e2e",
+  "private": true,
+  "description": "Browser visual E2E — not part of publish validation or go test ./...",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:ui": "playwright test --ui",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0"
+  }
+}

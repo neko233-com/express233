@@ -41,7 +41,7 @@ func (s *Server) handleCreateTenant(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, t)
 }
 
-func (s *Server) mePayload(sess session) map[string]any {
+func (s *Server) mePayload(sess session, token string) map[string]any {
 	role, _ := s.Store.UserRole(sess.UserID)
 	slug := sess.TenantSlug
 	if slug == "" {
@@ -49,11 +49,15 @@ func (s *Server) mePayload(sess session) map[string]any {
 			slug = t.Slug
 		}
 	}
-	return map[string]any{
+	out := map[string]any{
 		"username":    sess.Username,
 		"is_admin":    sess.IsAdmin,
 		"role":        role,
 		"tenant_id":   sess.TenantID,
 		"tenant_slug": slug,
 	}
+	if token != "" {
+		out["token"] = token
+	}
+	return out
 }

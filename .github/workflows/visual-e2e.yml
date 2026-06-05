@@ -1,0 +1,49 @@
+# 浏览器可视化全流程 — 仅手动/可选触发，不参与发布与默认 CI
+name: Visual E2E
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "test/visual/**"
+      - "internal/api/web/**"
+      - ".github/workflows/visual-e2e.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  playwright:
+    name: browser flows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: test/visual/package.json
+
+      - name: Install Playwright
+        working-directory: test/visual
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+
+      - name: Run visual E2E
+        working-directory: test/visual
+        env:
+          CI: "true"
+        run: npx playwright test
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: test/visual/playwright-report/

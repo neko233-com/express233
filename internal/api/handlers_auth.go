@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"time"
 )
 
 type loginReq struct {
@@ -32,14 +33,19 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, http.StatusInternalServerError, "tenant error")
 		return
 	}
-	sid, err := s.sessions.create(uid, req.Username, admin, tid, t.Slug)
+	sess := session{UserID: uid, Username: req.Username, IsAdmin: admin, TenantID: tid, TenantSlug: t.Slug}
+	tok, err := s.jwt.sign(sess, 7*24*time.Hour)
 	if err != nil {
-		errJSON(w, http.StatusInternalServerError, "session error")
+		errJSON(w, http.StatusInternalServerError, "token error")
 		return
 	}
-	s.setSessionCookie(w, sid)
+	s.setJWTCookie(w, tok)
+	// 兼容依赖 cookie jar 的测试
+	if sid, err := s.sessions.create(uid, req.Username, admin, tid, t.Slug); err == nil {
+		s.setSessionCookie(w, sid)
+	}
 	s.reloadServerYAML(tid)
-	writeJSON(w, http.StatusOK, s.mePayload(session{UserID: uid, Username: req.Username, IsAdmin: admin, TenantID: tid, TenantSlug: t.Slug}))
+	writeJSON(w, http.StatusOK, s.mePayload(sess, tok))
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -47,6 +53,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		s.sessions.delete(c.Value)
 	}
 	s.clearSessionCookie(w)
+	s.clearJWTCookie(w)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -56,7 +63,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, http.StatusUnauthorized, "not logged in")
 		return
 	}
-	writeJSON(w, http.StatusOK, s.mePayload(sess))
+	writeJSON(w, http.StatusOK, s.mePayload(sess, ""))
 }
 
 func (s *Server) requireLogin(next http.Handler) http.Handler {

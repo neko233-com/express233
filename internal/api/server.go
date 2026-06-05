@@ -16,13 +16,14 @@ import (
 type Server struct {
 	Store          *store.Store
 	sessions       *sessionStore
+	jwt            *jwtAuth
 	serverMu       sync.RWMutex
 	serverByTenant map[int64]*config.ServerFile
 }
 
 // New 创建 API 服务。
 func New(st *store.Store) *Server {
-	s := &Server{Store: st, sessions: newSessionStore(), serverByTenant: make(map[int64]*config.ServerFile)}
+	s := &Server{Store: st, sessions: newSessionStore(), jwt: newJWTAuth(), serverByTenant: make(map[int64]*config.ServerFile)}
 	if t, err := st.TenantByID(1); err == nil {
 		_ = t
 	}

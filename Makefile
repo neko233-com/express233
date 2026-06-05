@@ -23,7 +23,7 @@ build:
 	go build -ldflags "$(LDFLAGS)" -o bin/express233-server ./cmd/express233-server
 
 run-server:
-	go run -ldflags "$(LDFLAGS)" ./cmd/express233-server -addr :23380
+	go run -ldflags "$(LDFLAGS)" ./cmd/express233-server -addr 127.0.0.1:23380
 
 smoke: build
 	bash scripts/ci-smoke.sh
