@@ -43,16 +43,18 @@ printf 'port=1\n' | curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X POST \
   "$BASE/api/projects/${PID_NUM}/versions/1.0.0/files" \
   -F "file=@-;filename=game.properties" >/dev/null
 
-curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X PUT "$BASE/api/server-yaml" \
-  -H 'Content-Type: text/yaml' \
-  --data-binary @- <<'EOF'
-servers:
+python3 - <<'PY' | curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X PUT "$BASE/api/server-yaml" \
+  -H 'Content-Type: application/json' \
+  -d @-
+import json
+print(json.dumps({"content": """servers:
   s1:
     replacements:
       game.properties:
         port: "9001"
     post_hook: restart.sh
-EOF
+"""}))
+PY
 
 curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
   "$BASE/api/deploy/preview?project=smoke&version=1.0.0&server_id=s1" | grep -q '"after":"9001"'

@@ -31,7 +31,9 @@ get_latest_version() {
 }
 
 normalize_version() {
-    echo "${1#v}" | sed 's/^V//'
+    local v="${1#v}"
+    v="${v#V}"
+    echo "$v"
 }
 
 OS=$(detect_os)
