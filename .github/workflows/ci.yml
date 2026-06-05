@@ -100,10 +100,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
       - name: ShellCheck
-        uses: rhysd/action-shellcheck@v1
-        with:
-          pattern: "scripts/*.sh"
+        run: shellcheck scripts/*.sh
 
       - name: Bash syntax
         run: |

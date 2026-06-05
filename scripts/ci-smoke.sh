@@ -43,7 +43,9 @@ printf 'port=1\n' | curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X POST \
   "$BASE/api/projects/${PID_NUM}/versions/1.0.0/files" \
   -F "file=@-;filename=game.properties" >/dev/null
 
-cat > "$DATA/server.yaml" <<'EOF'
+curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X PUT "$BASE/api/server-yaml" \
+  -H 'Content-Type: text/yaml' \
+  --data-binary @- <<'EOF'
 servers:
   s1:
     replacements:
