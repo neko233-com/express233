@@ -18,9 +18,9 @@ func (s *Store) StreamVersionArchive(tenantID int64, projectName, version string
 		return err
 	}
 	gzw := gzip.NewWriter(w)
-	defer gzw.Close()
+	defer func() { _ = gzw.Close() }()
 	tw := tar.NewWriter(gzw)
-	defer tw.Close()
+	defer func() { _ = tw.Close() }()
 
 	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {

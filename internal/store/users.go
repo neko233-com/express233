@@ -35,7 +35,7 @@ func (s *Store) ListUsers(tenantID int64) ([]User, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []User
 	for rows.Next() {
 		var u User

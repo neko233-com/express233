@@ -58,7 +58,7 @@ func buildBundleFromVersionDir(vdir string, sf *config.ServerFile, projectName, 
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }()
 
 	if err := copyDir(vdir, tmp); err != nil {
 		return err
@@ -74,9 +74,9 @@ func buildBundleFromVersionDir(vdir string, sf *config.ServerFile, projectName, 
 	}
 
 	gzw := gzip.NewWriter(w)
-	defer gzw.Close()
+	defer func() { _ = gzw.Close() }()
 	tw := tar.NewWriter(gzw)
-	defer tw.Close()
+	defer func() { _ = tw.Close() }()
 
 	hookVars := template.HookTemplateVars(projectName, version, serverID, entry.PostHookEnv)
 	manifest := Manifest{
@@ -141,12 +141,12 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	out, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 	_, err = io.Copy(out, in)
 	return err
 }
@@ -171,7 +171,7 @@ func ExtractBundle(r io.Reader, dest string) (*Manifest, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer gzr.Close()
+	defer func() { _ = gzr.Close() }()
 	tr := tar.NewReader(gzr)
 
 	var manifest *Manifest
@@ -207,10 +207,10 @@ func ExtractBundle(r io.Reader, dest string) (*Manifest, error) {
 			return nil, err
 		}
 		if _, err := io.Copy(f, tr); err != nil {
-			f.Close()
+			_ = f.Close()
 			return nil, err
 		}
-		f.Close()
+		_ = f.Close()
 	}
 	if manifest == nil {
 		return nil, fmt.Errorf("missing manifest in bundle")

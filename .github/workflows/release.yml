@@ -16,9 +16,25 @@ permissions:
 
 env:
   GO_VERSION: "1.26.x"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  verify-checks:
+    name: require CI + Lint green
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Verify required GitHub Checks
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/require-green-checks.sh "$(git rev-parse HEAD)"
+
   build:
+    needs: verify-checks
     name: build ${{ matrix.goos }}-${{ matrix.goarch }}
     runs-on: ubuntu-latest
     strategy:
@@ -88,7 +104,7 @@ jobs:
 
   release:
     name: publish GitHub Release
-    needs: build
+    needs: [verify-checks, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

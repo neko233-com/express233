@@ -14,6 +14,37 @@ if [[ "$EXPRESS233_ADDR" == *:* ]]; then
   PORT="${EXPRESS233_ADDR##*:}"
 fi
 
+stop_previous_server() {
+  local port="$1"
+  if ! curl -sf --max-time 2 "http://127.0.0.1:${port}/healthz" | grep -qxF ok; then
+    return 0
+  fi
+  local pids=()
+  if command -v lsof >/dev/null 2>&1; then
+    while IFS= read -r pid; do
+      [[ -n "$pid" ]] && pids+=("$pid")
+    done < <(lsof -t -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true)
+  fi
+  for pid in "${pids[@]}"; do
+    local name
+    name="$(ps -p "$pid" -o comm= 2>/dev/null || true)"
+    if [[ "$name" != *express233-server* ]]; then
+      continue
+    fi
+    echo "[停止] express233-server PID ${pid}"
+    if command -v unicli >/dev/null 2>&1; then
+      unicli kill "$pid" >/dev/null 2>&1 || kill "$pid" 2>/dev/null || true
+    else
+      kill "$pid" 2>/dev/null || true
+    fi
+  done
+  sleep 1
+}
+
+if [[ -z "${EXPRESS233_NO_KILL:-}" ]]; then
+  stop_previous_server "$PORT"
+fi
+
 echo ""
 echo "-----------------"
 echo "访问地址 = http://${HOST}:${PORT}"

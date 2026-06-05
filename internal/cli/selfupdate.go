@@ -42,7 +42,7 @@ func InstallOrSwitch(targetVersion string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download %s: HTTP %d", url, resp.StatusCode)
 	}
@@ -60,10 +60,10 @@ func InstallOrSwitch(targetVersion string) error {
 		return err
 	}
 	if _, err := io.Copy(f, resp.Body); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
-	f.Close()
+	_ = f.Close()
 	if err := os.Rename(tmp, dest); err != nil {
 		_ = os.Remove(dest)
 		return os.Rename(tmp, dest)
@@ -92,7 +92,7 @@ func latestRelease() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var body struct {
 		TagName string `json:"tag_name"`
 	}

@@ -140,7 +140,7 @@ func (s *Store) ListProjectInvites(projectID int64) ([]ProjectInvite, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []ProjectInvite
 	for rows.Next() {
 		var inv ProjectInvite

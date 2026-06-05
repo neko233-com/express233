@@ -13,6 +13,7 @@ permissions:
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}/express233-server
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:

@@ -4,6 +4,57 @@
 
 游戏逻辑服 **拉模式部署** 中央控制台：项目管理、版本包、按 `server_id` 配置替换、拉取预览、发布与团队邀请。
 
+## CI / GitHub / 发布（必读）
+
+### 工具链
+
+| 工具 | 安装 | 用途 |
+|------|------|------|
+| **gh** | [install-gh.cmd](install-gh.cmd) 或 `winget install GitHub.cli` | Actions 日志、Release、PR |
+| **golangci-lint** v2 | `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest` | 与 `lint.yml` 一致 |
+| **Node.js 24 LTS** | `.nvmrc`（`24`） | `test/visual`、Actions JS 步骤 |
+
+`gh auth login` 后执行 `gh auth status`，发布/查日志需 **workflow** scope。
+
+### Node.js 24 LTS（强制）
+
+- 所有 GitHub Actions workflow 设置 `env.FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true`。
+- `test/visual`：`package.json` → `"engines": { "node": ">=24" }`；workflow 使用 `node-version: "24"`。
+- **禁止**在 workflow 中使用 Node 20/22。
+
+### golangci-lint
+
+- 配置文件 **必须** 含 `version: "2"`（见 [.golangci.yml](.golangci.yml)）。
+- CI 使用 `golangci/golangci-lint-action@v7` + `version: v2.1.6`。
+- 本地：`golangci-lint run --timeout=5m` 或 `make lint`。
+
+### 发布门禁（必须遵守）
+
+**仅当**下列 GitHub Check 在**目标 commit** 上均为 `success` 时，才可打 tag / 发布：
+
+- `golangci-lint`
+- `test (ubuntu-latest)`、`test (windows-latest)`、`test (macos-latest)`
+- `build binaries`
+- `validate scripts`
+
+流程：
+
+1. 合并 `main` → 等待 [CI](https://github.com/neko233-com/express233/actions/workflows/ci.yml) + [Lint](https://github.com/neko233-com/express233/actions/workflows/lint.yml) 全绿。
+2. 可选：`bash scripts/require-green-checks.sh <sha>`
+3. `git tag vX.Y.Z && git push origin vX.Y.Z`
+4. [release.yml](.github/workflows/release.yml) 的 `verify-checks` job 会再次校验；失败则**不**创建 Release 产物。
+
+`visual-e2e` **不参与**发布门禁。
+
+### Agent Skills（GitHub）
+
+| 位置 | Skill |
+|------|--------|
+| 项目 | [.cursor/skills/express233-github/SKILL.md](.cursor/skills/express233-github/SKILL.md) |
+| 全局 | `~/.cursor/skills/express233-github/SKILL.md` |
+
+调试 CI 时可配合：`gh-fix-ci`、`gh-address-comments`（用户本机 Codex skills）。
+
 ## Web UI 设计规范（New API 暗黑风格）
 
 所有 `internal/api/web/*` 改动必须遵循本规范，与 [New API](https://github.com/QuantumNous/new-api) / shadcn 暗色语义一致。
@@ -78,9 +129,10 @@
 
 - 控制台 UI：`.cursor/skills/express233-ui/SKILL.md`
 - 浏览器验收：`.cursor/skills/express233-visual-verify/SKILL.md`
+- GitHub / CI / 发布：`.cursor/skills/express233-github/SKILL.md`
 
 ## 后端与测试（简）
 
 - Go 模块根目录；`go test ./...` 为默认 CI 测试（不含 `test/visual` npm 包）。
 - 发布校验 `ValidateBeforePublish` **不**跑浏览器 E2E。
-- 本地服务：`run-server.cmd` → `127.0.0.1:23380`。
+- 本地服务：`run-server.cmd` → `127.0.0.1:23380`（自动停止旧 express233-server 实例）。

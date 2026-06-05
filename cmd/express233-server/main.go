@@ -39,7 +39,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	srv := api.New(st)
 	log.Printf("%s", version.String("express233-server"))
@@ -112,7 +112,7 @@ func warnIfPortBlocked(listen string) error {
 			port,
 		)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode == http.StatusOK && strings.TrimSpace(string(body)) == "ok" {
 		return fmt.Errorf("已有 express233-server 在 %s 运行", browserURL(listen))

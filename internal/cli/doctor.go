@@ -90,7 +90,7 @@ func pingHealth(serverURL string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 || string(b) != "ok" {
 		return fmt.Errorf("status %d", resp.StatusCode)
@@ -111,7 +111,7 @@ func fetchServerIDs(serverURL, token string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
 		b, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("%d %s", resp.StatusCode, b)
@@ -139,7 +139,7 @@ func countPublishedVersions(serverURL, project, token string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
 		b, _ := io.ReadAll(resp.Body)
 		return 0, fmt.Errorf("%d %s", resp.StatusCode, b)

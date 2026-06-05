@@ -16,7 +16,7 @@ test-race:
 	go test ./... -count=1 -race
 
 lint:
-	golangci-lint run ./...
+	golangci-lint run --timeout=5m
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/express233 ./cmd/express233

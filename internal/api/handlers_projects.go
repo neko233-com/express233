@@ -222,7 +222,7 @@ func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, http.StatusBadRequest, "file required")
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	if rel == "" {
 		rel = hdr.Filename

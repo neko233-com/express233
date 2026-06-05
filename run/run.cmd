@@ -14,10 +14,19 @@ for /f "tokens=1,2 delims=:" %%a in ("%EXPRESS233_ADDR%") do (
 if "%HOST%"=="" set "HOST=127.0.0.1"
 if "%PORT%"=="" set "PORT=23380"
 
+set "UNICLI=unicli"
+where unicli >nul 2>&1 || set "UNICLI=%USERPROFILE%\.local\bin\unicli.exe"
+
+if not defined EXPRESS233_NO_KILL call :stop_previous_server %PORT%
+
 call :warn_port_conflict %PORT%
 if errorlevel 2 (
-  echo [提示] 中央服已在运行: http://%HOST%:%PORT%
-  exit /b 0
+  echo.
+  echo [错误] 无法停止已在运行的 express233-server ^(http://%HOST%:%PORT%^)
+  echo        可手动: unicli psports %PORT%  然后  unicli kill ^<pid^>
+  echo        或设置 EXPRESS233_NO_KILL=1 跳过自动停止
+  echo.
+  exit /b 1
 )
 if errorlevel 1 (
   echo.
@@ -38,6 +47,22 @@ echo.
 
 go run ./cmd/express233-server -addr %EXPRESS233_ADDR% -data "%EXPRESS233_DATA%" %*
 exit /b %errorlevel%
+
+:stop_previous_server
+set "STOP_PORT=%~1"
+powershell -NoProfile -Command ^
+  "$port=%STOP_PORT%; $unicli='%UNICLI%';" ^
+  "try { $r = Invoke-WebRequest -Uri \"http://127.0.0.1:$port/healthz\" -TimeoutSec 2 -UseBasicParsing; if ($r.Content.Trim() -ne 'ok') { exit 0 } } catch { exit 0 };" ^
+  "$pids = @(Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique);" ^
+  "if (-not $pids.Count) { $pids = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique) };" ^
+  "foreach ($procId in $pids) {" ^
+  "  $p = Get-Process -Id $procId -ErrorAction SilentlyContinue; if (-not $p) { continue };" ^
+  "  $name = $p.ProcessName; $cmd = (Get-CimInstance Win32_Process -Filter \"ProcessId=$procId\" -ErrorAction SilentlyContinue).CommandLine;" ^
+  "  if ($name -notlike '*express233-server*' -and $cmd -notlike '*express233-server*') { continue };" ^
+  "  Write-Host \"[停止] express233-server PID $procId\";" ^
+  "  if (Test-Path -LiteralPath $unicli) { & $unicli kill $procId 2>$null } else { Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue }" ^
+  "}; Start-Sleep -Seconds 1"
+exit /b 0
 
 :warn_port_conflict
 powershell -NoProfile -Command ^

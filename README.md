@@ -76,7 +76,9 @@ replacements:
 
 | 脚本 | 说明 |
 |------|------|
-| [run-server.cmd](run-server.cmd) / [run-server.sh](run-server.sh) | 启动中央服 `:23380` |
+| [run-server.cmd](run-server.cmd) / [run-server.sh](run-server.sh) | 启动中央服 `:23380`（若本机已有 express233-server 会先自动停止） |
+| [install-unicli.cmd](install-unicli.cmd) | 安装 [neko233-com/unicli](https://github.com/neko233-com/unicli)（端口/进程工具，推荐） |
+| [install-gh.cmd](install-gh.cmd) | 安装 [GitHub CLI](https://cli.github.com/)（CI 日志、发布门禁） |
 | [test-server.cmd](test-server.cmd) / [test-server.sh](test-server.sh) | `go test ./...` |
 | [build-all.cmd](build-all.cmd) / [build-all.sh](build-all.sh) | 构建 CLI + Server 到 `bin/` |
 | [git-deploy.cmd](git-deploy.cmd) / [git-deploy.sh](git-deploy.sh) | 本地模拟 CI（vet/测试/构建/冒烟）；`git-deploy.cmd --push` 再推送 |
@@ -120,11 +122,13 @@ docker compose up --build
 make test
 make build
 make smoke      # 本地冒烟（同 CI）
-make lint       # 需本地安装 golangci-lint
+make lint       # golangci-lint v2（.golangci.yml version: "2"）
 make run-server # :23380 root/root
 ```
 
 `run-server` 会设置 `EXPRESS233_WEB_DIR=internal/api/web`：开发时修改 `html`/`css`/`js` 后刷新浏览器即可，无需重启 Go 进程。
+
+重复启动时脚本会探测 `http://127.0.0.1:23380/healthz`，仅停止进程名或命令行含 `express233-server` 的实例（不会误杀 `proxysss` 等）。跳过：`set EXPRESS233_NO_KILL=1`。
 
 ## GitHub Actions
 

@@ -25,7 +25,7 @@ func RunListVersions(serverURL, project, token string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("versions %d: %s", resp.StatusCode, string(body))

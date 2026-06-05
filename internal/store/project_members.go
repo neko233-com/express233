@@ -117,7 +117,7 @@ ORDER BY m.joined_at`, projectID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []ProjectMember
 	for rows.Next() {
 		var m ProjectMember

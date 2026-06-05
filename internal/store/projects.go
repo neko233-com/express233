@@ -43,7 +43,7 @@ ORDER BY p.name`, userID, tenantID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Project
 	for rows.Next() {
 		var p Project
@@ -120,7 +120,7 @@ func (s *Store) ListVersions(projectID int64) ([]Version, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Version
 	for rows.Next() {
 		var v Version
@@ -255,7 +255,7 @@ func (s *Store) ListPublishedVersions(projectID int64) ([]Version, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Version
 	for rows.Next() {
 		var v Version

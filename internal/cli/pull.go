@@ -50,7 +50,7 @@ func RunPull(opts PullOptions) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("pull failed %d: %s", resp.StatusCode, string(b))
@@ -113,12 +113,8 @@ func runPostHook(dest string, m *pull.Manifest) error {
 	)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if runtime.GOOS == "windows" {
-		// bash scripts need sh on Windows; user may use .bat
-	} else {
-		if err := os.Chmod(script, 0o755); err == nil {
-			// ok
-		}
+	if runtime.GOOS != "windows" {
+		_ = os.Chmod(script, 0o755)
 	}
 	fmt.Printf("running post_hook: %s\n", script)
 	return cmd.Run()

@@ -34,7 +34,7 @@ func (s *Store) WriteVersionFile(tenantID int64, projectName, version, relPath s
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	_, err = io.Copy(f, r)
 	return err
 }
@@ -90,12 +90,12 @@ func (s *Store) ExtractZipToVersion(tenantID int64, projectName, version string,
 		}
 		out, err := os.Create(dest)
 		if err != nil {
-			rc.Close()
+			_ = rc.Close()
 			return err
 		}
 		_, copyErr := io.Copy(out, rc)
-		out.Close()
-		rc.Close()
+		_ = out.Close()
+		_ = rc.Close()
 		if copyErr != nil {
 			return copyErr
 		}

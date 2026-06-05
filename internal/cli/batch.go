@@ -14,7 +14,7 @@ func RunPullBatch(opts PullOptions, listPath string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	sc := bufio.NewScanner(f)
 	lineNo := 0
