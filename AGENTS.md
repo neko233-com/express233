@@ -25,7 +25,7 @@
 ### golangci-lint
 
 - 配置文件 **必须** 含 `version: "2"`（见 [.golangci.yml](.golangci.yml)）。
-- CI 使用 `golangci/golangci-lint-action@v7` + `version: v2.1.6`。
+- CI 使用 `golangci/golangci-lint-action@v9` + `install-mode: goinstall`（与 `go 1.26` 工具链一致）。
 - 本地：`golangci-lint run --timeout=5m` 或 `make lint`。
 
 ### 发布门禁（必须遵守）
