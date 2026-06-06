@@ -23,15 +23,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SAFE_DEPLOY="${SCRIPT_DIR}/safe-deploy.sh"
 GAME_ROOT="${GAME_ROOT:-/opt/game-servers}"
-VERSION_FLAG=""
+VERSION_ARGS=()
 SERVERS=""
 FAILURES=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --servers)   SERVERS="$2"; shift 2 ;;
-    --file)      SERVERS=$(cat "$2" | tr '\n' ','); shift 2 ;;
-    --version)   VERSION_FLAG="--version $2"; shift 2 ;;
+    --file)      SERVERS=$(tr '\n' ',' < "$2"); shift 2 ;;
+    --version)   VERSION_ARGS=(--version "$2"); shift 2 ;;
     --root)      GAME_ROOT="$2"; shift 2 ;;
     -h|--help)   sed -n '2,15p' "$0"; exit 0 ;;
     *) echo "unknown: $1"; exit 1 ;;
@@ -59,7 +59,7 @@ for sid in "${SERVER_LIST[@]}"; do
   echo "────────── [$i/$TOTAL] $sid ──────────"
   if GAME_ROOT="$GAME_ROOT" bash "$SAFE_DEPLOY" \
       --server-id "$sid" \
-      $VERSION_FLAG; then
+      "${VERSION_ARGS[@]}"; then
     echo "  ✓ $sid deployed"
   else
     echo "  ✗ $sid FAILED (exit $?)"

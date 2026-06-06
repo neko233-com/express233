@@ -22,14 +22,14 @@ EXPRESS233_BIN="${EXPRESS233_BIN:-express233}"
 STOP_TIMEOUT="${STOP_TIMEOUT:-10}"        # 等待进程退出的秒数
 DRY_RUN=false
 BACKUP=false
-VERSION_FLAG=""
+VERSION_ARGS=()
 
 # ═══════════════ 参数解析 ═══════════════
 SERVER_ID="${EXPRESS233_SERVER_ID:-}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --server-id)  SERVER_ID="$2"; shift 2 ;;
-    --version)    VERSION_FLAG="--version $2"; shift 2 ;;
+    --version)    VERSION_ARGS=(--version "$2"); shift 2 ;;
     --dry-run)    DRY_RUN=true; shift ;;
     --backup)     BACKUP=true; shift ;;
     --root)       GAME_ROOT="$2"; shift 2 ;;
@@ -68,7 +68,7 @@ else
     --server-id "$SERVER_ID" \
     --dest "$TMP_DIR" \
     --skip-hook \
-    $VERSION_FLAG
+    "${VERSION_ARGS[@]}"
   log "pull complete: $(find "$TMP_DIR" -type f | wc -l) files"
 fi
 
@@ -166,9 +166,7 @@ else
 
   if [[ -n "$HOOK_SCRIPT" ]]; then
     chmod +x "$HOOK_SCRIPT"
-    SERVER_ID="$SERVER_ID" \
-    EXPRESS233_SERVER_ID="$SERVER_ID" \
-    "$HOOK_SCRIPT"
+    env SERVER_ID="$SERVER_ID" EXPRESS233_SERVER_ID="$SERVER_ID" "$HOOK_SCRIPT"
     log "post_hook executed"
   else
     log "no restart script found at scripts/restart.sh — start manually"
