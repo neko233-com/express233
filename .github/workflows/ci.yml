@@ -115,3 +115,5 @@ jobs:
           bash -n scripts/require-green-checks.sh
           bash -n scripts/backup-data.sh
           bash -n scripts/restore-data.sh
+          bash -n scripts/safe-deploy.sh
+          bash -n scripts/batch-deploy.sh

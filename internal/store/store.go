@@ -80,7 +80,10 @@ CREATE TABLE IF NOT EXISTS versions (
 	if err := s.migrateTenant(); err != nil {
 		return err
 	}
-	return s.migrateProjectMembers()
+	if err := s.migrateProjectMembers(); err != nil {
+		return err
+	}
+	return s.migrateBlobs()
 }
 
 func (s *Store) ensureDefaultAdmin() error {

@@ -44,12 +44,13 @@ SELECT id, COALESCE(tenant_id, 0), name, created_at FROM projects`)
 }
 
 // ServerYAMLPath 租户级 server.yaml。
+// 路径布局: {dataDir}/userdata/{slug}/server.yaml
 func (s *Store) ServerYAMLPath(tenantID int64) (string, error) {
 	t, err := s.TenantByID(tenantID)
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(s.dataDir, "tenants", t.Slug)
+	dir := filepath.Join(s.dataDir, "userdata", t.Slug)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
@@ -57,21 +58,23 @@ func (s *Store) ServerYAMLPath(tenantID int64) (string, error) {
 }
 
 // VersionDir 租户项目版本目录。
+// 路径布局: {dataDir}/userdata/{slug}/projects/{projectName}/{version}/
 func (s *Store) VersionDir(tenantID int64, projectName, version string) (string, error) {
 	t, err := s.TenantByID(tenantID)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(s.dataDir, "tenants", t.Slug, "projects", projectName, version), nil
+	return filepath.Join(s.dataDir, "userdata", t.Slug, "projects", projectName, version), nil
 }
 
 // ProjectsRoot 租户项目根目录。
+// 路径布局: {dataDir}/userdata/{slug}/projects/
 func (s *Store) ProjectsRoot(tenantID int64) (string, error) {
 	t, err := s.TenantByID(tenantID)
 	if err != nil {
 		return "", err
 	}
-	root := filepath.Join(s.dataDir, "tenants", t.Slug, "projects")
+	root := filepath.Join(s.dataDir, "userdata", t.Slug, "projects")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return "", err
 	}

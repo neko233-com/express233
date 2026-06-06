@@ -34,6 +34,7 @@ test.describe("express233 控制台全流程", () => {
     await expect(page.getByTestId("preview-table")).toContainText("game.properties", { timeout: 10_000 });
     await expect(page.getByTestId("preview-rendered-body")).toContainText("9001", { timeout: 10_000 });
 
+    await page.getByRole("button", { name: "版本" }).click();
     await page.getByTestId("validate-version").click();
     const validate = page.getByTestId("validate-result");
     await expect(validate).toContainText("可以发布", { timeout: 10_000 });
@@ -44,6 +45,51 @@ test.describe("express233 控制台全流程", () => {
     await expect(page.getByTestId("ver-status")).toContainText("published", { timeout: 5_000 });
     await expect(page.getByTestId("download-version")).toBeVisible();
     await expect(page.getByTestId("deploy-cmd")).toContainText("visual-s1");
+  });
+
+  test("版本搜索过滤列表", async ({ page }) => {
+    const projectName = `version-search-${Date.now()}`;
+
+    await page.getByTestId("new-project-input").fill(projectName);
+    await page.getByTestId("add-project").click();
+    await page.getByTestId("project-list").getByText(projectName, { exact: true }).click();
+
+    await page.getByTestId("new-version-input").fill("1.0.0");
+    await page.getByTestId("add-version").click();
+    await page.getByTestId("new-version-input").fill("2.0.0");
+    await page.getByTestId("add-version").click();
+
+    await page.getByTestId("version-search").fill("2.0");
+    await expect(page.getByTestId("version-list")).toContainText("2.0.0");
+    await expect(page.getByTestId("version-list")).not.toContainText("1.0.0");
+  });
+
+  test("演示项目引导素材包含 JSON/YAML/properties 替换", async ({ page }) => {
+    await page.locator("#btnDemoProject").click();
+    await expect(page.getByTestId("cur-project")).toContainText("demo-game", { timeout: 20_000 });
+    await expect(page.getByTestId("version-list")).toContainText("2.0.0", { timeout: 20_000 });
+    await page.getByTestId("version-list").getByText("2.0.0").click();
+    await expect(page.getByTestId("version-detail")).toBeVisible();
+    await page.getByRole("button", { name: "拉取预览" }).click();
+    await page.getByTestId("preview-server-id").fill("game-logic-01");
+    await page.getByTestId("preview-submit").click();
+    await expect(page.getByTestId("preview-table")).toContainText("game.properties", { timeout: 10_000 });
+    await expect(page.getByTestId("preview-table")).toContainText("application.yaml");
+    await expect(page.getByTestId("preview-table")).toContainText("settings.json");
+    await expect(page.getByTestId("preview-rendered-body")).toContainText("game-logic-01");
+  });
+
+  test("新手引导可跳过并记录", async ({ page }) => {
+    await page.locator("#btnStartOnboarding").click();
+    await expect(page.locator(".driver-popover")).toBeVisible({ timeout: 10_000 });
+    await page.locator(".driver-popover-close-btn").click();
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          Object.keys(localStorage).some((k) => k.startsWith("express233_onboarding_v1_default_root"))
+        )
+      )
+      .toBeTruthy();
   });
 
   test("server.yaml 页签保存与拉取预览", async ({ page }) => {

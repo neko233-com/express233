@@ -3,7 +3,7 @@ import path from "path";
 
 export default async function globalSetup() {
   const repoRoot = path.resolve(__dirname, "../..");
-  const tenantDir = path.join(repoRoot, ".visual-e2e-data", "tenants", "default");
+  const tenantDir = path.join(repoRoot, ".visual-e2e-data", "userdata", "default");
   fs.mkdirSync(tenantDir, { recursive: true });
   const yaml = `servers:
   visual-s1:

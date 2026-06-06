@@ -136,3 +136,37 @@
 - Go 模块根目录；`go test ./...` 为默认 CI 测试（不含 `test/visual` npm 包）。
 - 发布校验 `ValidateBeforePublish` **不**跑浏览器 E2E。
 - 本地服务：`run-server.cmd` → `127.0.0.1:23380`（自动停止旧 express233-server 实例）。
+
+## 节点部署（必读）
+
+详见 [docs/SAFE_DEPLOY.md](docs/SAFE_DEPLOY.md)，核心设计：
+
+### 安全部署流程（stop → swap → start）
+
+远程 SSH 服务器上**不能直接覆盖运行中的二进制**。正确流程：
+
+1. **Pull 到临时目录** `GAME_ROOT/.tmp/{server_id}/`（不影响正在运行的服务）
+2. **Stop 旧服务** 读取 `run/server.pid`，SIGTERM → 超时 SIGKILL
+3. **Swap 文件** rsync --exclude logs/ --exclude run/（保留日志和 PID）
+4. **Start 新服务** 执行 `scripts/restart.sh`
+
+### 多 game-server 隔离
+
+一台机器运行多个 game-server 实例时，每个 `server_id` 必须独立：
+
+| 资源 | 路径 |
+|------|------|
+| 最终目录 | `GAME_ROOT/{server_id}/` |
+| 临时目录 | `GAME_ROOT/.tmp/{server_id}/` |
+| 日志目录 | `GAME_ROOT/{server_id}/logs/` |
+| PID 文件 | `GAME_ROOT/{server_id}/run/server.pid` |
+| 备份目录 | `GAME_ROOT/.backup/{server_id}/` |
+
+### 设计约束（改动时必须考虑）
+
+- `logs/` 和 `run/` 在部署替换时**不被删除**
+- 批量部署默认**串行**，避免同时停多个服
+- 部署脚本**幂等**，重复执行安全
+- 已发布版本可删除节省磁盘，丢失后重新 pull 同步
+- 磁盘数据布局: `{dataDir}/userdata/{slug}/projects/{name}/{version}/`
+

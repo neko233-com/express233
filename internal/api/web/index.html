@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="dark" />
   <title>express233</title>
+  <link rel="stylesheet" href="/vendor/driver.js/driver.css" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
@@ -16,14 +17,15 @@
 
   <div id="login" class="login-screen" data-testid="login-panel">
     <div class="login-bg" aria-hidden="true"></div>
-    <div class="login-card">
-      <div class="login-brand">
+      <div class="login-card">
+        <div class="login-brand">
         <div class="login-logo" aria-hidden="true">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
         </div>
         <h1>express233</h1>
         <p class="login-sub">游戏逻辑服 · 拉模式部署中央控制台</p>
       </div>
+      <h2 class="login-title">账号密码登录</h2>
       <label class="field">
         <span>用户名</span>
         <input id="user" class="input" autocomplete="username" value="root" placeholder="root" />
@@ -32,7 +34,7 @@
         <span>密码</span>
         <input id="pass" class="input" type="password" autocomplete="current-password" value="root" placeholder="••••••" />
       </label>
-      <button id="btnLogin" type="button" class="btn btn-primary btn-block" data-testid="login-submit">登录</button>
+      <button id="btnLogin" type="button" class="btn btn-primary btn-block login-submit" data-testid="login-submit">登录</button>
       <p id="loginErr" class="err"></p>
       <p class="login-hint">默认账号 root / root</p>
     </div>
@@ -86,6 +88,7 @@
           <span class="user-avatar" aria-hidden="true">R</span>
           <span id="who" class="user-label" data-testid="whoami"></span>
         </div>
+        <button type="button" id="btnStartOnboarding" class="btn btn-ghost btn-sm">引导</button>
         <button type="button" id="btnLogout" class="btn btn-ghost btn-sm">退出</button>
       </div>
     </aside>
@@ -97,6 +100,10 @@
         </div>
         <h2>选择项目</h2>
         <p>在左侧选择或创建项目，管理版本包与 server_id 配置替换。</p>
+        <div class="empty-actions">
+          <button type="button" id="btnDemoProject" class="btn btn-secondary">添加演示项目</button>
+          <button type="button" id="btnEmptyStartOnboarding" class="btn btn-primary">新手引导</button>
+        </div>
       </div>
 
       <div id="globalServer" class="global-panel hidden">
@@ -187,6 +194,11 @@
                 <input id="newVersion" placeholder="1.0.0" class="input" data-testid="new-version-input" />
                 <button type="button" id="btnAddVersion" class="btn btn-primary btn-sm project-write" data-testid="add-version">新建</button>
               </div>
+              <div class="version-search-wrap">
+                <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                <input id="versionSearch" type="search" placeholder="搜索版本…" class="search-input" data-testid="version-search" />
+              </div>
+              <div class="version-divider"></div>
               <ul id="versionList" class="version-list" data-testid="version-list"></ul>
             </div>
             <div id="versionDetail" class="card version-detail hidden" data-testid="version-detail">
@@ -208,7 +220,7 @@
               <h3 class="card-title">文件</h3>
               <label class="upload-zone project-write">
                 <input type="file" id="fileInput" multiple data-testid="file-input" />
-                <span>点击或拖拽上传 / zip</span>
+                <span>点击或拖拽上传文件 / zip 包</span>
               </label>
               <ul id="fileList" class="file-list" data-testid="file-list"></ul>
             </div>
@@ -251,16 +263,33 @@
 
         <div id="ptab-deploy" class="ptab-panel hidden">
           <div class="card">
-            <p class="hint">复制到 SSH 主机执行</p>
+            <h3 class="card-title">一键部署脚本</h3>
+            <div class="toolbar">
+              <input id="deployServerId" list="serverIdList" placeholder="server_id" class="input" />
+              <input id="deployToken" placeholder="pull token" class="input" style="min-width:200px" />
+              <input id="deployTempDir" placeholder="临时目录 (默认 /tmp/express233-staging)" class="input" style="min-width:200px" />
+            </div>
+            <nav class="seg-tabs" id="deployOsTabs">
+              <button type="button" class="seg-tab active" data-os="linux">Linux (.sh)</button>
+              <button type="button" class="seg-tab" data-os="windows">Windows (.ps1)</button>
+            </nav>
             <pre id="deployCmd" class="cmdbox" data-testid="deploy-cmd"></pre>
-            <button type="button" id="btnCopyDeploy" class="btn btn-secondary btn-sm">复制命令</button>
+            <div class="toolbar" style="margin-top:0.5rem">
+              <button type="button" id="btnCopyDeploy" class="btn btn-primary btn-sm">复制脚本</button>
+              <button type="button" id="btnDownloadDeploy" class="btn btn-secondary btn-sm">下载文件</button>
+              <span class="hint" style="margin-left:0.5rem">脚本会自动检查并安装 express233 CLI，拉取并安全部署</span>
+            </div>
           </div>
         </div>
 
         <div id="ptab-diff" class="ptab-panel hidden">
           <div class="card">
+            <h3 class="card-title">版本对比</h3>
             <div class="toolbar">
-              <input id="diffFromVer" placeholder="对比版本 from" class="input" />
+              <select id="diffFromVer" class="input"><option value="">from 版本</option></select>
+              <span class="diff-arrow">&rarr;</span>
+              <select id="diffToVer" class="input"><option value="">to 版本</option></select>
+              <input id="diffServerId" list="serverIdList" placeholder="server_id" class="input" />
               <button type="button" id="btnVersionDiff" class="btn btn-primary btn-sm">生成 diff</button>
             </div>
             <div id="versionDiffOut"></div>
@@ -269,6 +298,7 @@
       </div>
     </main>
   </div>
+  <script src="/vendor/driver.js/driver.js.iife.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

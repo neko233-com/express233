@@ -90,7 +90,9 @@ func (s *Store) DeleteProject(tenantID, id int64) error {
 	if err != nil {
 		return err
 	}
-	_ = os.RemoveAll(filepath.Join(root, name))
+	projDir := filepath.Join(root, name)
+	_ = s.releaseProjectDir(projDir)
+	_ = os.RemoveAll(projDir)
 	return nil
 }
 
@@ -240,6 +242,7 @@ func (s *Store) DeleteVersion(tenantID, projectID int64, projectName, version st
 	}
 	dir, err := s.VersionDir(tenantID, projectName, version)
 	if err == nil {
+		_ = s.releaseVersionDir(dir)
 		_ = os.RemoveAll(dir)
 	}
 	return nil
@@ -282,6 +285,10 @@ func (s *Store) ListVersionFiles(tenantID int64, projectName, version string) ([
 	root, err := s.VersionDir(tenantID, projectName, version)
 	if err != nil {
 		return nil, err
+	}
+	// 目录不存在（版本已删除/丢失）时返回空列表，调用方可提示重新同步。
+	if _, statErr := os.Stat(root); os.IsNotExist(statErr) {
+		return []string{}, nil
 	}
 	var files []string
 	err = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {

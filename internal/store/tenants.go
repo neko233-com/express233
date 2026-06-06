@@ -44,10 +44,12 @@ func (s *Store) EnsureDefaultTenant() error {
 }
 
 func (s *Store) migrateLegacyDataLayout(tenantID int64, slug string) error {
-	tenantRoot := filepath.Join(s.dataDir, "tenants", slug)
+	tenantRoot := filepath.Join(s.dataDir, "userdata", slug)
 	_ = os.MkdirAll(tenantRoot, 0o755)
-	oldProjects := filepath.Join(s.dataDir, "projects")
 	newProjects := filepath.Join(tenantRoot, "projects")
+
+	// 1. 最早期布局: {dataDir}/projects/ → {dataDir}/userdata/{slug}/projects/
+	oldProjects := filepath.Join(s.dataDir, "projects")
 	if _, err := os.Stat(oldProjects); err == nil {
 		if _, err := os.Stat(newProjects); os.IsNotExist(err) {
 			if err := os.Rename(oldProjects, newProjects); err != nil {
@@ -55,15 +57,43 @@ func (s *Store) migrateLegacyDataLayout(tenantID int64, slug string) error {
 			}
 		}
 	}
-	oldYAML := filepath.Join(s.dataDir, "server.yaml")
-	newYAML := filepath.Join(tenantRoot, "server.yaml")
-	if _, err := os.Stat(oldYAML); err == nil {
-		if _, err := os.Stat(newYAML); os.IsNotExist(err) {
-			if err := os.Rename(oldYAML, newYAML); err != nil {
-				return fmt.Errorf("migrate server.yaml: %w", err)
+
+	// 2. 上一版布局: {dataDir}/tenants/{slug}/projects/{name}/ → userdata/{slug}/projects/{name}/
+	oldTenantProjects := filepath.Join(s.dataDir, "tenants", slug, "projects")
+	if _, err := os.Stat(oldTenantProjects); err == nil {
+		if _, err := os.Stat(newProjects); os.IsNotExist(err) {
+			if err := os.Rename(oldTenantProjects, newProjects); err != nil {
+				return fmt.Errorf("migrate tenant projects dir: %w", err)
+			}
+		} else {
+			// newProjects 已存在，逐项迁移
+			entries, _ := os.ReadDir(oldTenantProjects)
+			for _, e := range entries {
+				dst := filepath.Join(newProjects, e.Name())
+				if _, err := os.Stat(dst); os.IsNotExist(err) {
+					if err := os.Rename(filepath.Join(oldTenantProjects, e.Name()), dst); err != nil {
+						return fmt.Errorf("migrate tenant project %s: %w", e.Name(), err)
+					}
+				}
 			}
 		}
 	}
+
+	// 3. server.yaml: 两个旧位置都要检查
+	for _, oldPath := range []string{
+		filepath.Join(s.dataDir, "server.yaml"),
+		filepath.Join(s.dataDir, "tenants", slug, "server.yaml"),
+	} {
+		newYAML := filepath.Join(tenantRoot, "server.yaml")
+		if _, err := os.Stat(oldPath); err == nil {
+			if _, err := os.Stat(newYAML); os.IsNotExist(err) {
+				if err := os.Rename(oldPath, newYAML); err != nil {
+					return fmt.Errorf("migrate server.yaml: %w", err)
+				}
+			}
+		}
+	}
+
 	_ = tenantID
 	return nil
 }
@@ -100,7 +130,7 @@ func (s *Store) CreateTenant(slug, name string) (*Tenant, error) {
 		return nil, err
 	}
 	id, _ := res.LastInsertId()
-	root := filepath.Join(s.dataDir, "tenants", slug)
+	root := filepath.Join(s.dataDir, "userdata", slug)
 	if err := os.MkdirAll(filepath.Join(root, "projects"), 0o755); err != nil {
 		return nil, err
 	}

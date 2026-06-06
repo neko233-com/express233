@@ -23,20 +23,7 @@ func (s *Store) WriteVersionFile(tenantID int64, projectName, version, relPath s
 	if err := CheckConfigBasenameConflict(root, relPath); err != nil {
 		return err
 	}
-	path, err := s.versionFilePath(tenantID, projectName, version, relPath)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-	_, err = io.Copy(f, r)
-	return err
+	return s.writeVersionBlob(tenantID, projectName, version, relPath, r)
 }
 
 // DeleteVersionFile 删除版本内文件（仅 draft）。
@@ -48,7 +35,7 @@ func (s *Store) DeleteVersionFile(tenantID int64, projectName, version, relPath 
 	if err != nil {
 		return err
 	}
-	return os.Remove(path)
+	return s.releaseBlobLink(path)
 }
 
 // ExtractZipToVersion 解压 zip 到版本目录（仅 draft）。
@@ -84,20 +71,22 @@ func (s *Store) ExtractZipToVersion(tenantID int64, projectName, version string,
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 			return err
 		}
+		if _, err := os.Stat(dest); err == nil {
+			if err := s.releaseBlobLink(dest); err != nil {
+				return err
+			}
+		}
 		rc, err := f.Open()
 		if err != nil {
 			return err
 		}
-		out, err := os.Create(dest)
-		if err != nil {
-			_ = rc.Close()
-			return err
-		}
-		_, copyErr := io.Copy(out, rc)
-		_ = out.Close()
+		hash, ingestErr := s.ingestBlobFromReader(rc)
 		_ = rc.Close()
-		if copyErr != nil {
-			return copyErr
+		if ingestErr != nil {
+			return ingestErr
+		}
+		if err := s.linkBlobToVersion(hash, dest); err != nil {
+			return err
 		}
 	}
 	return ValidateUniqueConfigBasenames(root)
