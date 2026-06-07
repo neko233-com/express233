@@ -37,6 +37,16 @@ curl -fsSL https://raw.githubusercontent.com/neko233-com/express233/main/scripts
 iwr -useb https://raw.githubusercontent.com/neko233-com/express233/main/scripts/install-server.ps1 | iex
 ```
 
+安装指定版本：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/neko233-com/express233/main/scripts/install-server.sh | bash -s -- v0.1.0
+```
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/neko233-com/express233/main/scripts/install-server.ps1 | iex; Install-Express233Server -Ver v0.1.0
+```
+
 或 `go install ./cmd/express233-cli ./cmd/express233-server`
 
 Release 资产（tag `v*` 触发 [release.yml](.github/workflows/release.yml)）：
@@ -44,6 +54,48 @@ Release 资产（tag `v*` 触发 [release.yml](.github/workflows/release.yml)）
 - `express233-cli-{linux,darwin,windows}-{amd64,arm64}[.exe]`
 - `express233-server-{...}`（同上）
 - 各文件 `.sha256` 校验
+
+## 中央服运维命令
+
+默认监听 `127.0.0.1:23380`，数据目录优先读取 `EXPRESS233_DATA`，否则使用 `~/.express233-server`。
+
+首次安装后推荐顺序：
+
+```bash
+express233-server start
+express233-server status
+express233-server reset-root-password --password 'change-me-now'
+```
+
+常用命令：
+
+```bash
+express233-server port
+express233-server set-port 32380
+express233-server restart
+express233-server backup-config
+express233-server reload-config
+express233-server restore-config
+express233-server stop
+```
+
+说明：
+
+- `start`：后台启动并写入 `run/server.pid`、`run/server-state.json`、`run/server.log`
+- `status`：查看当前 PID、访问地址、数据目录、默认端口
+- `port`：查看默认端口 `23380` 与当前持久化监听地址
+- `set-port`：修改中央服监听端口，默认会自动重启正在运行的中央服
+- `reload-config`：校验并热重载租户 `server.yaml`，无需重启进程
+- `backup-config` / `restore-config`：备份并恢复中央 `server.yaml`；`restore-config --default` 可恢复为示例模板
+- `reset-root-password`：仅命令行强制重置 `root` 密码，适合忘记密码时救援
+
+PowerShell 示例：
+
+```powershell
+express233-server start
+express233-server set-port 32380
+express233-server reset-root-password --password "change-me-now"
+```
 
 ## 一行部署
 

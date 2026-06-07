@@ -3,136 +3,396 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
-	"github.com/neko233-com/express233/internal/api"
-	"github.com/neko233-com/express233/internal/store"
 	"github.com/neko233-com/express233/internal/version"
 )
 
 func main() {
-	showVer := flag.Bool("version", false, "print version and exit")
-	addr := flag.String("addr", defaultListenAddr(), "listen address")
-	dataDir := flag.String("data", defaultDataDir(), "data directory")
-	flag.Parse()
+	if err := run(os.Args[1:]); err != nil {
+		log.Fatal(err)
+	}
+}
 
+func run(args []string) error {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return runServe(args)
+	}
+	switch args[0] {
+	case "run", "serve":
+		return runServe(args[1:])
+	case "start":
+		return runStart(args[1:])
+	case "stop":
+		return runStop(args[1:])
+	case "restart":
+		return runRestart(args[1:])
+	case "status":
+		return runStatus(args[1:])
+	case "port":
+		return runPort(args[1:])
+	case "set-port":
+		return runSetPort(args[1:])
+	case "reload-config":
+		return runReloadConfig(args[1:])
+	case "backup-config":
+		return runBackupConfig(args[1:])
+	case "restore-config":
+		return runRestoreConfig(args[1:])
+	case "reset-root-password":
+		return runResetRootPassword(args[1:])
+	case "version":
+		fmt.Println(version.String("express233-server"))
+		return nil
+	case "help", "-h", "--help":
+		printUsage()
+		return nil
+	default:
+		return fmt.Errorf("unknown command %q", args[0])
+	}
+}
+
+func runServe(args []string) error {
+	fs := flag.NewFlagSet("express233-server serve", flag.ContinueOnError)
+	fs.SetOutput(os.Stdout)
+	showVer := fs.Bool("version", false, "print version and exit")
+	addr := &stringFlag{}
+	data := &stringFlag{}
+	fs.Var(addr, "addr", "listen address")
+	fs.Var(data, "data", "data directory")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 	if *showVer {
 		fmt.Println(version.String("express233-server"))
-		os.Exit(0)
+		return nil
 	}
 
-	listen := normalizeListenAddr(*addr)
-
-	if err := os.MkdirAll(*dataDir, 0o755); err != nil {
-		log.Fatal(err)
-	}
-	ensureServerYAML(*dataDir)
-
-	st, err := store.Open(*dataDir)
+	dataDir := resolveDataDir(data.Value(), data.IsSet())
+	listen, err := resolveListenAddr(dataDir, addr.Value(), addr.IsSet())
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-	defer func() { _ = st.Close() }()
-
-	srv := api.New(st)
-	log.Printf("%s", version.String("express233-server"))
-	if err := warnIfPortBlocked(listen); err != nil {
-		log.Fatal(err)
-	}
-	log.Printf("listening on %s (data: %s)", listen, *dataDir)
-	log.Printf("访问地址 = %s", browserURL(listen))
-	if wd := api.DevWebDir(); wd != "" {
-		log.Printf("static hot reload: %s (html/css/js)", wd)
-	}
-	log.Printf("default login: root / root")
-	if err := http.ListenAndServe(listen, srv.Router()); err != nil {
-		log.Fatal(err)
-	}
+	listen = normalizeListenAddr(listen)
+	return serve(listen, dataDir)
 }
 
-func defaultListenAddr() string {
-	if a := os.Getenv("EXPRESS233_ADDR"); a != "" {
-		return a
+func runStart(args []string) error {
+	fs := flag.NewFlagSet("express233-server start", flag.ContinueOnError)
+	fs.SetOutput(os.Stdout)
+	addr := &stringFlag{}
+	data := &stringFlag{}
+	fs.Var(addr, "addr", "listen address")
+	fs.Var(data, "data", "data directory")
+	if err := fs.Parse(args); err != nil {
+		return err
 	}
-	return "127.0.0.1:23380"
-}
-
-func defaultDataDir() string {
-	if d := os.Getenv("EXPRESS233_DATA"); d != "" {
-		return d
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".express233-server")
-}
-
-// normalizeListenAddr 将 :port 转为 127.0.0.1:port，避免 Windows 上仅监听 IPv6 而 127.0.0.1 被其它程序占用。
-func normalizeListenAddr(addr string) string {
-	if strings.HasPrefix(addr, ":") {
-		return "127.0.0.1" + addr
-	}
-	return addr
-}
-
-func browserURL(listen string) string {
-	host, port, err := net.SplitHostPort(listen)
+	dataDir := resolveDataDir(data.Value(), data.IsSet())
+	listen, err := resolveListenAddr(dataDir, addr.Value(), addr.IsSet())
 	if err != nil {
-		return "http://" + listen
+		return err
 	}
-	switch host {
-	case "", "0.0.0.0", "::":
-		host = "127.0.0.1"
+	listen = normalizeListenAddr(listen)
+	if _, _, ok, err := loadRuntimeState(dataDir); err != nil {
+		return err
+	} else if ok {
+		return fmt.Errorf("express233-server already running")
 	}
-	return fmt.Sprintf("http://%s:%s", host, port)
+	if err := saveRuntimeConfig(dataDir, runtimeConfig{Addr: listen}); err != nil {
+		return err
+	}
+	state, err := startDetachedServer(dataDir, listen)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("started express233-server pid=%d url=%s data=%s\n", state.PID, browserURL(state.Addr), state.DataDir)
+	return nil
 }
 
-func warnIfPortBlocked(listen string) error {
+func runStop(args []string) error {
+	fs := flag.NewFlagSet("express233-server stop", flag.ContinueOnError)
+	fs.SetOutput(os.Stdout)
+	data := &stringFlag{}
+	fs.Var(data, "data", "data directory")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	dataDir := resolveDataDir(data.Value(), data.IsSet())
+	st, path, ok, err := loadRuntimeState(dataDir)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		fmt.Println("express233-server is not running")
+		return nil
+	}
+	if err := stopServer(st); err != nil {
+		return err
+	}
+	_ = os.Remove(path)
+	_ = os.Remove(runtimePIDPath(dataDir))
+	fmt.Printf("stopped express233-server pid=%d\n", st.PID)
+	return nil
+}
+
+func runRestart(args []string) error {
+	fs := flag.NewFlagSet("express233-server restart", flag.ContinueOnError)
+	fs.SetOutput(os.Stdout)
+	addr := &stringFlag{}
+	data := &stringFlag{}
+	fs.Var(addr, "addr", "listen address")
+	fs.Var(data, "data", "data directory")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	dataDir := resolveDataDir(data.Value(), data.IsSet())
+	listen, err := resolveListenAddr(dataDir, addr.Value(), addr.IsSet())
+	if err != nil {
+		return err
+	}
+	listen = normalizeListenAddr(listen)
+	if st, _, ok, err := loadRuntimeState(dataDir); err != nil {
+		return err
+	} else if ok {
+		if err := stopServer(st); err != nil {
+			return err
+		}
+	}
+	if err := saveRuntimeConfig(dataDir, runtimeConfig{Addr: listen}); err != nil {
+		return err
+	}
+	state, err := startDetachedServer(dataDir, listen)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("restarted express233-server pid=%d url=%s\n", state.PID, browserURL(state.Addr))
+	return nil
+}
+
+func runStatus(args []string) error {
+	fs := flag.NewFlagSet("express233-server status", flag.ContinueOnError)
+	fs.SetOutput(os.Stdout)
+	data := &stringFlag{}
+	fs.Var(data, "data", "data directory")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	dataDir := resolveDataDir(data.Value(), data.IsSet())
+	configured, err := resolveListenAddr(dataDir, "", false)
+	if err != nil {
+		return err
+	}
+	st, _, ok, err := loadRuntimeState(dataDir)
+	if err != nil {
+		return err
+	}
+	if ok {
+		fmt.Printf("status=running\npid=%d\naddr=%s\nurl=%s\ndata=%s\nconfig=%s\ndefault_port=%s\n",
+			st.PID, st.Addr, browserURL(st.Addr), st.DataDir, serverRuntimeConfigPath(dataDir), defaultPort())
+		return nil
+	}
+	configured = normalizeListenAddr(configured)
+	fmt.Printf("status=stopped\nconfigured_addr=%s\nurl=%s\ndata=%s\nconfig=%s\ndefault_port=%s\n",
+		configured, browserURL(configured), dataDir, serverRuntimeConfigPath(dataDir), defaultPort())
+	return nil
+}
+
+func runPort(args []string) error {
+	fs := flag.NewFlagSet("express233-server port", flag.ContinueOnError)
+	fs.SetOutput(os.Stdout)
+	data := &stringFlag{}
+	fs.Var(data, "data", "data directory")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	dataDir := resolveDataDir(data.Value(), data.IsSet())
+	listen, err := resolveListenAddr(dataDir, "", false)
+	if err != nil {
+		return err
+	}
+	listen = normalizeListenAddr(listen)
 	_, port, err := net.SplitHostPort(listen)
 	if err != nil {
-		return nil
+		return err
 	}
-	probe := net.JoinHostPort("127.0.0.1", port)
-	conn, err := net.DialTimeout("tcp", probe, 400*time.Millisecond)
-	if err != nil {
-		return nil
-	}
-	_ = conn.Close()
-
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get("http://" + probe + "/healthz")
-	if err != nil {
-		return fmt.Errorf(
-			"127.0.0.1:%s 已被其他程序占用（常见: proxysss）；请关闭该程序或设置 EXPRESS233_ADDR=127.0.0.1:其他端口",
-			port,
-		)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode == http.StatusOK && strings.TrimSpace(string(body)) == "ok" {
-		return fmt.Errorf("已有 express233-server 在 %s 运行", browserURL(listen))
-	}
-	return fmt.Errorf(
-		"127.0.0.1:%s 已被其他程序占用（常见: proxysss）；请关闭该程序或设置 EXPRESS233_ADDR=127.0.0.1:其他端口",
-		port,
-	)
+	fmt.Printf("default_port=%s\nconfigured_addr=%s\nconfigured_port=%s\n", defaultPort(), listen, port)
+	return nil
 }
 
-func ensureServerYAML(dataDir string) {
-	path := filepath.Join(dataDir, "server.yaml")
-	if _, err := os.Stat(path); err == nil {
-		return
+func runSetPort(args []string) error {
+	fs := flag.NewFlagSet("express233-server set-port", flag.ContinueOnError)
+	fs.SetOutput(os.Stdout)
+	data := &stringFlag{}
+	restart := fs.Bool("restart", true, "restart running server after updating port")
+	fs.Var(data, "data", "data directory")
+	if err := fs.Parse(args); err != nil {
+		return err
 	}
-	example := `servers: {}
-`
-	if b, err := os.ReadFile("configs/server.yaml.example"); err == nil {
-		example = string(b)
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: express233-server set-port [--data DIR] [--restart=true] <port|host:port>")
 	}
-	_ = os.WriteFile(path, []byte(example), 0o644)
-	fmt.Printf("created default server.yaml at %s\n", path)
+	dataDir := resolveDataDir(data.Value(), data.IsSet())
+	current, err := resolveListenAddr(dataDir, "", false)
+	if err != nil {
+		return err
+	}
+	listen, err := normalizePortValue(current, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	if err := saveRuntimeConfig(dataDir, runtimeConfig{Addr: listen}); err != nil {
+		return err
+	}
+	fmt.Printf("saved configured_addr=%s\n", listen)
+	if !*restart {
+		return nil
+	}
+	if st, _, ok, err := loadRuntimeState(dataDir); err != nil {
+		return err
+	} else if ok {
+		if err := stopServer(st); err != nil {
+			return err
+		}
+		state, err := startDetachedServer(dataDir, listen)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("restarted express233-server pid=%d url=%s\n", state.PID, browserURL(state.Addr))
+	}
+	return nil
 }
+
+func runReloadConfig(args []string) error {
+	fs := flag.NewFlagSet("express233-server reload-config", flag.ContinueOnError)
+	fs.SetOutput(os.Stdout)
+	data := &stringFlag{}
+	fs.Var(data, "data", "data directory")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	dataDir := resolveDataDir(data.Value(), data.IsSet())
+	if err := validateServerConfig(dataDir); err != nil {
+		return err
+	}
+	st, _, ok, err := loadRuntimeState(dataDir)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		fmt.Println("config is valid; server not running, reload skipped")
+		return nil
+	}
+	if err := postControl(st, "/__admin/reload-config"); err != nil {
+		return err
+	}
+	fmt.Println("reloaded server.yaml from disk")
+	return nil
+}
+
+func runBackupConfig(args []string) error {
+	fs := flag.NewFlagSet("express233-server backup-config", flag.ContinueOnError)
+	fs.SetOutput(os.Stdout)
+	data := &stringFlag{}
+	fs.Var(data, "data", "data directory")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	dataDir := resolveDataDir(data.Value(), data.IsSet())
+	backup, err := backupServerConfig(dataDir)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("backup created at %s\n", backup)
+	return nil
+}
+
+func runRestoreConfig(args []string) error {
+	fs := flag.NewFlagSet("express233-server restore-config", flag.ContinueOnError)
+	fs.SetOutput(os.Stdout)
+	data := &stringFlag{}
+	fromDefault := fs.Bool("default", false, "restore default example config instead of latest backup")
+	fs.Var(data, "data", "data directory")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	dataDir := resolveDataDir(data.Value(), data.IsSet())
+	restored, err := restoreServerConfig(dataDir, *fromDefault)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("restored server config from %s\n", restored)
+	if st, _, ok, err := loadRuntimeState(dataDir); err != nil {
+		return err
+	} else if ok {
+		if err := postControl(st, "/__admin/reload-config"); err != nil {
+			return err
+		}
+		fmt.Println("reloaded restored config")
+	}
+	return nil
+}
+
+func runResetRootPassword(args []string) error {
+	fs := flag.NewFlagSet("express233-server reset-root-password", flag.ContinueOnError)
+	fs.SetOutput(os.Stdout)
+	data := &stringFlag{}
+	password := fs.String("password", "", "new root password")
+	fs.Var(data, "data", "data directory")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*password) == "" {
+		return fmt.Errorf("--password is required")
+	}
+	dataDir := resolveDataDir(data.Value(), data.IsSet())
+	if err := resetRootPassword(dataDir, *password); err != nil {
+		return err
+	}
+	fmt.Println("root password updated")
+	return nil
+}
+
+func printUsage() {
+	name := filepath.Base(os.Args[0])
+	fmt.Printf(`%s commands:
+  serve | run            foreground server
+  start                  background server
+  stop                   stop running server
+  restart                restart background server
+  status                 show pid/addr/data dir
+  port                   show configured/default port
+  set-port <port>        update configured port/address
+  reload-config          validate and hot reload server.yaml
+  backup-config          save server.yaml backup
+  restore-config         restore latest backup or --default
+  reset-root-password    force reset root password from CLI
+  version                print version
+
+Examples:
+  %s start
+  %s set-port 32380
+  %s reload-config
+  %s reset-root-password --password 'new-secret'
+`, name, name, name, name, name)
+}
+
+type stringFlag struct {
+	value string
+	set   bool
+}
+
+func (f *stringFlag) String() string { return f.value }
+
+func (f *stringFlag) Set(v string) error {
+	f.value = v
+	f.set = true
+	return nil
+}
+
+func (f *stringFlag) Value() string { return f.value }
+
+func (f *stringFlag) IsSet() bool { return f.set }

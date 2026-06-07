@@ -35,7 +35,11 @@ function Install-Express233Server {
     Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
     Write-Host "Installed to $dest"
     Write-Host "Add to PATH: $installDir"
-    Write-Host "Run: `$env:EXPRESS233_DATA=`"$env:USERPROFILE\\.express233-server`"; express233-server -addr :23380"
+    Write-Host "Run: `$env:EXPRESS233_DATA=`"$env:USERPROFILE\\.express233-server`"; express233-server start"
+    Write-Host "Status: express233-server status"
+    Write-Host "Change port: express233-server set-port 32380"
+    Write-Host "Hot reload server.yaml: express233-server reload-config"
+    Write-Host "Force reset root password: express233-server reset-root-password --password <NEW_PASSWORD>"
 }
 
 if ($Version -eq "latest") {

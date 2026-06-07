@@ -68,4 +68,8 @@ chmod +x "${install_dir}/${target}" 2>/dev/null || true
 rm -rf "$TMP"
 
 echo "Installed ${BINARY_NAME} v${VERSION} -> ${install_dir}/${target}"
-echo "Run: EXPRESS233_DATA=~/.express233-server ${BINARY_NAME}${ext} -addr :23380"
+echo "Run: EXPRESS233_DATA=~/.express233-server ${BINARY_NAME}${ext} start"
+echo "Status: ${BINARY_NAME}${ext} status"
+echo "Change port: ${BINARY_NAME}${ext} set-port 32380"
+echo "Hot reload server.yaml: ${BINARY_NAME}${ext} reload-config"
+echo "Force reset root password: ${BINARY_NAME}${ext} reset-root-password --password <NEW_PASSWORD>"

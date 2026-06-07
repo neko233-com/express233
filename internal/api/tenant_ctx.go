@@ -55,6 +55,22 @@ func (s *Server) reloadServerYAML(tenantID int64) {
 	s.serverMu.Unlock()
 }
 
+// ReloadAllServerYAML 从磁盘重新加载所有租户的 server.yaml。
+func (s *Server) ReloadAllServerYAML() error {
+	list, err := s.Store.ListTenants()
+	if err != nil {
+		return err
+	}
+	if len(list) == 0 {
+		s.reloadServerYAML(1)
+		return nil
+	}
+	for _, tenant := range list {
+		s.reloadServerYAML(tenant.ID)
+	}
+	return nil
+}
+
 func (s *Server) pullTenant(token string) (tenantID int64, username string, ok bool) {
 	uid, tid, err := s.Store.LookupPullToken(token)
 	if err != nil {
