@@ -37,6 +37,8 @@ func run(args []string) error {
 		return runPort(args[1:])
 	case "set-port":
 		return runSetPort(args[1:])
+	case "update":
+		return runUpdate(args[1:])
 	case "reload-config":
 		return runReloadConfig(args[1:])
 	case "backup-config":
@@ -366,6 +368,7 @@ func printUsage() {
   status                 show pid/addr/data dir
   port                   show configured/default port
   set-port <port>        update configured port/address
+	update                 self-update binary and restart server
   reload-config          validate and hot reload server.yaml
   backup-config          save server.yaml backup
   restore-config         restore latest backup or --default
@@ -375,9 +378,10 @@ func printUsage() {
 Examples:
   %s start
   %s set-port 32380
+	%s update
   %s reload-config
   %s reset-root-password --password 'new-secret'
-`, name, name, name, name, name)
+`, name, name, name, name, name, name)
 }
 
 type stringFlag struct {

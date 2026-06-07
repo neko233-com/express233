@@ -7,23 +7,34 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/neko233-com/express233/internal/api"
 	"github.com/neko233-com/express233/internal/config"
 	"github.com/neko233-com/express233/internal/store"
 	"github.com/neko233-com/express233/internal/version"
+)
+
+const (
+	defaultLogMaxSizeBytes = 10 * 1024 * 1024
+	defaultLogMaxBackups   = 5
+	defaultLogLevel        = "info"
+	githubRepo             = "neko233-com/express233"
 )
 
 type runtimeConfig struct {
@@ -53,6 +64,12 @@ func serve(listen, dataDir string) error {
 		return err
 	}
 	defer func() { _ = st.Close() }()
+
+	logger, logCloser, err := setupServerLogger(dataDir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = logCloser() }()
 
 	controlToken, err := randomHex(16)
 	if err != nil {
@@ -100,20 +117,21 @@ func serve(listen, dataDir string) error {
 	mux.Handle("/", srvAPI.Router())
 	server.Handler = mux
 
-	log.Printf("%s", version.String("express233-server"))
+	logger.Info("server starting", "version", version.String("express233-server"))
 	if err := warnIfPortBlocked(listen); err != nil {
 		return err
 	}
-	log.Printf("listening on %s (data: %s)", listen, dataDir)
-	log.Printf("访问地址 = %s", browserURL(listen))
+	logger.Info("server listening", "addr", listen, "url", browserURL(listen), "data_dir", dataDir)
 	if wd := api.DevWebDir(); wd != "" {
-		log.Printf("static hot reload: %s (html/css/js)", wd)
+		logger.Info("static hot reload enabled", "dir", wd)
 	}
-	log.Printf("root account available; initial password is root, rotate with reset-root-password")
+	logger.Info("root account available; rotate the initial password with reset-root-password")
 	err = server.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
+		logger.Info("server stopped")
 		return nil
 	}
+	logger.Error("server exited with error", "error", err)
 	return err
 }
 
@@ -238,6 +256,124 @@ func runtimePIDPath(dataDir string) string {
 
 func runtimeLogPath(dataDir string) string {
 	return filepath.Join(runtimeDir(dataDir), "server.log")
+}
+
+func parseLogLevel(raw string) slog.Level {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	case "info", "":
+		return slog.LevelInfo
+	default:
+		return slog.LevelInfo
+	}
+}
+
+func setupServerLogger(dataDir string) (*slog.Logger, func() error, error) {
+	writer, err := newRotatingFileWriter(runtimeLogPath(dataDir), defaultLogMaxSizeBytes, defaultLogMaxBackups)
+	if err != nil {
+		return nil, nil, err
+	}
+	level := parseLogLevel(os.Getenv("EXPRESS233_LOG_LEVEL"))
+	handler := slog.NewTextHandler(writer, &slog.HandlerOptions{Level: level})
+	logger := slog.New(handler)
+	slog.SetDefault(logger)
+	log.SetFlags(0)
+	log.SetOutput(slog.NewLogLogger(handler, level).Writer())
+	return logger, writer.Close, nil
+}
+
+type rotatingFileWriter struct {
+	mu         sync.Mutex
+	path       string
+	file       *os.File
+	size       int64
+	maxSize    int64
+	maxBackups int
+}
+
+func newRotatingFileWriter(path string, maxSize int64, maxBackups int) (*rotatingFileWriter, error) {
+	if maxSize <= 0 {
+		maxSize = defaultLogMaxSizeBytes
+	}
+	if maxBackups <= 0 {
+		maxBackups = defaultLogMaxBackups
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	return &rotatingFileWriter{path: path, file: file, size: info.Size(), maxSize: maxSize, maxBackups: maxBackups}, nil
+}
+
+func (w *rotatingFileWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if err := w.rotateIfNeeded(int64(len(p))); err != nil {
+		return 0, err
+	}
+	n, err := w.file.Write(p)
+	w.size += int64(n)
+	return n, err
+}
+
+func (w *rotatingFileWriter) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.file == nil {
+		return nil
+	}
+	err := w.file.Close()
+	w.file = nil
+	return err
+}
+
+func (w *rotatingFileWriter) rotateIfNeeded(incoming int64) error {
+	if w.file == nil {
+		return fmt.Errorf("log writer is closed")
+	}
+	if w.size+incoming <= w.maxSize {
+		return nil
+	}
+	if err := w.file.Close(); err != nil {
+		return err
+	}
+	for index := w.maxBackups - 1; index >= 1; index-- {
+		source := fmt.Sprintf("%s.%d", w.path, index)
+		target := fmt.Sprintf("%s.%d", w.path, index+1)
+		if _, err := os.Stat(source); err == nil {
+			_ = os.Remove(target)
+			if err := os.Rename(source, target); err != nil {
+				return err
+			}
+		}
+	}
+	firstBackup := w.path + ".1"
+	_ = os.Remove(firstBackup)
+	if _, err := os.Stat(w.path); err == nil {
+		if err := os.Rename(w.path, firstBackup); err != nil {
+			return err
+		}
+	}
+	file, err := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	w.file = file
+	w.size = 0
+	return nil
 }
 
 func loadRuntimeConfig(dataDir string) (runtimeConfig, error) {
@@ -392,6 +528,53 @@ func stopServer(st runtimeState) error {
 	return fmt.Errorf("timeout waiting for shutdown")
 }
 
+func runUpdate(args []string) error {
+	fs := flag.NewFlagSet("express233-server update", flag.ContinueOnError)
+	fs.SetOutput(os.Stdout)
+	data := &stringFlag{}
+	versionFlag := fs.String("version", "latest", "release version to install, for example v0.2.2 or latest")
+	restart := fs.Bool("restart", true, "restart the server after updating")
+	fs.Var(data, "data", "data directory")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	dataDir := resolveDataDir(data.Value(), data.IsSet())
+	listen, err := resolveListenAddr(dataDir, "", false)
+	if err != nil {
+		return err
+	}
+	listen = normalizeListenAddr(listen)
+	targetVersion, err := resolveReleaseTag(*versionFlag)
+	if err != nil {
+		return err
+	}
+	exePath, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	runningState, _, running, err := loadRuntimeState(dataDir)
+	if err != nil {
+		return err
+	}
+	if running {
+		if err := stopServer(runningState); err != nil {
+			return err
+		}
+	}
+	downloaded, err := downloadReleaseBinary(targetVersion)
+	if err != nil {
+		return err
+	}
+	if err := scheduleBinarySwap(exePath, downloaded, dataDir, listen, *restart); err != nil {
+		return err
+	}
+	fmt.Printf("scheduled update to %s from %s\n", targetVersion, downloaded)
+	if *restart {
+		fmt.Println("the binary will be replaced and the server will restart automatically")
+	}
+	return nil
+}
+
 func postControl(st runtimeState, path string) error {
 	req, err := http.NewRequest(http.MethodPost, browserURL(st.Addr)+path, bytes.NewReader(nil))
 	if err != nil {
@@ -409,6 +592,148 @@ func postControl(st runtimeState, path string) error {
 		return fmt.Errorf("control request failed: %s", strings.TrimSpace(string(body)))
 	}
 	return nil
+}
+
+func resolveReleaseTag(raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" || strings.EqualFold(value, "latest") {
+		return latestReleaseTag()
+	}
+	if strings.HasPrefix(strings.ToLower(value), "v") {
+		return value, nil
+	}
+	return "v" + value, nil
+}
+
+func latestReleaseTag() (string, error) {
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/"+githubRepo+"/releases/latest", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "express233-server-updater")
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("fetch latest release: %s", strings.TrimSpace(string(body)))
+	}
+	var payload struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(payload.TagName) == "" {
+		return "", fmt.Errorf("latest release tag missing")
+	}
+	return payload.TagName, nil
+}
+
+func releaseAssetName() string {
+	name := fmt.Sprintf("express233-server-%s-%s", runtime.GOOS, runtime.GOARCH)
+	if runtime.GOOS == "windows" {
+		return name + ".exe"
+	}
+	return name
+}
+
+func downloadReleaseBinary(tag string) (string, error) {
+	asset := releaseAssetName()
+	url := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", githubRepo, tag, asset)
+	tempDir, err := os.MkdirTemp("", "express233-update-")
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(tempDir, asset)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "express233-server-updater")
+	resp, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return "", fmt.Errorf("download release binary: %s", strings.TrimSpace(string(body)))
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		return "", err
+	}
+	if _, err := io.Copy(file, resp.Body); err != nil {
+		_ = file.Close()
+		return "", err
+	}
+	if err := file.Close(); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func scheduleBinarySwap(targetExe, downloadedPath, dataDir, listen string, restart bool) error {
+	self := os.Getpid()
+	scriptPath := filepath.Join(runtimeDir(dataDir), updaterScriptName())
+	if err := os.MkdirAll(runtimeDir(dataDir), 0o755); err != nil {
+		return err
+	}
+	content := updaterScriptContent(targetExe, downloadedPath, dataDir, listen, self, restart)
+	mode := os.FileMode(0o700)
+	if runtime.GOOS == "windows" {
+		mode = 0o644
+	}
+	if err := os.WriteFile(scriptPath, []byte(content), mode); err != nil {
+		return err
+	}
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/c", scriptPath)
+	} else {
+		cmd = exec.Command("/bin/sh", scriptPath)
+	}
+	cmd.Stdin = nil
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return cmd.Process.Release()
+}
+
+func updaterScriptName() string {
+	if runtime.GOOS == "windows" {
+		return "apply-update.cmd"
+	}
+	return "apply-update.sh"
+}
+
+func updaterScriptContent(targetExe, downloadedPath, dataDir, listen string, selfPID int, restart bool) string {
+	if runtime.GOOS == "windows" {
+		restartFlag := "0"
+		if restart {
+			restartFlag = "1"
+		}
+		return fmt.Sprintf("@echo off\r\nsetlocal\r\nset \"TARGET=%s\"\r\nset \"SOURCE=%s\"\r\nset \"DATA=%s\"\r\nset \"ADDR=%s\"\r\nset \"WAITPID=%d\"\r\nset \"RESTART=%s\"\r\nfor /L %%%%i in (1,1,30) do (\r\n  tasklist /FI \"PID eq %%WAITPID%%\" 2>NUL | find \"%%WAITPID%%\" >NUL\r\n  if errorlevel 1 goto COPY\r\n  timeout /t 1 /nobreak >NUL\r\n)\r\n:COPY\r\ncopy /Y \"%%SOURCE%%\" \"%%TARGET%%\" >NUL || exit /b 1\r\ndel /F /Q \"%%SOURCE%%\" >NUL 2>NUL\r\nif \"%%RESTART%%\"==\"1\" start \"\" \"%%TARGET%%\" start -data \"%%DATA%%\" -addr \"%%ADDR%%\"\r\ndel /F /Q \"%%~f0\" >NUL 2>NUL\r\n",
+			escapeBatchValue(targetExe), escapeBatchValue(downloadedPath), escapeBatchValue(dataDir), escapeBatchValue(listen), selfPID, restartFlag)
+	}
+	restartCommand := ""
+	if restart {
+		restartCommand = fmt.Sprintf("\n\"%s\" start -data %s -addr %s >/dev/null 2>&1 &", shellEscape(targetExe), shellEscape(dataDir), shellEscape(listen))
+	}
+	return fmt.Sprintf("#!/bin/sh\nTARGET=%s\nSOURCE=%s\nWAITPID=%d\nfor _ in $(seq 1 30); do\n  if ! kill -0 \"$WAITPID\" 2>/dev/null; then\n    break\n  fi\n  sleep 1\ndone\ncp \"$SOURCE\" \"$TARGET\"\nchmod +x \"$TARGET\"\nrm -f \"$SOURCE\"%s\nrm -f \"$0\"\n", shellEscape(targetExe), shellEscape(downloadedPath), selfPID, restartCommand)
+}
+
+func shellEscape(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+func escapeBatchValue(value string) string {
+	return strings.ReplaceAll(value, "\"", "\"\"")
 }
 
 func normalizePortValue(currentAddr, value string) (string, error) {

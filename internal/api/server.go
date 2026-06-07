@@ -34,7 +34,7 @@ func New(st *store.Store) *Server {
 // Router 返回 chi 路由。
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID, middleware.RealIP, middleware.Logger, middleware.Recoverer)
+	r.Use(middleware.RequestID, middleware.RealIP, requestLogMiddleware, middleware.Recoverer)
 
 	r.Get("/healthz", s.handleHealthz)
 	r.Get("/readyz", s.handleHealthz)

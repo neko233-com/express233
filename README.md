@@ -73,6 +73,7 @@ express233-server reset-root-password --password 'change-me-now'
 express233-server port
 express233-server set-port 32380
 express233-server restart
+express233-server update
 express233-server backup-config
 express233-server reload-config
 express233-server restore-config
@@ -85,9 +86,11 @@ express233-server stop
 - `status`：查看当前 PID、访问地址、数据目录、默认端口
 - `port`：查看默认端口 `23380` 与当前持久化监听地址
 - `set-port`：修改中央服监听端口，默认会自动重启正在运行的中央服
+- `update`：更新到最新 Release（或 `--version vX.Y.Z` 指定版本），自动替换二进制并重启中央服
 - `reload-config`：校验并热重载租户 `server.yaml`，无需重启进程
 - `backup-config` / `restore-config`：备份并恢复中央 `server.yaml`；`restore-config --default` 可恢复为示例模板
 - `reset-root-password`：仅命令行强制重置 `root` 密码，适合忘记密码时救援
+- 运行日志：默认 `info` 级别，写入 `run/server.log`，按大小滚动，避免单文件无限增长；高频 2xx 请求默认不记日志
 
 PowerShell 示例：
 

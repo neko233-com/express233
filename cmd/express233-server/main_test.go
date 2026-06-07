@@ -1,7 +1,10 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/neko233-com/express233/internal/store"
@@ -91,5 +94,47 @@ func TestResetRootPassword(t *testing.T) {
 	}
 	if _, _, err := st.Authenticate("root", "new-secret"); err != nil {
 		t.Fatalf("new root auth: %v", err)
+	}
+}
+
+func TestRotatingFileWriterRotates(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "server.log")
+	writer, err := newRotatingFileWriter(path, 16, 2)
+	if err != nil {
+		t.Fatalf("new rotating writer: %v", err)
+	}
+	defer func() { _ = writer.Close() }()
+	if _, err := writer.Write([]byte("1234567890\n")); err != nil {
+		t.Fatalf("first write: %v", err)
+	}
+	if _, err := writer.Write([]byte("abcdefghij\n")); err != nil {
+		t.Fatalf("second write: %v", err)
+	}
+	if _, err := os.Stat(path + ".1"); err != nil {
+		t.Fatalf("expected rotated log file: %v", err)
+	}
+	current, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read current log: %v", err)
+	}
+	if !strings.Contains(string(current), "abcdefghij") {
+		t.Fatalf("unexpected current log contents: %q", string(current))
+	}
+}
+
+func TestUpdaterScriptContentIncludesRestart(t *testing.T) {
+	content := updaterScriptContent("C:/bin/express233-server.exe", "C:/tmp/new.exe", "C:/data", "127.0.0.1:23380", 42, true)
+	if !strings.Contains(content, "express233-server.exe") {
+		t.Fatalf("expected target path in updater script: %q", content)
+	}
+	if runtime.GOOS == "windows" {
+		if !strings.Contains(content, " start -data ") {
+			t.Fatalf("expected restart command in updater script: %q", content)
+		}
+		return
+	}
+	if !strings.Contains(content, " start -data ") {
+		t.Fatalf("expected restart command in updater script: %q", content)
 	}
 }

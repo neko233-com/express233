@@ -4,6 +4,7 @@
 
 ### Added
 - `express233-server` 运维命令：`start` / `stop` / `restart` / `status` / `port` / `set-port` / `reload-config` / `backup-config` / `restore-config` / `reset-root-password`
+- `express233-server update`：自更新到最新或指定 Release，并自动重启中央服
 - **多租户**：`tenants` 表 + 数据目录 `data/tenants/<slug>/`；用户/项目/pull token 按租户隔离；`root` 可 `POST /api/tenants` 创建租户
 - **嵌套配置覆盖**：`server.yaml` 中按 basename 写 YAML 子树（如 `mysql.url` / `mysql.password`），深度合并进版本包；仍兼容扁平 dotted 键
 - 版本审批流：`draft/rejected` → `pending_review` → admin 发布；`POST .../submit-review`、`POST .../reject`
@@ -24,3 +25,4 @@
 ### Changed
 - `server_id` 列表按字母排序
 - CLI 二进制与 Release 资产改为 `express233-cli`，README 与安装脚本补齐 `express233-server` 的 PowerShell / shell 一键安装与运维示例
+- 中央服日志改为 `slog` 文本日志 + 滚动文件；默认 `info` 级别且不再记录高频 2xx 请求日志
