@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -124,17 +123,41 @@ func TestRotatingFileWriterRotates(t *testing.T) {
 }
 
 func TestUpdaterScriptContentIncludesRestart(t *testing.T) {
-	content := updaterScriptContent("C:/bin/express233-server.exe", "C:/tmp/new.exe", "C:/data", "127.0.0.1:23380", 42, true)
+	content := updaterScriptContent("C:/bin/express233-server.exe", "C:/tmp/new.exe", "C:/data", "127.0.0.1:23380", 42, true, "start command")
 	if !strings.Contains(content, "express233-server.exe") {
 		t.Fatalf("expected target path in updater script: %q", content)
 	}
-	if runtime.GOOS == "windows" {
-		if !strings.Contains(content, " start -data ") {
-			t.Fatalf("expected restart command in updater script: %q", content)
-		}
-		return
-	}
-	if !strings.Contains(content, " start -data ") {
+	if !strings.Contains(content, "start command") {
 		t.Fatalf("expected restart command in updater script: %q", content)
+	}
+}
+
+func TestSystemdUnitContent(t *testing.T) {
+	content := systemdUnitContent("/usr/local/bin/express233-server", "/srv/express233", "127.0.0.1:23380")
+	if !strings.Contains(content, "ExecStart=/usr/local/bin/express233-server serve") {
+		t.Fatalf("missing ExecStart: %q", content)
+	}
+	if !strings.Contains(content, "WantedBy=multi-user.target") {
+		t.Fatalf("missing install target: %q", content)
+	}
+}
+
+func TestLaunchdPlistContent(t *testing.T) {
+	content := launchdPlistContent("/usr/local/bin/express233-server", "/srv/express233", "127.0.0.1:23380")
+	if !strings.Contains(content, "<string>serve</string>") {
+		t.Fatalf("missing serve arg: %q", content)
+	}
+	if !strings.Contains(content, launchdLabel) {
+		t.Fatalf("missing launchd label: %q", content)
+	}
+}
+
+func TestWindowsTaskCommand(t *testing.T) {
+	command := windowsTaskCommand(`C:\express233\express233-server.exe`, `C:\data\express233`, "127.0.0.1:23380")
+	if !strings.Contains(command, `serve -data`) {
+		t.Fatalf("missing serve args: %q", command)
+	}
+	if !strings.Contains(command, `C:\express233\express233-server.exe`) {
+		t.Fatalf("missing exe path: %q", command)
 	}
 }

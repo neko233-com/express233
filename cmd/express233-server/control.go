@@ -682,7 +682,7 @@ func scheduleBinarySwap(targetExe, downloadedPath, dataDir, listen string, resta
 	if err := os.MkdirAll(runtimeDir(dataDir), 0o755); err != nil {
 		return err
 	}
-	content := updaterScriptContent(targetExe, downloadedPath, dataDir, listen, self, restart)
+	content := updaterScriptContent(targetExe, downloadedPath, dataDir, listen, self, restart, restartStrategyCommand(dataDir, listen))
 	mode := os.FileMode(0o700)
 	if runtime.GOOS == "windows" {
 		mode = 0o644
@@ -712,20 +712,20 @@ func updaterScriptName() string {
 	return "apply-update.sh"
 }
 
-func updaterScriptContent(targetExe, downloadedPath, dataDir, listen string, selfPID int, restart bool) string {
+func updaterScriptContent(targetExe, downloadedPath, dataDir, listen string, selfPID int, restart bool, restartCommand string) string {
 	if runtime.GOOS == "windows" {
 		restartFlag := "0"
 		if restart {
 			restartFlag = "1"
 		}
-		return fmt.Sprintf("@echo off\r\nsetlocal\r\nset \"TARGET=%s\"\r\nset \"SOURCE=%s\"\r\nset \"DATA=%s\"\r\nset \"ADDR=%s\"\r\nset \"WAITPID=%d\"\r\nset \"RESTART=%s\"\r\nfor /L %%%%i in (1,1,30) do (\r\n  tasklist /FI \"PID eq %%WAITPID%%\" 2>NUL | find \"%%WAITPID%%\" >NUL\r\n  if errorlevel 1 goto COPY\r\n  timeout /t 1 /nobreak >NUL\r\n)\r\n:COPY\r\ncopy /Y \"%%SOURCE%%\" \"%%TARGET%%\" >NUL || exit /b 1\r\ndel /F /Q \"%%SOURCE%%\" >NUL 2>NUL\r\nif \"%%RESTART%%\"==\"1\" start \"\" \"%%TARGET%%\" start -data \"%%DATA%%\" -addr \"%%ADDR%%\"\r\ndel /F /Q \"%%~f0\" >NUL 2>NUL\r\n",
-			escapeBatchValue(targetExe), escapeBatchValue(downloadedPath), escapeBatchValue(dataDir), escapeBatchValue(listen), selfPID, restartFlag)
+		return fmt.Sprintf("@echo off\r\nsetlocal\r\nset \"TARGET=%s\"\r\nset \"SOURCE=%s\"\r\nset \"DATA=%s\"\r\nset \"ADDR=%s\"\r\nset \"WAITPID=%d\"\r\nset \"RESTART=%s\"\r\nfor /L %%%%i in (1,1,30) do (\r\n  tasklist /FI \"PID eq %%WAITPID%%\" 2>NUL | find \"%%WAITPID%%\" >NUL\r\n  if errorlevel 1 goto COPY\r\n  timeout /t 1 /nobreak >NUL\r\n)\r\n:COPY\r\ncopy /Y \"%%SOURCE%%\" \"%%TARGET%%\" >NUL || exit /b 1\r\ndel /F /Q \"%%SOURCE%%\" >NUL 2>NUL\r\nif \"%%RESTART%%\"==\"1\" %s\r\ndel /F /Q \"%%~f0\" >NUL 2>NUL\r\n",
+			escapeBatchValue(targetExe), escapeBatchValue(downloadedPath), escapeBatchValue(dataDir), escapeBatchValue(listen), selfPID, restartFlag, restartCommand)
 	}
-	restartCommand := ""
+	restartShell := ""
 	if restart {
-		restartCommand = fmt.Sprintf("\n\"%s\" start -data %s -addr %s >/dev/null 2>&1 &", shellEscape(targetExe), shellEscape(dataDir), shellEscape(listen))
+		restartShell = "\n" + restartCommand
 	}
-	return fmt.Sprintf("#!/bin/sh\nTARGET=%s\nSOURCE=%s\nWAITPID=%d\nfor _ in $(seq 1 30); do\n  if ! kill -0 \"$WAITPID\" 2>/dev/null; then\n    break\n  fi\n  sleep 1\ndone\ncp \"$SOURCE\" \"$TARGET\"\nchmod +x \"$TARGET\"\nrm -f \"$SOURCE\"%s\nrm -f \"$0\"\n", shellEscape(targetExe), shellEscape(downloadedPath), selfPID, restartCommand)
+	return fmt.Sprintf("#!/bin/sh\nTARGET=%s\nSOURCE=%s\nWAITPID=%d\nfor _ in $(seq 1 30); do\n  if ! kill -0 \"$WAITPID\" 2>/dev/null; then\n    break\n  fi\n  sleep 1\ndone\ncp \"$SOURCE\" \"$TARGET\"\nchmod +x \"$TARGET\"\nrm -f \"$SOURCE\"%s\nrm -f \"$0\"\n", shellEscape(targetExe), shellEscape(downloadedPath), selfPID, restartShell)
 }
 
 func shellEscape(value string) string {

@@ -5,6 +5,7 @@
 ### Added
 - `express233-server` 运维命令：`start` / `stop` / `restart` / `status` / `port` / `set-port` / `reload-config` / `backup-config` / `restore-config` / `reset-root-password`
 - `express233-server update`：自更新到最新或指定 Release，并自动重启中央服
+- `express233-server enable-autostart` / `disable-autostart` / `autostart-status`：跨平台原生开机自启动控制（Linux systemd、macOS launchd、Windows schtasks）
 - **多租户**：`tenants` 表 + 数据目录 `data/tenants/<slug>/`；用户/项目/pull token 按租户隔离；`root` 可 `POST /api/tenants` 创建租户
 - **嵌套配置覆盖**：`server.yaml` 中按 basename 写 YAML 子树（如 `mysql.url` / `mysql.password`），深度合并进版本包；仍兼容扁平 dotted 键
 - 版本审批流：`draft/rejected` → `pending_review` → admin 发布；`POST .../submit-review`、`POST .../reject`

@@ -73,9 +73,12 @@ express233-server reset-root-password --password 'change-me-now'
 express233-server port
 express233-server set-port 32380
 express233-server restart
+express233-server enable-autostart
+express233-server autostart-status
 express233-server update
 express233-server backup-config
 express233-server reload-config
+express233-server disable-autostart
 express233-server restore-config
 express233-server stop
 ```
@@ -83,6 +86,8 @@ express233-server stop
 说明：
 
 - `start`：后台启动并写入 `run/server.pid`、`run/server-state.json`、`run/server.log`
+- `enable-autostart` / `disable-autostart`：安装或移除原生开机自启动。Linux 使用 `systemd`，macOS 使用 `launchd`，Windows 使用 `schtasks /SC ONSTART`
+- `autostart-status`：查看当前是否已安装原生开机自启动，以及当前是否 active
 - `status`：查看当前 PID、访问地址、数据目录、默认端口
 - `port`：查看默认端口 `23380` 与当前持久化监听地址
 - `set-port`：修改中央服监听端口，默认会自动重启正在运行的中央服
@@ -96,9 +101,17 @@ PowerShell 示例：
 
 ```powershell
 express233-server start
+express233-server enable-autostart
 express233-server set-port 32380
 express233-server reset-root-password --password "change-me-now"
 ```
+
+生产落地建议：
+
+- Linux（Ubuntu / Debian / CentOS 7+）：优先用 `express233-server enable-autostart` 落到 `systemd`
+- macOS：落到 `launchd`
+- Windows：落到计划任务 `ONSTART`
+- 开启原生自启动后，后续 `start` / `stop` / `restart` 会优先走原生服务控制面
 
 ## 一行部署
 

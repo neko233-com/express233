@@ -37,6 +37,7 @@ function Install-Express233Server {
     Write-Host "Add to PATH: $installDir"
     Write-Host "Run: `$env:EXPRESS233_DATA=`"$env:USERPROFILE\\.express233-server`"; express233-server start"
     Write-Host "Status: express233-server status"
+    Write-Host "Enable boot autostart: express233-server enable-autostart"
     Write-Host "Change port: express233-server set-port 32380"
     Write-Host "Self update: express233-server update"
     Write-Host "Hot reload server.yaml: express233-server reload-config"

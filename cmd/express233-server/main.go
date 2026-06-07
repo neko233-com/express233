@@ -31,6 +31,12 @@ func run(args []string) error {
 		return runStop(args[1:])
 	case "restart":
 		return runRestart(args[1:])
+	case "enable-autostart":
+		return runEnableAutostart(args[1:])
+	case "disable-autostart":
+		return runDisableAutostart(args[1:])
+	case "autostart-status":
+		return runAutostartStatus(args[1:])
 	case "status":
 		return runStatus(args[1:])
 	case "port":
@@ -94,6 +100,16 @@ func runStart(args []string) error {
 		return err
 	}
 	dataDir := resolveDataDir(data.Value(), data.IsSet())
+	if status, err := detectAutostartStatus(dataDir); err == nil && status.Enabled {
+		if addr.IsSet() || data.IsSet() {
+			return fmt.Errorf("autostart is enabled via %s; rerun enable-autostart to change addr/data", status.Backend)
+		}
+		if err := startManagedAutostart(dataDir); err != nil {
+			return err
+		}
+		fmt.Printf("started express233-server via %s\n", status.Backend)
+		return nil
+	}
 	listen, err := resolveListenAddr(dataDir, addr.Value(), addr.IsSet())
 	if err != nil {
 		return err
@@ -124,6 +140,13 @@ func runStop(args []string) error {
 		return err
 	}
 	dataDir := resolveDataDir(data.Value(), data.IsSet())
+	if status, err := detectAutostartStatus(dataDir); err == nil && status.Enabled {
+		if err := stopManagedAutostart(dataDir); err != nil {
+			return err
+		}
+		fmt.Printf("stopped express233-server via %s\n", status.Backend)
+		return nil
+	}
 	st, path, ok, err := loadRuntimeState(dataDir)
 	if err != nil {
 		return err
@@ -152,6 +175,16 @@ func runRestart(args []string) error {
 		return err
 	}
 	dataDir := resolveDataDir(data.Value(), data.IsSet())
+	if status, err := detectAutostartStatus(dataDir); err == nil && status.Enabled {
+		if addr.IsSet() || data.IsSet() {
+			return fmt.Errorf("autostart is enabled via %s; rerun enable-autostart to change addr/data", status.Backend)
+		}
+		if err := restartManagedAutostart(dataDir); err != nil {
+			return err
+		}
+		fmt.Printf("restarted express233-server via %s\n", status.Backend)
+		return nil
+	}
 	listen, err := resolveListenAddr(dataDir, addr.Value(), addr.IsSet())
 	if err != nil {
 		return err
@@ -195,11 +228,17 @@ func runStatus(args []string) error {
 	if ok {
 		fmt.Printf("status=running\npid=%d\naddr=%s\nurl=%s\ndata=%s\nconfig=%s\ndefault_port=%s\n",
 			st.PID, st.Addr, browserURL(st.Addr), st.DataDir, serverRuntimeConfigPath(dataDir), defaultPort())
+		if auto, err := detectAutostartStatus(dataDir); err == nil {
+			fmt.Printf("autostart_backend=%s\nautostart_enabled=%t\nautostart_active=%t\n", auto.Backend, auto.Enabled, auto.Active)
+		}
 		return nil
 	}
 	configured = normalizeListenAddr(configured)
 	fmt.Printf("status=stopped\nconfigured_addr=%s\nurl=%s\ndata=%s\nconfig=%s\ndefault_port=%s\n",
 		configured, browserURL(configured), dataDir, serverRuntimeConfigPath(dataDir), defaultPort())
+	if auto, err := detectAutostartStatus(dataDir); err == nil {
+		fmt.Printf("autostart_backend=%s\nautostart_enabled=%t\nautostart_active=%t\n", auto.Backend, auto.Enabled, auto.Active)
+	}
 	return nil
 }
 
@@ -365,6 +404,9 @@ func printUsage() {
   start                  background server
   stop                   stop running server
   restart                restart background server
+	enable-autostart       install native boot autostart
+	disable-autostart      remove native boot autostart
+	autostart-status       show native boot autostart status
   status                 show pid/addr/data dir
   port                   show configured/default port
   set-port <port>        update configured port/address
@@ -377,11 +419,12 @@ func printUsage() {
 
 Examples:
   %s start
+	%s enable-autostart
   %s set-port 32380
 	%s update
   %s reload-config
   %s reset-root-password --password 'new-secret'
-`, name, name, name, name, name, name)
+`, name, name, name, name, name, name, name)
 }
 
 type stringFlag struct {
