@@ -112,6 +112,19 @@ docker compose up --build
 # http://localhost:23380  root/root
 ```
 
+## Cloudflare
+
+Cloudflare Workers / Pages 不能直接运行 `express233-server` Go 二进制；推荐用 Worker 作为现有中央服的 HTTPS 反向代理，或 Pages 托管静态控制台并把 `/api/*` 代理到中央服。示例见 [docs/CLOUDFLARE.md](docs/CLOUDFLARE.md) 与 [examples/cloudflare/worker-proxy](examples/cloudflare/worker-proxy)。
+
+## HTTP 自动化 Demo
+
+管理端受保护 API 现在支持两种方式：
+
+- `POST /api/login` 获取 Cookie / JWT
+- 直接用 HTTP Basic Auth，例如 `root/root`
+
+多版本、整包上传、`server_id` 注册与替换预览、diff、发布、拉取的完整 curl 演示见 [docs/HTTP_AUTOMATION_DEMO.md](docs/HTTP_AUTOMATION_DEMO.md)。
+
 ## Ansible 批量
 
 [examples/ansible/](examples/ansible/)：`inventory.ini` 中为每台逻辑服设置 `express233_server_id` 与 `express233_dest`。
@@ -150,8 +163,11 @@ make run-server # :23380 root/root
 - [configs/post-hook.yaml.example](configs/post-hook.yaml.example) — 拉取后处理（`when: os == ...` / `else`）
 - 校验夹具：`testdata/validation-tree/`（双服、树形配置、拉取替换与 post-hook 集成测试）
 - [docs/DEPLOY.md](docs/DEPLOY.md) — Helm / K8s / CLI 配置
+- [docs/CLOUDFLARE.md](docs/CLOUDFLARE.md) — Cloudflare Worker / Pages 入口适配
+- [docs/HTTP_AUTOMATION_DEMO.md](docs/HTTP_AUTOMATION_DEMO.md) — root/root + Basic Auth 自动化演示（多版本 / 模板替换 / 整包上传）
 - [docs/openapi.yaml](docs/openapi.yaml) — OpenAPI 3（运行时 `/api/openapi.yaml`）
 - [scripts/deploy-on-host.sh](scripts/deploy-on-host.sh)
 - 在线 Swagger：`http://<central>/docs/`
+
 
 Go **1.26** · MIT

@@ -29,6 +29,11 @@ func Open(dataDir string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`PRAGMA busy_timeout = 5000`); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	s := &Store{db: db, dataDir: dataDir}
 	if err := s.migrate(); err != nil {
 		_ = db.Close()

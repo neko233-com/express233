@@ -1,0 +1,3 @@
+/api/* https://express233.example.com/api/:splat 200
+/docs/* https://express233.example.com/docs/:splat 200
+/metrics https://express233.example.com/metrics 200

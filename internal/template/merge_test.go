@@ -40,3 +40,35 @@ redis:
 		t.Fatalf("old password should be replaced:\n%s", s)
 	}
 }
+
+func TestMergeYAMLAcceptsNamedStringMapTrees(t *testing.T) {
+	type namedMap map[string]any
+	data := []byte(`database:
+  mysql:
+    host: db.internal
+    password: old
+    pool:
+      max_open: 8
+      timeout: 5s
+  redis:
+    host: redis.internal
+`)
+	override := map[string]any{
+		"database": namedMap{
+			"mysql": namedMap{
+				"password": "secret",
+				"pool": namedMap{
+					"max_open": 16,
+				},
+			},
+		},
+	}
+	got, err := MergeBytes("application.yaml", data, override)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(got)
+	if !strings.Contains(s, "password: secret") || !strings.Contains(s, "host: db.internal") || !strings.Contains(s, "timeout: 5s") || !strings.Contains(s, "host: redis.internal") {
+		t.Fatalf("named map merge lost unrelated fields:\n%s", s)
+	}
+}

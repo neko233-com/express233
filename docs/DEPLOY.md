@@ -18,6 +18,16 @@ helm install express233 ./deploy/helm/express233-server \
 docker compose up -d
 ```
 
+## Cloudflare Worker / Pages
+
+Cloudflare 适合作为入口层，不适合作为当前 Go server 的运行时：
+
+- Worker：代理 `express233-server` origin，提供统一 HTTPS 域名。
+- Pages：可托管静态控制台，但 `/api/*` 仍需代理到 central server。
+- Tunnel：适合 origin 在内网或家用机器时安全回源。
+
+示例和限制见 [CLOUDFLARE.md](CLOUDFLARE.md)。
+
 ## 节点 CLI 配置
 
 ```bash

@@ -13,9 +13,9 @@ type FileOverrides map[string]any
 
 // ServerEntry 单个逻辑服配置。
 type ServerEntry struct {
-	Replacements map[string]FileOverrides `yaml:"replacements"`
-	PostHook     string                   `yaml:"post_hook"`
-	PostHookEnv  map[string]string        `yaml:"post_hook_env"`
+	Replacements map[string]FileOverrides `yaml:"replacements" json:"replacements"`
+	PostHook     string                   `yaml:"post_hook" json:"post_hook"`
+	PostHookEnv  map[string]string        `yaml:"post_hook_env" json:"post_hook_env"`
 }
 
 // Normalize 将覆盖树转为 template 可用的结构（嵌套 map 或 properties 扁平键）。

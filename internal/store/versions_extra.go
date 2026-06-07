@@ -10,7 +10,7 @@ func (s *Store) PublishedVersionByOffset(projectID int64, offset int) (string, e
 	var ver string
 	err := s.db.QueryRow(
 		`SELECT version FROM versions WHERE project_id = ? AND status = 'published'
-		 ORDER BY published_at DESC LIMIT 1 OFFSET ?`,
+		 ORDER BY published_at DESC, id DESC LIMIT 1 OFFSET ?`,
 		projectID, offset,
 	).Scan(&ver)
 	if err == sql.ErrNoRows {

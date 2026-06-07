@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strconv"
@@ -43,8 +44,16 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sess, _ := s.currentSession(r)
+	tenantRole, _ := s.Store.UserRole(sess.UserID)
 	p, err := s.Store.CreateProject(tid, sess.UserID, req.Name)
 	if err != nil {
+		if existing, getErr := s.Store.GetProjectByName(tid, req.Name); getErr == nil {
+			role, roleErr := s.Store.ProjectAccess(existing.ID, sess.UserID, tenantRole)
+			if roleErr == nil && store.CanWriteProject(role) {
+				writeJSON(w, http.StatusOK, existing)
+				return
+			}
+		}
 		errJSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -71,7 +80,6 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 	s.auditSession(r, "project.delete", "id="+chi.URLParam(r, "id"))
 	w.WriteHeader(http.StatusNoContent)
 }
-
 
 func (s *Server) handleListVersions(w http.ResponseWriter, r *http.Request) {
 	pid, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
@@ -100,11 +108,24 @@ func (s *Server) handleCreateVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req nameReq
-	if err := readJSON(r, &req); err != nil || req.Name == "" {
-		errJSON(w, http.StatusBadRequest, "version name required")
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	_ = r.Body.Close()
+	if err != nil {
+		errJSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	v, err := s.Store.CreateVersion(tid, pid, pname, req.Name)
+	if len(bytes.TrimSpace(body)) > 0 {
+		if err := json.Unmarshal(body, &req); err != nil {
+			errJSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	var v *store.Version
+	if strings.TrimSpace(req.Name) == "" {
+		v, err = s.Store.CreateNextPatchVersion(tid, pid, pname)
+	} else {
+		v, err = s.Store.CreateVersion(tid, pid, pname, strings.TrimSpace(req.Name))
+	}
 	if err != nil {
 		errJSON(w, http.StatusBadRequest, err.Error())
 		return
@@ -229,7 +250,8 @@ func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	uploadDetail := "project=" + pname + " version=" + ver + " file=" + rel
-	if strings.HasSuffix(strings.ToLower(hdr.Filename), ".zip") {
+	filename := strings.ToLower(hdr.Filename)
+	if strings.HasSuffix(filename, ".zip") {
 		buf, err := io.ReadAll(file)
 		if err != nil {
 			errJSON(w, http.StatusInternalServerError, err.Error())
@@ -242,6 +264,20 @@ func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 		s.auditSession(r, "version.upload.zip", uploadDetail)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "zip extracted"})
+		return
+	}
+	if strings.HasSuffix(filename, ".tar.gz") || strings.HasSuffix(filename, ".tgz") || strings.HasSuffix(filename, ".tar") {
+		buf, err := io.ReadAll(file)
+		if err != nil {
+			errJSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if err := s.Store.ExtractTarToVersion(tid, pname, ver, bytes.NewReader(buf), strings.HasSuffix(filename, ".tar.gz") || strings.HasSuffix(filename, ".tgz")); err != nil {
+			errJSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.auditSession(r, "version.upload.tar", uploadDetail)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "archive extracted"})
 		return
 	}
 

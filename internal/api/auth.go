@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"net/http"
 	"sync"
@@ -65,6 +66,37 @@ const sessionCookie = "express233_session"
 
 func (s *Server) currentSession(r *http.Request) (session, bool) {
 	return s.sessionFromRequest(r)
+}
+
+func (s *Server) basicAuthSession(r *http.Request) (session, bool) {
+	user, pass, ok := r.BasicAuth()
+	if !ok || user == "" {
+		return session{}, false
+	}
+	uid, admin, err := s.Store.Authenticate(user, pass)
+	if err != nil {
+		return session{}, false
+	}
+	tid, err := s.Store.UserTenantID(uid)
+	if err != nil {
+		return session{}, false
+	}
+	t, err := s.Store.TenantByID(tid)
+	if err != nil && err != sql.ErrNoRows {
+		return session{}, false
+	}
+	tenantSlug := ""
+	if t != nil {
+		tenantSlug = t.Slug
+	}
+	return session{
+		UserID:     uid,
+		Username:   user,
+		IsAdmin:    admin,
+		TenantID:   tid,
+		TenantSlug: tenantSlug,
+		Expires:    time.Now().Add(time.Hour),
+	}, true
 }
 
 func (s *Server) setSessionCookie(w http.ResponseWriter, id string) {

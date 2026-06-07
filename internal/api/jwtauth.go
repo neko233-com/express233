@@ -137,6 +137,9 @@ func (s *Server) sessionFromRequest(r *http.Request) (session, bool) {
 			return c.session(), true
 		}
 	}
+	if sess, ok := s.basicAuthSession(r); ok {
+		return sess, true
+	}
 	if c, err := r.Cookie(jwtCookie); err == nil && c.Value != "" {
 		if claims, err := s.jwt.verify(c.Value); err == nil {
 			return claims.session(), true

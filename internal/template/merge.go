@@ -3,6 +3,7 @@ package template
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -79,7 +80,16 @@ func AsStringMap(v any) (map[string]any, error) {
 	case map[interface{}]interface{}:
 		return YAMLMapToStringMap(t), nil
 	default:
-		return nil, fmt.Errorf("not a map")
+		rv := reflect.ValueOf(v)
+		if !rv.IsValid() || rv.Kind() != reflect.Map || rv.Type().Key().Kind() != reflect.String {
+			return nil, fmt.Errorf("not a map")
+		}
+		out := make(map[string]any, rv.Len())
+		iter := rv.MapRange()
+		for iter.Next() {
+			out[iter.Key().String()] = iter.Value().Interface()
+		}
+		return out, nil
 	}
 }
 
@@ -87,12 +97,8 @@ func AsStringMap(v any) (map[string]any, error) {
 func DeepCopyMap(src map[string]any) map[string]any {
 	out := make(map[string]any, len(src))
 	for k, v := range src {
-		if sub, ok := v.(map[string]any); ok {
+		if sub, err := AsStringMap(v); err == nil {
 			out[k] = DeepCopyMap(sub)
-			continue
-		}
-		if sub, ok := v.(map[interface{}]interface{}); ok {
-			out[k] = DeepCopyMap(YAMLMapToStringMap(sub))
 			continue
 		}
 		out[k] = v
@@ -114,20 +120,8 @@ func DeepMergeInPlace(dst, src map[string]any) error {
 			}
 			continue
 		}
-		srcMap, srcIsMap := sv.(map[string]any)
-		if !srcIsMap {
-			if sub, ok := sv.(map[interface{}]interface{}); ok {
-				srcMap = YAMLMapToStringMap(sub)
-				srcIsMap = true
-			}
-		}
-		dstMap, dstIsMap := dv.(map[string]any)
-		if !dstIsMap {
-			if sub, ok := dv.(map[interface{}]interface{}); ok {
-				dstMap = YAMLMapToStringMap(sub)
-				dstIsMap = true
-			}
-		}
+		srcMap, srcIsMap := mapValue(sv)
+		dstMap, dstIsMap := mapValue(dv)
 		if srcIsMap && dstIsMap {
 			if err := DeepMergeInPlace(dstMap, srcMap); err != nil {
 				return err
@@ -141,6 +135,11 @@ func DeepMergeInPlace(dst, src map[string]any) error {
 		dst[k] = sv
 	}
 	return nil
+}
+
+func mapValue(v any) (map[string]any, bool) {
+	m, err := AsStringMap(v)
+	return m, err == nil
 }
 
 // FlattenScalars 将嵌套 map 展平为 dotted 键（仅 properties）。

@@ -9,7 +9,7 @@ import (
 
 // ServerFile 中央 server.yaml 结构。
 type ServerFile struct {
-	Servers map[string]ServerEntry `yaml:"servers"`
+	Servers map[string]ServerEntry `yaml:"servers" json:"servers"`
 }
 
 // LoadServerFile 从路径加载 server.yaml。

@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -116,7 +119,7 @@ func (s *Store) ProjectNameInTenant(tenantID, projectID int64) (string, error) {
 // ListVersions 列出项目下版本。
 func (s *Store) ListVersions(projectID int64) ([]Version, error) {
 	rows, err := s.db.Query(
-		`SELECT id, project_id, version, status, created_at, COALESCE(published_at,'') FROM versions WHERE project_id = ? ORDER BY created_at DESC`,
+		`SELECT id, project_id, version, status, created_at, COALESCE(published_at,'') FROM versions WHERE project_id = ? ORDER BY created_at DESC, id DESC`,
 		projectID,
 	)
 	if err != nil {
@@ -156,6 +159,70 @@ func (s *Store) CreateVersion(tenantID, projectID int64, projectName, version st
 		return nil, err
 	}
 	return &Version{ID: id, ProjectID: projectID, Version: version, Status: "draft", CreatedAt: now}, nil
+}
+
+var semanticVersionRE = regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)$`)
+
+// NextPatchVersion 返回项目当前最大三段数字版本的下一个 patch；无版本时从 0.0.1 开始。
+func (s *Store) NextPatchVersion(projectID int64) (string, error) {
+	rows, err := s.db.Query(`SELECT version FROM versions WHERE project_id = ?`, projectID)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = rows.Close() }()
+
+	bestMajor, bestMinor, bestPatch := 0, 0, 0
+	found := false
+	for rows.Next() {
+		var version string
+		if err := rows.Scan(&version); err != nil {
+			return "", err
+		}
+		matches := semanticVersionRE.FindStringSubmatch(version)
+		if matches == nil {
+			continue
+		}
+		major, _ := strconv.Atoi(matches[1])
+		minor, _ := strconv.Atoi(matches[2])
+		patch, _ := strconv.Atoi(matches[3])
+		if !found ||
+			major > bestMajor ||
+			(major == bestMajor && minor > bestMinor) ||
+			(major == bestMajor && minor == bestMinor && patch > bestPatch) {
+			bestMajor, bestMinor, bestPatch = major, minor, patch
+			found = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	if !found {
+		return "0.0.1", nil
+	}
+	return fmt.Sprintf("%d.%d.%d", bestMajor, bestMinor, bestPatch+1), nil
+}
+
+// CreateNextPatchVersion 创建自动递增的 patch 草稿版本。
+func (s *Store) CreateNextPatchVersion(tenantID, projectID int64, projectName string) (*Version, error) {
+	for attempt := 0; attempt < 8; attempt++ {
+		version, err := s.NextPatchVersion(projectID)
+		if err != nil {
+			return nil, err
+		}
+		v, err := s.CreateVersion(tenantID, projectID, projectName, version)
+		if err == nil {
+			return v, nil
+		}
+		if !isUniqueVersionError(err) {
+			return nil, err
+		}
+	}
+	return nil, fmt.Errorf("create next version: too many concurrent retries")
+}
+
+func isUniqueVersionError(err error) bool {
+	return strings.Contains(err.Error(), "UNIQUE constraint failed") &&
+		strings.Contains(err.Error(), "versions")
 }
 
 // GetVersion 获取版本元数据。
@@ -252,7 +319,7 @@ func (s *Store) DeleteVersion(tenantID, projectID int64, projectName, version st
 func (s *Store) ListPublishedVersions(projectID int64) ([]Version, error) {
 	rows, err := s.db.Query(
 		`SELECT id, project_id, version, status, created_at, COALESCE(published_at,'') FROM versions
-		 WHERE project_id = ? AND status = 'published' ORDER BY published_at DESC`,
+			 WHERE project_id = ? AND status = 'published' ORDER BY published_at DESC, id DESC`,
 		projectID,
 	)
 	if err != nil {
@@ -274,7 +341,7 @@ func (s *Store) ListPublishedVersions(projectID int64) ([]Version, error) {
 func (s *Store) LatestPublishedVersion(projectID int64) (string, error) {
 	var ver string
 	err := s.db.QueryRow(
-		`SELECT version FROM versions WHERE project_id = ? AND status = 'published' ORDER BY published_at DESC LIMIT 1`,
+		`SELECT version FROM versions WHERE project_id = ? AND status = 'published' ORDER BY published_at DESC, id DESC LIMIT 1`,
 		projectID,
 	).Scan(&ver)
 	return ver, err

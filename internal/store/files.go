@@ -1,7 +1,9 @@
 package store
 
 import (
+	"archive/tar"
 	"archive/zip"
+	"compress/gzip"
 	"fmt"
 	"io"
 	"os"
@@ -84,6 +86,79 @@ func (s *Store) ExtractZipToVersion(tenantID int64, projectName, version string,
 		_ = rc.Close()
 		if ingestErr != nil {
 			return ingestErr
+		}
+		if err := s.linkBlobToVersion(hash, dest); err != nil {
+			return err
+		}
+	}
+	return ValidateUniqueConfigBasenames(root)
+}
+
+// ExtractTarToVersion 解压 tar/tar.gz 到版本目录（仅 draft）。
+func (s *Store) ExtractTarToVersion(tenantID int64, projectName, version string, r io.Reader, gzipped bool) error {
+	if err := s.assertDraft(tenantID, projectName, version); err != nil {
+		return err
+	}
+	if gzipped {
+		gr, err := gzip.NewReader(r)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = gr.Close() }()
+		r = gr
+	}
+	root, err := s.VersionDir(tenantID, projectName, version)
+	if err != nil {
+		return err
+	}
+	tr := tar.NewReader(r)
+	seen := make(map[string]string)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		name := filepath.Clean(hdr.Name)
+		if name == "." {
+			continue
+		}
+		if strings.HasPrefix(name, "..") || filepath.IsAbs(name) {
+			return fmt.Errorf("invalid tar entry: %s", hdr.Name)
+		}
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			continue
+		case tar.TypeReg:
+		default:
+			return fmt.Errorf("unsupported tar entry: %s", hdr.Name)
+		}
+		base := filepath.Base(name)
+		if template.IsConfigFile(base) {
+			if prev, ok := seen[base]; ok {
+				return fmt.Errorf("tar contains duplicate config filename %q in %s and %s", base, prev, hdr.Name)
+			}
+			seen[base] = hdr.Name
+		}
+		dest := filepath.Join(root, name)
+		if !strings.HasPrefix(dest, filepath.Clean(root)+string(os.PathSeparator)) && dest != filepath.Clean(root) {
+			if !strings.HasPrefix(dest, root) {
+				return fmt.Errorf("tar path escape: %s", hdr.Name)
+			}
+		}
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			return err
+		}
+		if _, err := os.Stat(dest); err == nil {
+			if err := s.releaseBlobLink(dest); err != nil {
+				return err
+			}
+		}
+		hash, err := s.ingestBlobFromReader(tr)
+		if err != nil {
+			return err
 		}
 		if err := s.linkBlobToVersion(hash, dest); err != nil {
 			return err
