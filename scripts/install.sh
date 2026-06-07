@@ -1,12 +1,12 @@
 #!/bin/bash
 set -e
 
-# express233 CLI installer
+# express233-cli installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/neko233-com/express233/main/scripts/install.sh | bash
 # Or: curl -fsSL .../install.sh | bash -s -- v0.1.0
 
 VERSION="${1:-latest}"
-BINARY_NAME="express233"
+BINARY_NAME="express233-cli"
 REPO="neko233-com/express233"
 
 detect_os() {
@@ -53,25 +53,25 @@ install_binary() {
 
     if [ "$os" = "windows" ]; then
         install_dir="${LOCALAPPDATA:-$HOME/AppData/Local}/express233"
-        target="${BINARY_NAME}.exe"
+        target="${BINARY_NAME}${ext}"
         mkdir -p "$install_dir"
     fi
 
     echo "Downloading ${url}..."
     TMPDIR=$(mktemp -d)
-    curl -fsSL "$url" -o "${TMPDIR}/${target}${ext}"
+    curl -fsSL "$url" -o "${TMPDIR}/${target}"
 
     if [ -w "$install_dir" ]; then
-        mv -f "${TMPDIR}/${target}${ext}" "${install_dir}/${target}${ext}"
+        mv -f "${TMPDIR}/${target}" "${install_dir}/${target}"
     else
-        sudo mv -f "${TMPDIR}/${target}${ext}" "${install_dir}/${target}${ext}"
+        sudo mv -f "${TMPDIR}/${target}" "${install_dir}/${target}"
     fi
 
-    chmod +x "${install_dir}/${target}${ext}" 2>/dev/null || true
+    chmod +x "${install_dir}/${target}" 2>/dev/null || true
     rm -rf "$TMPDIR"
 
-    echo "Installed to ${install_dir}/${target}${ext}"
-    echo "Run: express233 --help"
+    echo "Installed to ${install_dir}/${target}"
+    echo "Run: express233-cli --help"
 }
 
 main() {
@@ -89,7 +89,7 @@ main() {
     VERSION=$(normalize_version "$VERSION")
 
     echo "Detected: ${OS}/${ARCH}"
-    echo "Installing express233 v${VERSION}..."
+    echo "Installing express233-cli v${VERSION}..."
     install_binary "$OS" "$ARCH" "$VERSION"
     echo "Done."
 }

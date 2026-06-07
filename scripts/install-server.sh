@@ -52,18 +52,20 @@ url="https://github.com/${REPO}/releases/download/v${VERSION}/${asset}"
 install_dir="${EXPRESS233_SERVER_INSTALL:-/usr/local/bin}"
 [ "$OS" = "windows" ] && install_dir="${LOCALAPPDATA}/express233"
 
+target="${BINARY_NAME}${ext}"
+
 mkdir -p "$install_dir"
 echo "Downloading $url ..."
 TMP=$(mktemp -d)
-curl -fsSL "$url" -o "${TMP}/${BINARY_NAME}${ext}"
+curl -fsSL "$url" -o "${TMP}/${target}"
 
 if [ -w "$install_dir" ]; then
-  mv -f "${TMP}/${BINARY_NAME}${ext}" "${install_dir}/${BINARY_NAME}${ext}"
+    mv -f "${TMP}/${target}" "${install_dir}/${target}"
 else
-  sudo mv -f "${TMP}/${BINARY_NAME}${ext}" "${install_dir}/${BINARY_NAME}${ext}"
+    sudo mv -f "${TMP}/${target}" "${install_dir}/${target}"
 fi
-chmod +x "${install_dir}/${BINARY_NAME}${ext}" 2>/dev/null || true
+chmod +x "${install_dir}/${target}" 2>/dev/null || true
 rm -rf "$TMP"
 
-echo "Installed ${BINARY_NAME} v${VERSION} -> ${install_dir}/${BINARY_NAME}${ext}"
+echo "Installed ${BINARY_NAME} v${VERSION} -> ${install_dir}/${target}"
 echo "Run: EXPRESS233_DATA=~/.express233-server ${BINARY_NAME}${ext} -addr :23380"

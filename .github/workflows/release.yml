@@ -86,10 +86,10 @@ jobs:
             -X github.com/neko233-com/express233/internal/version.Commit=${COMMIT} \
             -X github.com/neko233-com/express233/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-          cli="express233-${GOOS}-${GOARCH}${ext}"
+          cli="express233-cli-${GOOS}-${GOARCH}${ext}"
           srv="express233-server-${GOOS}-${GOARCH}${ext}"
 
-          go build -ldflags "${LDFLAGS}" -o "dist/${cli}" ./cmd/express233
+          go build -ldflags "${LDFLAGS}" -o "dist/${cli}" ./cmd/express233-cli
           go build -ldflags "${LDFLAGS}" -o "dist/${srv}" ./cmd/express233-server
 
           cd dist

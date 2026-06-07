@@ -1,13 +1,13 @@
-# express233-cli installer (Windows PowerShell)
-# iwr -useb https://raw.githubusercontent.com/neko233-com/express233/main/scripts/install.ps1 | iex
-# iwr ... | iex; Install-Express233Cli -Version v0.1.0
+# express233-server installer (Windows PowerShell)
+# iwr -useb https://raw.githubusercontent.com/neko233-com/express233/main/scripts/install-server.ps1 | iex
+# iwr ... | iex; Install-Express233Server -Version v0.1.0
 
 param(
     [string]$Version = "latest"
 )
 
 $ErrorActionPreference = "Stop"
-$BinaryName = "express233-cli"
+$BinaryName = "express233-server"
 $Repo = "neko233-com/express233"
 
 function Get-LatestVersion {
@@ -19,7 +19,7 @@ function Get-LatestVersion {
     }
 }
 
-function Install-Express233Cli {
+function Install-Express233Server {
     param([string]$Ver)
 
     $arch = "amd64"
@@ -35,7 +35,7 @@ function Install-Express233Cli {
     Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
     Write-Host "Installed to $dest"
     Write-Host "Add to PATH: $installDir"
-    Write-Host "Run: express233-cli version"
+    Write-Host "Run: `$env:EXPRESS233_DATA=`"$env:USERPROFILE\\.express233-server`"; express233-server -addr :23380"
 }
 
 if ($Version -eq "latest") {
@@ -43,5 +43,5 @@ if ($Version -eq "latest") {
 }
 $Version = $Version -replace '^[vV]', ''
 
-Write-Host "Installing express233-cli v$Version ..."
-Install-Express233Cli -Ver $Version
+Write-Host "Installing express233-server v$Version ..."
+Install-Express233Server -Ver $Version

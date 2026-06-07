@@ -18,7 +18,7 @@ set -euo pipefail
 
 # ═══════════════ 配置 ═══════════════
 GAME_ROOT="${GAME_ROOT:-/opt/game-servers}"
-EXPRESS233_BIN="${EXPRESS233_BIN:-express233}"
+EXPRESS233_BIN="${EXPRESS233_BIN:-express233-cli}"
 STOP_TIMEOUT="${STOP_TIMEOUT:-10}"        # 等待进程退出的秒数
 DRY_RUN=false
 BACKUP=false

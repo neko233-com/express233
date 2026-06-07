@@ -194,19 +194,19 @@ STAGING_DIR="${tmp}"
 GAME_ROOT="\${GAME_ROOT:-/opt/game-servers}"
 FINAL_DIR="\${GAME_ROOT}/\${SERVER_ID}"
 
-# 1. 检查并安装 express233 CLI
-if ! command -v express233 &>/dev/null; then
-  echo "[install] downloading express233 CLI..."
+# 1. 检查并安装 express233-cli
+if ! command -v express233-cli &>/dev/null; then
+  echo "[install] downloading express233-cli..."
   curl -fsSL "\${EXPRESS233_SERVER}/cli/install.sh" | bash 2>/dev/null \\
     || { echo "请手动安装: https://github.com/neko233-com/express233/releases"; exit 1; }
 fi
-echo "[ok] express233 $(express233 version 2>/dev/null || echo dev)"
+echo "[ok] express233-cli $(express233-cli version 2>/dev/null || echo dev)"
 
 # 2. 拉取到临时目录
 echo "[pull] \${PROJECT} → \${STAGING_DIR}"
 rm -rf "\${STAGING_DIR}"
 mkdir -p "\${STAGING_DIR}"
-express233 pull \\
+express233-cli pull \\
   --server "\${EXPRESS233_SERVER}" \\
   --token "\${EXPRESS233_TOKEN}" \\
   --project "\${PROJECT}" \\
@@ -259,24 +259,18 @@ $STAGING_DIR       = "${tmp}"
 $GAME_ROOT         = if ($env:GAME_ROOT) { $env:GAME_ROOT } else { "C:\\game-servers" }
 $FINAL_DIR         = Join-Path $GAME_ROOT $SERVER_ID
 
-# 1. 检查并安装 express233 CLI
-if (-not (Get-Command express233 -ErrorAction SilentlyContinue)) {
-  Write-Host "[install] downloading express233 CLI..." -ForegroundColor Cyan
+# 1. 检查并安装 express233-cli
+if (-not (Get-Command express233-cli -ErrorAction SilentlyContinue)) {
+  Write-Host "[install] downloading express233-cli..." -ForegroundColor Cyan
   try {
-    $release = (Invoke-RestMethod "$EXPRESS233_SERVER/cli/version.json").latest
-    $url = "$EXPRESS233_SERVER/cli/express233-windows-amd64.zip"
-    $zip = Join-Path $env:TEMP "express233.zip"
-    Invoke-WebRequest -Uri $url -OutFile $zip
-    $dest = Join-Path $env:LOCALAPPDATA "express233"
-    Expand-Archive -Path $zip -DestinationPath $dest -Force
-    $env:PATH += ";$dest"
-    Write-Host "[ok] installed to $dest" -ForegroundColor Green
+    Invoke-Expression ((Invoke-WebRequest -Uri "https://raw.githubusercontent.com/neko233-com/express233/main/scripts/install.ps1" -UseBasicParsing).Content)
+    $env:PATH += ";$(Join-Path $env:LOCALAPPDATA "express233")"
   } catch {
     Write-Host "请手动安装: https://github.com/neko233-com/express233/releases" -ForegroundColor Red
     exit 1
   }
 }
-Write-Host "[ok] express233 $(express233 version)" -ForegroundColor Green
+Write-Host "[ok] express233-cli $(express233-cli version)" -ForegroundColor Green
 
 # 2. 拉取到临时目录
 Write-Host "[pull] $PROJECT -> $STAGING_DIR" -ForegroundColor Cyan
@@ -292,7 +286,7 @@ $pullArgs = @(
   "--dest", $STAGING_DIR,
   "--skip-hook"
 )${version ? `\n$pullArgs += @("--version", "${version}")` : ""}
-& express233 @pullArgs
+& express233-cli @pullArgs
 
 # 3. 停止旧服务
 $PID_FILE = Join-Path $FINAL_DIR "run\\server.pid"

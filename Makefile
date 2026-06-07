@@ -19,7 +19,7 @@ lint:
 	golangci-lint run --timeout=5m
 
 build:
-	go build -ldflags "$(LDFLAGS)" -o bin/express233 ./cmd/express233
+	go build -ldflags "$(LDFLAGS)" -o bin/express233-cli ./cmd/express233-cli
 	go build -ldflags "$(LDFLAGS)" -o bin/express233-server ./cmd/express233-server
 
 run-server:
@@ -29,7 +29,7 @@ smoke: build
 	bash scripts/ci-smoke.sh
 
 install:
-	go install -ldflags "$(LDFLAGS)" ./cmd/express233 ./cmd/express233-server
+	go install -ldflags "$(LDFLAGS)" ./cmd/express233-cli ./cmd/express233-server
 
 tidy:
 	go mod tidy

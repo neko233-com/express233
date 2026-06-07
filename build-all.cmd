@@ -10,8 +10,8 @@ set LDFLAGS=-s -w -X github.com/neko233-com/express233/internal/version.Version=
 
 echo == build-all ==
 if not exist bin mkdir bin
-go build -ldflags "%LDFLAGS%" -o bin\express233.exe .\cmd\express233
+go build -ldflags "%LDFLAGS%" -o bin\express233-cli.exe .\cmd\express233-cli
 if errorlevel 1 exit /b 1
 go build -ldflags "%LDFLAGS%" -o bin\express233-server.exe .\cmd\express233-server
 if errorlevel 1 exit /b 1
-echo OK: bin\express233.exe bin\express233-server.exe
+echo OK: bin\express233-cli.exe bin\express233-server.exe

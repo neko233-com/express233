@@ -11,6 +11,6 @@ LDFLAGS="-s -w \
 
 echo "== build-all =="
 mkdir -p bin
-go build -ldflags "$LDFLAGS" -o bin/express233 ./cmd/express233
+go build -ldflags "$LDFLAGS" -o bin/express233-cli ./cmd/express233-cli
 go build -ldflags "$LDFLAGS" -o bin/express233-server ./cmd/express233-server
-echo "OK: bin/express233 bin/express233-server"
+echo "OK: bin/express233-cli bin/express233-server"

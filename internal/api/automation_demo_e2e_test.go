@@ -2,6 +2,7 @@ package api
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
@@ -16,6 +17,156 @@ import (
 	"github.com/neko233-com/express233/internal/store"
 	"gopkg.in/yaml.v3"
 )
+
+func TestE2E_HTTPAutomationZipUploadRawDownloadAndMultiServerPull(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	srv := New(st)
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+	var resp *http.Response
+
+	for serverID, replacements := range map[string]map[string]any{
+		"game-a": {
+			"game.properties": map[string]any{
+				"server.port": "9101",
+			},
+			"application.yaml": map[string]any{
+				"spring.profiles.active": "game-a",
+			},
+		},
+		"game-b": {
+			"game.properties": map[string]any{
+				"server.port": "9102",
+			},
+			"application.yaml": map[string]any{
+				"spring.profiles.active": "game-b",
+			},
+		},
+	} {
+		putReq, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/servers/"+serverID, bytes.NewReader(mustJSON(t, map[string]any{
+			"replacements": replacements,
+		})))
+		putReq.Header.Set("Content-Type", "application/json")
+		setBasicRootAuth(putReq)
+		resp, err = http.DefaultClient.Do(putReq)
+		assertStatus(t, resp, err, http.StatusOK)
+	}
+
+	project := createProjectBasic(t, ts.URL, "zip-http-auto")
+	pid := strconv.FormatInt(project.ID, 10)
+	version := createVersionBasic(t, ts.URL, pid, nil)
+	if version.Version != "0.0.1" {
+		t.Fatalf("auto version = %s, want 0.0.1", version.Version)
+	}
+
+	uploadZipArchive(t, ts.URL+"/api/projects/"+pid+"/versions/"+version.Version+"/files", map[string]string{
+		"conf/game.properties":       "server.port=7000\nfeature.flag=zip-mode\n",
+		"conf/application.yaml":      "spring:\n  profiles:\n    active: default\n",
+		"scripts/restart.sh":         "#!/bin/sh\necho restart\n",
+		"assets/maps/world/info.txt": "zone=forest\n",
+	})
+
+	listReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/projects/"+pid+"/versions/"+version.Version+"/files", nil)
+	setBasicRootAuth(listReq)
+	resp, err = http.DefaultClient.Do(listReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("list files %d %s", resp.StatusCode, b)
+	}
+	var files []string
+	if err := json.NewDecoder(resp.Body).Decode(&files); err != nil {
+		resp.Body.Close()
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	for _, want := range []string{"conf/game.properties", "conf/application.yaml", "scripts/restart.sh", "assets/maps/world/info.txt"} {
+		if !containsString(files, want) {
+			t.Fatalf("uploaded recursive file missing %q in %v", want, files)
+		}
+	}
+
+	pubReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/projects/"+pid+"/versions/"+version.Version+"/publish", nil)
+	setBasicRootAuth(pubReq)
+	resp, err = http.DefaultClient.Do(pubReq)
+	assertStatus(t, resp, err, http.StatusOK)
+
+	rawReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/projects/"+pid+"/versions/"+version.Version+"/download", nil)
+	setBasicRootAuth(rawReq)
+	resp, err = http.DefaultClient.Do(rawReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("raw download %d %s", resp.StatusCode, b)
+	}
+	rawBundle, err := readTarGzResponse(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rawBundle["conf/game.properties"], "server.port=7000") || !strings.Contains(rawBundle["conf/game.properties"], "feature.flag=zip-mode") {
+		t.Fatalf("unexpected raw game.properties: %q", rawBundle["conf/game.properties"])
+	}
+	if !strings.Contains(rawBundle["conf/application.yaml"], "active: default") {
+		t.Fatalf("unexpected raw application.yaml: %q", rawBundle["conf/application.yaml"])
+	}
+	if rawBundle["assets/maps/world/info.txt"] != "zone=forest\n" {
+		t.Fatalf("unexpected raw nested file: %q", rawBundle["assets/maps/world/info.txt"])
+	}
+
+	users, err := st.ListUsers(1)
+	if err != nil || len(users) == 0 {
+		t.Fatalf("list users: %v %v", users, err)
+	}
+	token := users[0].Token
+
+	for serverID, wantPort := range map[string]string{"game-a": "9101", "game-b": "9102"} {
+		resp, err = http.Get(ts.URL + "/api/pull?token=" + token + "&project=zip-http-auto&version=" + version.Version + "&server_id=" + serverID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			t.Fatalf("pull %s %d %s", serverID, resp.StatusCode, b)
+		}
+		bundle, err := readTarGzResponse(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(bundle["conf/game.properties"], "server.port="+wantPort) || !strings.Contains(bundle["conf/game.properties"], "feature.flag=zip-mode") {
+			t.Fatalf("unexpected pulled game.properties for %s: %q", serverID, bundle["conf/game.properties"])
+		}
+		if !strings.Contains(bundle["conf/application.yaml"], "active: "+serverID) {
+			t.Fatalf("unexpected pulled application.yaml for %s: %q", serverID, bundle["conf/application.yaml"])
+		}
+		if bundle["assets/maps/world/info.txt"] != "zone=forest\n" {
+			t.Fatalf("unexpected pulled nested file for %s: %q", serverID, bundle["assets/maps/world/info.txt"])
+		}
+		var manifest struct {
+			Version  string `json:"version"`
+			ServerID string `json:"server_id"`
+		}
+		if err := json.Unmarshal([]byte(bundle[".express233/manifest.json"]), &manifest); err != nil {
+			t.Fatal(err)
+		}
+		if manifest.Version != version.Version || manifest.ServerID != serverID {
+			t.Fatalf("manifest mismatch for %s: %+v", serverID, manifest)
+		}
+	}
+}
 
 func TestE2E_AutomationDemoMultiVersion(t *testing.T) {
 	st, err := store.Open(t.TempDir())
@@ -467,6 +618,47 @@ func uploadArchive(t *testing.T, url string, files map[string]string) {
 	assertStatus(t, resp, err, http.StatusOK)
 }
 
+func uploadZipArchive(t *testing.T, url string, files map[string]string) {
+	t.Helper()
+	archive := mustZipArchive(t, files)
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	fw, err := mw.CreateFormFile("file", "bundle.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write(archive); err != nil {
+		t.Fatal(err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodPost, url, &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	setBasicRootAuth(req)
+	resp, err := http.DefaultClient.Do(req)
+	assertStatus(t, resp, err, http.StatusOK)
+}
+
+func mustZipArchive(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, content := range files {
+		fw, err := zw.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fw.Write([]byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
 func assertStatus(t *testing.T, resp *http.Response, err error, want int) {
 	t.Helper()
 	if err != nil {
@@ -543,4 +735,13 @@ func readTarGzResponse(r io.Reader) (map[string]string, error) {
 		}
 		out[hdr.Name] = string(data)
 	}
+}
+
+func containsString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }

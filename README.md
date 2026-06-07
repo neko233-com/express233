@@ -4,7 +4,7 @@
 [![Lint](https://github.com/neko233-com/express233/actions/workflows/lint.yml/badge.svg)](https://github.com/neko233-com/express233/actions/workflows/lint.yml)
 [![CodeQL](https://github.com/neko233-com/express233/actions/workflows/codeql.yml/badge.svg)](https://github.com/neko233-com/express233/actions/workflows/codeql.yml)
 
-游戏逻辑服 **拉模式** 部署：中央上传一次，SSH 集群 `express233 deploy` 拉齐；按 `server_id` 预览配置 diff。
+游戏逻辑服 **拉模式** 部署：中央上传一次，SSH 集群 `express233-cli deploy` 拉齐；按 `server_id` 预览配置 diff。
 
 ## 工作流
 
@@ -12,8 +12,8 @@
 |------|------|
 | 中央上传 | 项目 → 版本（草稿）→ 上传 / zip → **发布** |
 | 配置约束 | 配置文件 **basename 全局唯一**；`server.yaml` 按 **文件名** 替换（无视路径） |
-| 预览 | Web 或 `express233 preview` 查看每个键 before → after |
-| 节点部署 | `express233 deploy` = 拉取 + 替换 + `post_hook` |
+| 预览 | Web 或 `express233-cli preview` 查看每个键 before → after |
+| 节点部署 | `express233-cli deploy` = 拉取 + 替换 + `post_hook` |
 
 ## 安装
 
@@ -23,16 +23,25 @@
 curl -fsSL https://raw.githubusercontent.com/neko233-com/express233/main/scripts/install.sh | bash
 ```
 
+```powershell
+iwr -useb https://raw.githubusercontent.com/neko233-com/express233/main/scripts/install.ps1 | iex
+```
+
 **Server（中央）**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/neko233-com/express233/main/scripts/install-server.sh | bash
-# 或 go install
 ```
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/neko233-com/express233/main/scripts/install-server.ps1 | iex
+```
+
+或 `go install ./cmd/express233-cli ./cmd/express233-server`
 
 Release 资产（tag `v*` 触发 [release.yml](.github/workflows/release.yml)）：
 
-- `express233-{linux,darwin,windows}-{amd64,arm64}[.exe]`
+- `express233-cli-{linux,darwin,windows}-{amd64,arm64}[.exe]`
 - `express233-server-{...}`（同上）
 - 各文件 `.sha256` 校验
 
@@ -41,18 +50,18 @@ Release 资产（tag `v*` 触发 [release.yml](.github/workflows/release.yml)）
 ```bash
 export EXPRESS233_SERVER=http://10.0.0.1:23380
 export EXPRESS233_TOKEN=<token>
-express233 deploy --project mygame --server-id game-logic-042 --dest /opt/game/042
+express233-cli deploy --project mygame --server-id game-logic-042 --dest /opt/game/042
 ```
 
-批量：[examples/deploy-batch.csv](examples/deploy-batch.csv) + `express233 pull-batch --file ...`
+批量：[examples/deploy-batch.csv](examples/deploy-batch.csv) + `express233-cli pull-batch --file ...`
 
-列出中央已配置的 server_id：`express233 servers --server URL --token TOKEN`
+列出中央已配置的 server_id：`express233-cli servers --server URL --token TOKEN`
 
-环境自检：`express233 doctor`（检查 healthz、token、server_id、已发布版本）
+环境自检：`express233-cli doctor`（检查 healthz、token、server_id、已发布版本）
 
-版本回滚：`express233 rollback --server-id ID`（部署上一发布版；`--to 1.0.0` 指定版本）
+版本回滚：`express233-cli rollback --server-id ID`（部署上一发布版；`--to 1.0.0` 指定版本）
 
-版本 diff：`express233 diff --from 1.0.0 --to 1.1.0 --server-id ID`（对比两版本在 server_id 下的有效配置键）
+版本 diff：`express233-cli diff --from 1.0.0 --to 1.1.0 --server-id ID`（对比两版本在 server_id 下的有效配置键）
 
 审批流：operator 上传并「提交审批」→ admin「正式发布」或「驳回」
 

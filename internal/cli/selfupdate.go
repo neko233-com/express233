@@ -15,7 +15,7 @@ import (
 
 const (
 	repo       = "neko233-com/express233"
-	binaryName = "express233"
+	binaryName = "express233-cli"
 )
 
 // InstallOrSwitch 从 GitHub Release 安装或切换 CLI 版本。
@@ -68,7 +68,7 @@ func InstallOrSwitch(targetVersion string) error {
 		_ = os.Remove(dest)
 		return os.Rename(tmp, dest)
 	}
-	fmt.Printf("express233 %s installed to %s\n", ver, dest)
+	fmt.Printf("express233-cli %s installed to %s\n", ver, dest)
 	return nil
 }
 
@@ -104,5 +104,5 @@ func latestRelease() (string, error) {
 
 // PrintVersion 打印当前版本。
 func PrintVersion() {
-	fmt.Printf("%s (%s/%s)\n", version.String("express233"), runtime.GOOS, runtime.GOARCH)
+	fmt.Printf("%s (%s/%s)\n", version.String("express233-cli"), runtime.GOOS, runtime.GOARCH)
 }

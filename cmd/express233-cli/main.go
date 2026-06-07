@@ -48,7 +48,7 @@ func main() {
 		fatal(cli.InstallOrSwitch(ver))
 	case "downgrade":
 		if len(os.Args) < 3 {
-			fatal(fmt.Errorf("usage: express233 downgrade <version>"))
+			fatal(fmt.Errorf("usage: express233-cli downgrade <version>"))
 		}
 		fatal(cli.InstallOrSwitch(os.Args[2]))
 	case "help", "-h", "--help":
@@ -149,15 +149,15 @@ func runVersions(args []string) {
 
 func runConfig(args []string) {
 	if len(args) == 0 {
-		fatal(fmt.Errorf("usage: express233 config show|set|init"))
+		fatal(fmt.Errorf("usage: express233-cli config show|set|init"))
 	}
 	switch args[0] {
 	case "show":
 		fatal(cli.PrintConfig())
 	case "init":
 		cfg := cli.UserConfig{
-			Server: os.Getenv("EXPRESS233_SERVER"),
-			Token:  os.Getenv("EXPRESS233_TOKEN"),
+			Server:  os.Getenv("EXPRESS233_SERVER"),
+			Token:   os.Getenv("EXPRESS233_TOKEN"),
 			Project: os.Getenv("EXPRESS233_PROJECT"),
 		}
 		fatal(cli.SaveUserConfig(cfg))
@@ -165,7 +165,7 @@ func runConfig(args []string) {
 		fmt.Println("wrote", p)
 	case "set":
 		if len(args) != 3 {
-			fatal(fmt.Errorf("usage: express233 config set <server|token|project|dest> <value>"))
+			fatal(fmt.Errorf("usage: express233-cli config set <server|token|project|dest> <value>"))
 		}
 		cfg, err := cli.LoadUserConfig()
 		fatal(err)
@@ -228,11 +228,11 @@ func runPreview(args []string) {
 }
 
 func usage() {
-	fmt.Print(`express233 - 游戏逻辑服拉模式部署 CLI
+	fmt.Print(`express233-cli - 游戏逻辑服拉模式部署 CLI
 
 一行部署（SSH 上执行）:
   EXPRESS233_SERVER=http://central:23380 EXPRESS233_TOKEN=xxx \
-  express233 deploy -project mygame -server-id logic-042 -dest /opt/game/042
+	express233-cli deploy -project mygame -server-id logic-042 -dest /opt/game/042
 
 命令:
   deploy|pull   拉取已发布版本 + 按 server_id 替换配置 + post_hook

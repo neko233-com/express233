@@ -22,3 +22,4 @@
 
 ### Changed
 - `server_id` 列表按字母排序
+- CLI 二进制与 Release 资产改为 `express233-cli`，并补齐 `express233-server` 的 PowerShell 安装入口

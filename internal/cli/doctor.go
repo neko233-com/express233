@@ -27,7 +27,7 @@ func RunDoctor(serverURL, token, project, serverID string) error {
 		}
 	}
 
-	fmt.Println("express233 doctor")
+	fmt.Println("express233-cli doctor")
 
 	if opts.ServerURL == "" {
 		fmt.Println("  [FAIL] server URL not set (config or --server)")

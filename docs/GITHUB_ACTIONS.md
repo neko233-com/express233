@@ -27,7 +27,7 @@
   - 推送 tag `v*`（如 `v0.1.0`）
   - `workflow_dispatch`（手动重建，需在输入框填写已有 tag 名）
 - **产物**（每个平台各 2 个二进制 + sha256）：
-  - `express233-{os}-{arch}[.exe]`
+  - `express233-cli-{os}-{arch}[.exe]`
   - `express233-server-{os}-{arch}[.exe]`
 - **发布**：合并 matrix 产物后由 `softprops/action-gh-release` 创建 GitHub Release
 

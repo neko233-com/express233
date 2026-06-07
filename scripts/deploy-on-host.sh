@@ -1,6 +1,6 @@
 #!/bin/bash
 # 游戏逻辑服 SSH 上一行拉取部署（由运维在机器上或 Ansible 调用）
-# 依赖: 已安装 express233 CLI
+# 依赖: 已安装 express233-cli
 #
 # 用法:
 #   CENTRAL=http://10.0.0.1:23380 TOKEN=xxx PROJECT=mygame \
@@ -19,8 +19,8 @@ args=(deploy --server "$CENTRAL" --project "$PROJECT" --server-id "$SERVER_ID" -
 [ -n "$VERSION" ] && args+=(--version "$VERSION")
 
 if [ "${PREVIEW:-0}" = "1" ]; then
-  express233 preview --server "$CENTRAL" --project "$PROJECT" --server-id "$SERVER_ID" --token "$TOKEN" ${VERSION:+--version "$VERSION"}
+  express233-cli preview --server "$CENTRAL" --project "$PROJECT" --server-id "$SERVER_ID" --token "$TOKEN" ${VERSION:+--version "$VERSION"}
   exit 0
 fi
 
-express233 "${args[@]}"
+express233-cli "${args[@]}"

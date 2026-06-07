@@ -73,9 +73,9 @@ jobs:
             -X github.com/neko233-com/express233/internal/version.Version=${VERSION} \
             -X github.com/neko233-com/express233/internal/version.Commit=${COMMIT} \
             -X github.com/neko233-com/express233/internal/version.Date=${DATE}"
-          go build -ldflags "${LDFLAGS}" -o bin/express233 ./cmd/express233
+          go build -ldflags "${LDFLAGS}" -o bin/express233-cli ./cmd/express233-cli
           go build -ldflags "${LDFLAGS}" -o bin/express233-server ./cmd/express233-server
-          ./bin/express233 version
+          ./bin/express233-cli version
           ./bin/express233-server -version
 
       - name: Smoke test server + API
