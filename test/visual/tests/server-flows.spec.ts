@@ -64,19 +64,53 @@ test.describe("express233 控制台全流程", () => {
     await expect(page.getByTestId("version-list")).not.toContainText("1.0.0");
   });
 
+  test("版本文件标签批量处理并展示", async ({ page }) => {
+    const projectName = `file-tags-${Date.now()}`;
+
+    await page.getByTestId("new-project-input").fill(projectName);
+    await page.getByTestId("add-project").click();
+    await page.getByTestId("project-list").getByText(projectName, { exact: true }).click();
+
+    await page.getByTestId("new-version-input").fill("1.0.0");
+    await page.getByTestId("add-version").click();
+    await page.getByTestId("version-list").getByText("1.0.0").click();
+    await page.getByTestId("upload-tags").fill("linux-amd64");
+    const fixture = path.join(__dirname, "../../../testdata/validation-tree/version/deploy/game.properties");
+    await page.getByTestId("file-input").setInputFiles(fixture);
+    await expect(page.getByTestId("file-list")).toContainText("linux-amd64", { timeout: 15_000 });
+
+    await page.getByTestId("tag-batch-paths").fill("game.properties");
+    await page.getByTestId("tag-batch-tags").fill("linux");
+    await page.getByTestId("tag-batch-mode").selectOption("add");
+    await page.getByTestId("tag-batch-apply").click();
+    await expect(page.getByTestId("file-list")).toContainText("linux");
+    await expect(page.getByTestId("file-list")).toContainText("linux-amd64");
+  });
+
   test("演示项目引导素材包含 JSON/YAML/properties 替换", async ({ page }) => {
-    await page.locator("#btnDemoProject").click();
-    await expect(page.getByTestId("cur-project")).toContainText("demo-game", { timeout: 20_000 });
-    await expect(page.getByTestId("version-list")).toContainText("2.0.0", { timeout: 20_000 });
-    await page.getByTestId("version-list").getByText("2.0.0").click();
-    await expect(page.getByTestId("version-detail")).toBeVisible();
-    await page.getByRole("button", { name: "拉取预览" }).click();
-    await page.getByTestId("preview-server-id").fill("game-logic-01");
-    await page.getByTestId("preview-submit").click();
-    await expect(page.getByTestId("preview-table")).toContainText("game.properties", { timeout: 10_000 });
-    await expect(page.getByTestId("preview-table")).toContainText("application.yaml");
-    await expect(page.getByTestId("preview-table")).toContainText("settings.json");
-    await expect(page.getByTestId("preview-rendered-body")).toContainText("game-logic-01");
+    const originalYaml = await page.evaluate(async () => (await fetch("/api/server-yaml")).json().then((x) => x.content));
+    try {
+      await page.locator("#btnDemoProject").click();
+      await expect(page.getByTestId("cur-project")).toContainText("demo-game", { timeout: 20_000 });
+      await expect(page.getByTestId("version-list")).toContainText("2.0.0", { timeout: 20_000 });
+      await page.getByTestId("version-list").getByText("2.0.0").click();
+      await expect(page.getByTestId("version-detail")).toBeVisible();
+      await page.getByRole("button", { name: "拉取预览" }).click();
+      await page.getByTestId("preview-server-id").fill("game-logic-01");
+      await page.getByTestId("preview-submit").click();
+      await expect(page.getByTestId("preview-table")).toContainText("game.properties", { timeout: 10_000 });
+      await expect(page.getByTestId("preview-table")).toContainText("application.yaml");
+      await expect(page.getByTestId("preview-table")).toContainText("settings.json");
+      await expect(page.getByTestId("preview-rendered-body")).toContainText("game-logic-01");
+    } finally {
+      await page.evaluate(async (content) => {
+        await fetch("/api/server-yaml", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content }),
+        });
+      }, originalYaml);
+    }
   });
 
   test("新手引导可跳过并记录", async ({ page }) => {

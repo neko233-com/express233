@@ -47,7 +47,7 @@ html, body {
   margin: 0;
   height: 100%;
   font-family: var(--font);
-  font-size: 14.5px;
+  font-size: 16px;
   line-height: 1.5;
   color: var(--text);
   background: var(--bg-base);
@@ -116,11 +116,11 @@ html, body {
   margin: 0;
   font-size: 1.5rem;
   font-weight: 700;
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
   color: var(--text);
 }
 .login-sub { margin: 0.5rem 0 0; color: var(--text-muted); font-size: 0.88rem; }
-.login-hint { text-align: center; font-size: 0.75rem; color: var(--text-faint); margin: 1.25rem 0 0; }
+.login-hint { text-align: center; font-size: 0.875rem; color: var(--text-faint); margin: 1.25rem 0 0; }
 .login-title {
   margin: -0.5rem 0 1.15rem;
   font-size: 1rem;
@@ -137,7 +137,7 @@ html, body {
 .field { display: block; margin-bottom: 1rem; }
 .field span {
   display: block;
-  font-size: 0.73rem;
+  font-size: 0.875rem;
   font-weight: 600;
   color: var(--text-muted);
   margin-bottom: 0.4rem;
@@ -165,7 +165,7 @@ html, body {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   color: #fcd34d;
   backdrop-filter: blur(8px);
 }
@@ -173,7 +173,7 @@ html, body {
   width: 22px; height: 22px; border-radius: 50%;
   background: rgba(245, 158, 11, 0.2);
   display: flex; align-items: center; justify-content: center;
-  font-weight: 700; font-size: 0.75rem;
+  font-weight: 700; font-size: 0.875rem;
 }
 
 /* —— Sidebar —— */
@@ -202,11 +202,11 @@ html, body {
   color: var(--primary);
   display: flex; align-items: center; justify-content: center;
 }
-.brand-name { font-weight: 600; font-size: 0.95rem; letter-spacing: -0.02em; }
+.brand-name { font-weight: 600; font-size: 0.95rem; letter-spacing: 0; }
 
 .sidebar-section { padding: var(--space-3) var(--space-2) var(--space-1); }
 .section-label {
-  font-size: 0.68rem;
+  font-size: 0.875rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.07em;
@@ -265,7 +265,7 @@ html, body {
   border-color: rgba(16, 185, 129, 0.5);
   box-shadow: 0 0 0 3px var(--primary-dim);
 }
-.input-sm { font-size: 0.85rem; padding: 0.4rem 0.6rem; }
+.input-sm { font-size: 0.875rem; padding: 0.4rem 0.6rem; }
 
 .project-list {
   list-style: none;
@@ -322,7 +322,7 @@ html, body {
   border-radius: var(--radius);
   background: transparent;
   font: inherit;
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   color: var(--text-muted);
   cursor: pointer;
   text-align: left;
@@ -364,7 +364,7 @@ html, body {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   color: var(--primary);
-  font-size: 0.72rem;
+  font-size: 0.875rem;
   font-weight: 700;
   display: flex;
   align-items: center;
@@ -412,7 +412,7 @@ html, body {
   font-size: 1.3rem;
   font-weight: 600;
   color: var(--text);
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
 }
 .empty-state p { margin: 0; max-width: 340px; font-size: 0.92rem; line-height: 1.6; }
 .empty-actions {
@@ -428,7 +428,7 @@ html, body {
   margin: 0;
   font-size: 1.4rem;
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 .subtitle { margin: 0.35rem 0 0; color: var(--text-muted); font-size: 0.88rem; }
 .workspace-title {
@@ -451,7 +451,7 @@ html, body {
   border: none;
   background: transparent;
   font: inherit;
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   font-weight: 500;
   color: var(--text-muted);
   cursor: pointer;
@@ -488,7 +488,7 @@ html, body {
   border-radius: 6px;
   background: transparent;
   font: inherit;
-  font-size: 0.84rem;
+  font-size: 0.875rem;
   color: var(--text-muted);
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
@@ -511,7 +511,7 @@ html, body {
 }
 .card-title, .card-title-row .card-title {
   margin: 0 0 0.75rem;
-  font-size: 0.78rem;
+  font-size: 0.875rem;
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -537,12 +537,12 @@ html, body {
   background: var(--bg-base);
   color: var(--text-muted);
   font-family: var(--mono);
-  font-size: 0.82rem;
+  font-size: 0.875rem;
   line-height: 1.5;
   white-space: pre-wrap;
 }
 .panel-label {
-  font-size: 0.72rem;
+  font-size: 0.875rem;
   font-weight: 600;
   color: var(--text-faint);
   text-transform: uppercase;
@@ -572,7 +572,7 @@ html, body {
   border-radius: var(--radius);
   border: 1px solid transparent;
   font: inherit;
-  font-size: 0.84rem;
+  font-size: 0.875rem;
   font-weight: 500;
   cursor: pointer;
   transition: all var(--transition-fast);
@@ -673,12 +673,83 @@ html, body {
   border-radius: var(--radius);
   cursor: default;
   font-family: var(--mono);
-  font-size: 0.86rem;
+  font-size: 0.875rem;
   color: var(--text-muted);
   border: 1px solid transparent;
 }
 .file-list li:hover {
   background: var(--bg-hover);
+}
+.file-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(180px, auto);
+  gap: 0.75rem;
+  align-items: center;
+  min-height: 2.6rem;
+}
+.file-row.muted {
+  display: block;
+  color: var(--text-faint);
+}
+.file-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-actions {
+  display: inline-flex;
+  gap: 0.35rem;
+}
+.file-tag-action {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+  padding: 0.15rem 0.2rem;
+}
+.file-tag-action:hover {
+  color: var(--primary-hover);
+}
+.file-tags {
+  display: flex;
+  flex-direction: row-reverse;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.file-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.65rem;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid rgba(16, 185, 129, 0.22);
+  background: rgba(16, 185, 129, 0.08);
+  color: #a7f3d0;
+  font-size: 0.875rem;
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+.tag-toolbar {
+  margin: 0.7rem 0 0.55rem;
+}
+.tag-batch {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.5fr) minmax(180px, 1fr) 120px auto;
+  gap: 0.55rem;
+  align-items: stretch;
+  margin-bottom: 0.75rem;
+}
+.tag-paths {
+  min-height: 2.7rem;
+  resize: vertical;
+}
+.input-select {
+  min-width: 110px;
 }
 .member-list li {
   padding: 0.6rem 0;
@@ -703,7 +774,7 @@ html, body {
   gap: 0.3rem;
   padding: 0.18rem 0.55rem;
   border-radius: 999px;
-  font-size: 0.72rem;
+  font-size: 0.875rem;
   font-weight: 600;
   text-transform: lowercase;
   background: var(--bg-elevated);
@@ -762,7 +833,7 @@ html, body {
   border-radius: var(--radius-lg);
   background: rgba(0, 0, 0, 0.15);
   color: var(--text-muted);
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   cursor: pointer;
   transition: all var(--transition-base);
 }
@@ -838,13 +909,13 @@ html, body {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--mono);
-  font-size: 0.82rem;
+  font-size: 0.875rem;
   color: var(--text);
 }
 
 .file-preview-meta {
   flex: 0 0 auto;
-  font-size: 0.78rem;
+  font-size: 0.875rem;
   color: var(--text-faint);
 }
 
@@ -858,7 +929,7 @@ html, body {
   border-radius: 0;
   background: #0a0d12;
   font-family: var(--mono);
-  font-size: 0.86rem;
+  font-size: 0.875rem;
   line-height: 1.55;
   white-space: pre;
 }
@@ -871,7 +942,7 @@ html, body {
   background: transparent;
   color: var(--text-muted);
   font-family: var(--mono);
-  font-size: 0.84rem;
+  font-size: 0.875rem;
   text-align: left;
   cursor: pointer;
 }
@@ -888,7 +959,7 @@ html, body {
   color: var(--text-muted);
   border: 0;
   font-family: var(--mono);
-  font-size: 0.83rem;
+  font-size: 0.875rem;
 }
 
 .file-list .ft-toolbar {
@@ -964,7 +1035,7 @@ html, body {
 }
 .rendered-tabs button {
   padding: 0.32rem 0.65rem;
-  font-size: 0.82rem;
+  font-size: 0.875rem;
   border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--bg-elevated);
@@ -1017,7 +1088,7 @@ input.cmdbox {
   padding: 0.55rem 0.75rem;
   text-align: left;
   font-weight: 600;
-  font-size: 0.75rem;
+  font-size: 0.875rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-faint);
@@ -1035,7 +1106,7 @@ input.cmdbox {
 }
 .data-table code, .preview-table code {
   font-family: var(--mono);
-  font-size: 0.86rem;
+  font-size: 0.875rem;
   color: var(--primary-hover);
   background: rgba(16, 185, 129, 0.06);
   padding: 0.1rem 0.35rem;
@@ -1050,7 +1121,7 @@ input.cmdbox {
 
 /* —— Utility —— */
 .hint { font-size: 0.8rem; color: var(--text-faint); margin: 0.4rem 0; line-height: 1.55; }
-.err { color: #fca5a5; font-size: 0.84rem; margin-top: 0.5rem; }
+.err { color: #fca5a5; font-size: 0.875rem; margin-top: 0.5rem; }
 .warn { color: #fcd34d; }
 .action-add { color: var(--primary-hover); }
 .action-replace { color: var(--warn); }
@@ -1061,7 +1132,7 @@ input.cmdbox {
   outline-offset: 4px;
 }
 .check-label {
-  font-size: 0.84rem;
+  font-size: 0.875rem;
   color: var(--text-muted);
   display: inline-flex;
   align-items: center;
@@ -1075,7 +1146,7 @@ input.cmdbox {
 
 /* —— Delete project button less aggressive —— */
 .workspace-title .btn-danger {
-  font-size: 0.75rem;
+  font-size: 0.875rem;
   padding: 0.3rem 0.6rem;
   opacity: 0.75;
   transition: opacity var(--transition-fast), background var(--transition-fast);
@@ -1124,7 +1195,7 @@ input.cmdbox {
 }
 .preview-table td:nth-child(6) {
   font-weight: 600;
-  font-size: 0.75rem;
+  font-size: 0.875rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
@@ -1164,4 +1235,62 @@ input.cmdbox {
 }
 .driver-popover.express-tour .driver-popover-close-btn {
   color: var(--text-muted);
+}
+
+@media (max-width: 900px) {
+  .file-row {
+    grid-template-columns: 1fr;
+  }
+  .file-tags {
+    flex-direction: row;
+    justify-content: flex-start;
+  }
+  .tag-batch {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Readability floor: keep operational UI at 14px or above. */
+.login-sub,
+.login-hint,
+.login-title,
+.input,
+.search-input,
+.input-sm,
+.sidebar-label,
+.project-list li,
+.sidebar-nav-title,
+.user-box,
+.subtitle,
+.project-tab,
+.seg-tab,
+.card-title,
+.panel-label,
+.btn,
+.btn-sm,
+.version-list li,
+.file-list li,
+.member-list li,
+.meta,
+.badge,
+.code-editor,
+#serverYaml,
+.upload-zone,
+.rendered-tabs button,
+.rendered-body,
+.cmdbox,
+pre.cmdbox,
+.data-table,
+.preview-table,
+.data-table th,
+.preview-table th,
+.data-table code,
+.preview-table code,
+.hint,
+.err,
+.check-label,
+.workspace-title .btn-danger,
+.preview-table td:nth-child(6),
+.driver-popover.express-tour .driver-popover-description {
+  font-size: max(0.875rem, 14px);
 }

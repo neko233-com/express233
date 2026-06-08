@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/neko233-com/express233/internal/config"
+	"github.com/neko233-com/express233/internal/filetags"
 	"github.com/neko233-com/express233/internal/hookspec"
 	"github.com/neko233-com/express233/internal/store"
 	"github.com/neko233-com/express233/internal/template"
@@ -19,17 +20,31 @@ import (
 
 // Manifest 随包下发的拉取元数据。
 type Manifest struct {
-	Project     string            `json:"project"`
-	Version     string            `json:"version"`
-	ServerID    string            `json:"server_id"`
-	PostHook       string            `json:"post_hook"`
-	PostHookEnv    map[string]string `json:"post_hook_env"`
-	PostHookSpec   string            `json:"post_hook_spec,omitempty"`
-	PostHookPlan   []string          `json:"post_hook_plan,omitempty"`
+	Project      string            `json:"project"`
+	Version      string            `json:"version"`
+	ServerID     string            `json:"server_id"`
+	OS           string            `json:"os,omitempty"`
+	Arch         string            `json:"arch,omitempty"`
+	Tags         []string          `json:"tags,omitempty"`
+	PostHook     string            `json:"post_hook"`
+	PostHookEnv  map[string]string `json:"post_hook_env"`
+	PostHookSpec string            `json:"post_hook_spec,omitempty"`
+	PostHookPlan []string          `json:"post_hook_plan,omitempty"`
+}
+
+type BundleOptions struct {
+	OS   string
+	Arch string
+	Tags []string
 }
 
 // BuildBundle 复制版本目录、应用 server.yaml 替换并打成 tar.gz。
 func BuildBundle(st *store.Store, tenantID int64, sf *config.ServerFile, projectName, version, serverID string, w io.Writer) error {
+	return BuildBundleWithOptions(st, tenantID, sf, projectName, version, serverID, BundleOptions{}, w)
+}
+
+// BuildBundleWithOptions 复制匹配标签的文件、应用 server.yaml 替换并打成 tar.gz。
+func BuildBundleWithOptions(st *store.Store, tenantID int64, sf *config.ServerFile, projectName, version, serverID string, opts BundleOptions, w io.Writer) error {
 	vdir, err := st.VersionDir(tenantID, projectName, version)
 	if err != nil {
 		return err
@@ -37,7 +52,19 @@ func BuildBundle(st *store.Store, tenantID int64, sf *config.ServerFile, project
 	if _, err := os.Stat(vdir); err != nil {
 		return fmt.Errorf("version files: %w", err)
 	}
-	return buildBundleFromVersionDir(vdir, sf, projectName, version, serverID, w)
+	tagRows, err := st.ListVersionFileTags(tenantID, projectName, version)
+	if err != nil {
+		return err
+	}
+	tagByPath := make(map[string][]string, len(tagRows))
+	for _, row := range tagRows {
+		tagByPath[row.Path] = row.Tags
+	}
+	target := filetags.Target(opts.OS, opts.Arch, opts.Tags)
+	filter := func(rel string) bool {
+		return filetags.Matches(tagByPath[filepath.ToSlash(rel)], target)
+	}
+	return buildBundleFromVersionDir(vdir, sf, projectName, version, serverID, opts, filter, w)
 }
 
 // BuildBundleFromDir 从本地版本目录构建包（测试/校验用）。
@@ -45,10 +72,10 @@ func BuildBundleFromDir(versionRoot string, sf *config.ServerFile, projectName, 
 	if _, err := os.Stat(versionRoot); err != nil {
 		return fmt.Errorf("version files: %w", err)
 	}
-	return buildBundleFromVersionDir(versionRoot, sf, projectName, version, serverID, w)
+	return buildBundleFromVersionDir(versionRoot, sf, projectName, version, serverID, BundleOptions{}, nil, w)
 }
 
-func buildBundleFromVersionDir(vdir string, sf *config.ServerFile, projectName, version, serverID string, w io.Writer) error {
+func buildBundleFromVersionDir(vdir string, sf *config.ServerFile, projectName, version, serverID string, opts BundleOptions, filter func(string) bool, w io.Writer) error {
 	entry := sf.Entry(serverID)
 	if entry == nil {
 		return fmt.Errorf("unknown server_id %q in server.yaml", serverID)
@@ -60,7 +87,7 @@ func buildBundleFromVersionDir(vdir string, sf *config.ServerFile, projectName, 
 	}
 	defer func() { _ = os.RemoveAll(tmp) }()
 
-	if err := copyDir(vdir, tmp); err != nil {
+	if err := copyDir(vdir, tmp, filter); err != nil {
 		return err
 	}
 	if len(entry.Replacements) > 0 {
@@ -83,6 +110,9 @@ func buildBundleFromVersionDir(vdir string, sf *config.ServerFile, projectName, 
 		Project:     projectName,
 		Version:     version,
 		ServerID:    serverID,
+		OS:          opts.OS,
+		Arch:        opts.Arch,
+		Tags:        filetags.Target(opts.OS, opts.Arch, opts.Tags),
 		PostHook:    template.RenderHookTemplate(entry.PostHook, hookVars),
 		PostHookEnv: entry.PostHookEnv,
 	}
@@ -116,7 +146,7 @@ func buildBundleFromVersionDir(vdir string, sf *config.ServerFile, projectName, 
 	})
 }
 
-func copyDir(src, dst string) error {
+func copyDir(src, dst string, filter func(string) bool) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -128,6 +158,10 @@ func copyDir(src, dst string) error {
 		target := filepath.Join(dst, rel)
 		if info.IsDir() {
 			return os.MkdirAll(target, 0o755)
+		}
+		relSlash := filepath.ToSlash(rel)
+		if filter != nil && !filter(relSlash) {
+			return nil
 		}
 		return copyFile(path, target)
 	})

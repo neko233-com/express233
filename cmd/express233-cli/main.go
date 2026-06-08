@@ -69,6 +69,9 @@ func pullFlags(args []string) (cli.PullOptions, *flag.FlagSet) {
 	fs.StringVar(&opts.Token, "token", os.Getenv("EXPRESS233_TOKEN"), "pull token")
 	fs.StringVar(&opts.Version, "version", "", "version (default: latest published)")
 	fs.StringVar(&opts.DestDir, "dest", ".", "destination directory")
+	fs.StringVar(&opts.OS, "os", "", "client OS tag (default: current GOOS)")
+	fs.StringVar(&opts.Arch, "arch", "", "client arch tag (default: current GOARCH)")
+	fs.Var((*stringSliceFlag)(&opts.Tags), "tag", "extra selection tag; repeatable")
 	fs.BoolVar(&opts.SkipHook, "skip-hook", false, "skip post_hook script")
 	_ = fs.Parse(args)
 	return opts, fs
@@ -92,6 +95,9 @@ func runPullBatch(args []string) {
 	fs.StringVar(&opts.Token, "token", os.Getenv("EXPRESS233_TOKEN"), "token")
 	fs.StringVar(&opts.Version, "version", "", "version")
 	fs.StringVar(&opts.DestDir, "dest", ".", "default dest when line has only server_id")
+	fs.StringVar(&opts.OS, "os", "", "client OS tag (default: current GOOS)")
+	fs.StringVar(&opts.Arch, "arch", "", "client arch tag (default: current GOARCH)")
+	fs.Var((*stringSliceFlag)(&opts.Tags), "tag", "extra selection tag; repeatable")
 	fs.BoolVar(&opts.SkipHook, "skip-hook", false, "skip post_hook")
 	_ = fs.Parse(args)
 	if *list == "" || opts.ServerURL == "" || opts.Project == "" || opts.Token == "" {
@@ -248,7 +254,7 @@ func usage() {
   version
 
 pull/deploy 参数:
-  --server --project --server-id --token [--version] [--dest] [--skip-hook]
+  --server --project --server-id --token [--version] [--dest] [--os] [--arch] [--tag] [--skip-hook]
 
 pull-batch:
   --file servers.csv --server URL --project NAME --token TOKEN
@@ -265,4 +271,15 @@ func fatal(err error) {
 	}
 	fmt.Fprintln(os.Stderr, "error:", err)
 	os.Exit(1)
+}
+
+type stringSliceFlag []string
+
+func (f *stringSliceFlag) String() string {
+	return fmt.Sprint([]string(*f))
+}
+
+func (f *stringSliceFlag) Set(v string) error {
+	*f = append(*f, v)
+	return nil
 }

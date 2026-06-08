@@ -39,7 +39,10 @@ func (s *Store) DeleteVersionFile(tenantID int64, projectName, version, relPath 
 	if err != nil {
 		return err
 	}
-	return s.releaseBlobLink(path)
+	if err := s.releaseBlobLink(path); err != nil {
+		return err
+	}
+	return s.DeleteVersionFileTags(tenantID, projectName, version, relPath)
 }
 
 // ReadVersionTextFile 读取版本内文本文件预览内容。

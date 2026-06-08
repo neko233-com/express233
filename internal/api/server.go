@@ -109,6 +109,9 @@ func (s *Server) Router() http.Handler {
 				r.Delete("/versions/{ver}", s.handleDeleteVersion)
 				r.Post("/versions/{ver}/files", s.handleUploadFile)
 				r.Delete("/versions/{ver}/files", s.handleDeleteVersionFile)
+				r.Put("/versions/{ver}/file-tags", s.handlePutVersionFileTags)
+				r.Delete("/versions/{ver}/file-tags", s.handleDeleteVersionFileTags)
+				r.Post("/versions/{ver}/file-tags/batch", s.handleBatchVersionFileTags)
 			})
 
 			r.Get("/projects/{id}/versions", s.handleListVersions)
@@ -116,6 +119,7 @@ func (s *Server) Router() http.Handler {
 			r.Get("/projects/{id}/versions/{ver}/download", s.handleDownloadVersion)
 			r.Get("/projects/{id}/versions/{ver}/files/content", s.handleReadVersionFile)
 			r.Get("/projects/{id}/versions/{ver}/files", s.handleListVersionFiles)
+			r.Get("/projects/{id}/versions/{ver}/file-tags", s.handleListVersionFileTags)
 			r.Get("/projects/{id}/versions/{ver}/config-files", s.handleListConfigFiles)
 		})
 	})

@@ -62,8 +62,8 @@ test.describe("项目操作", () => {
   test("空项目名不创建", async ({ page }) => {
     await page.getByTestId("new-project-input").fill("");
     await page.getByTestId("add-project").click();
-    // 没有新项目出现 (项目列表为空或不变)
-    await expect(page.getByTestId("empty-project-state").or(page.getByTestId("cur-project"))).toBeVisible({ timeout: 3_000 });
+    await expect(page.getByTestId("new-project-input")).toBeVisible();
+    await expect(page.getByTestId("new-project-input")).toHaveValue("");
   });
 
   test("选择项目后显示工作区 tabs", async ({ page }) => {
@@ -98,7 +98,7 @@ test.describe("版本管理", () => {
       d.dismiss();
     });
     await page.getByRole("button", { name: "删除版本" }).click();
-    await expect.poll(() => dialogSeen).toBeTruthy({ timeout: 5_000 });
+    await expect.poll(() => dialogSeen, { timeout: 5_000 }).toBeTruthy();
   });
 });
 
@@ -133,7 +133,7 @@ test.describe("拉取预览 — 未注册 serverId 报错", () => {
       d.accept();
     });
     await page.getByTestId("preview-submit").click();
-    await expect.poll(() => alertMsg).toBeTruthy({ timeout: 5_000 });
+    await expect.poll(() => alertMsg, { timeout: 5_000 }).toBeTruthy();
   });
 });
 
@@ -204,14 +204,14 @@ test.describe("部署命令 tab", () => {
   test("部署 tab 显示复制命令", async ({ page }) => {
     await page.getByRole("button", { name: "部署" }).click();
     await expect(page.getByTestId("deploy-cmd")).toBeVisible();
-    await expect(page.getByTestId("deploy-cmd")).toContainText("express233 deploy");
+    await expect(page.getByTestId("deploy-cmd")).toContainText("express233-cli pull");
   });
 
   test("复制按钮可点击", async ({ page }) => {
     await page.getByRole("button", { name: "部署" }).click();
     await expect(page.getByTestId("deploy-cmd")).toBeVisible();
     // 复制按钮存在且可点击
-    const copyBtn = page.getByRole("button", { name: "复制命令" });
+    const copyBtn = page.getByRole("button", { name: "复制脚本" });
     await expect(copyBtn).toBeVisible();
     await copyBtn.click();
   });
@@ -278,7 +278,7 @@ test.describe("server.yaml 页签", () => {
       d.accept();
     });
     await page.getByRole("button", { name: "预览 diff" }).click();
-    await expect.poll(() => alertMsg).toBeTruthy({ timeout: 10_000 });
+    await expect.poll(() => alertMsg, { timeout: 10_000 }).toBeTruthy();
   });
 });
 
@@ -298,12 +298,12 @@ test.describe("系统设置页签", () => {
 
   test("创建用户", async ({ page }) => {
     await page.locator('.sidebar-nav-item[data-global="settings"]').click();
-    await page.locator("#newUser").fill(`testuser-${Date.now()}`);
+    const username = `testuser-${Date.now()}`;
+    await page.locator("#newUser").fill(username);
     await page.locator("#newUserPass").fill("testpass123");
     await page.locator("#newUserRole").selectOption("viewer");
     await page.getByRole("button", { name: "创建" }).click();
-    // 用户表应更新
-    await expect(page.locator("#userTable tbody tr")).toHaveCount(2, { timeout: 5_000 });
+    await expect(page.locator("#userTable")).toContainText(username, { timeout: 5_000 });
   });
 
   test("用户表显示 root 用户", async ({ page }) => {

@@ -363,9 +363,111 @@ paths:
                 path:
                   type: string
                   description: 可选相对路径
+                tags:
+                  type: array
+                  items: { type: string }
+                  description: 可选文件标签；空或省略表示 *
       responses:
         "200":
           description: 已上传
+
+  /api/projects/{id}/versions/{ver}/file-tags:
+    get:
+      tags: [projects]
+      summary: 列出版本文件标签
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: ver
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VersionFileTag"
+    put:
+      tags: [projects]
+      summary: 设置单个版本文件标签
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: ver
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FileTagRequest"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VersionFileTag"
+    delete:
+      tags: [projects]
+      summary: 清空单个文件标签为 *
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: ver
+          in: path
+          required: true
+          schema: { type: string }
+        - name: path
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: 已清空
+
+  /api/projects/{id}/versions/{ver}/file-tags/batch:
+    post:
+      tags: [projects]
+      summary: 批量设置/追加/移除/清空版本文件标签
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: ver
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FileTagBatchRequest"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/VersionFileTag"
 
   /api/pull:
     get:
@@ -379,6 +481,22 @@ paths:
           in: query
           schema: { type: string }
           description: 省略则取最新已发布
+        - name: os
+          in: query
+          schema: { type: string }
+          description: 下载方 OS，例如 linux/windows/darwin；新版 CLI 默认自动上报
+        - name: arch
+          in: query
+          schema: { type: string }
+          description: 下载方架构，例如 amd64/arm64；新版 CLI 默认自动上报
+        - name: tags
+          in: query
+          schema:
+            type: array
+            items: { type: string }
+          style: form
+          explode: true
+          description: 额外选择标签，可重复传递
       responses:
         "200":
           description: application/gzip 包
@@ -583,6 +701,39 @@ components:
         status: { type: string, enum: [draft, pending_review, rejected, published] }
         created_at: { type: string }
         published_at: { type: string }
+    VersionFileTag:
+      type: object
+      properties:
+        path: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+          example: ["linux-amd64", "linux"]
+    FileTagRequest:
+      type: object
+      required: [path]
+      properties:
+        path: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+          description: 空数组表示 *
+    FileTagBatchRequest:
+      type: object
+      properties:
+        paths:
+          type: array
+          items: { type: string }
+        patterns:
+          type: array
+          items: { type: string }
+          description: glob，例如 bin/windows/** 或 *.exe
+        tags:
+          type: array
+          items: { type: string }
+        mode:
+          type: string
+          enum: [set, add, remove, clear]
     ServerEntry:
       type: object
       properties:

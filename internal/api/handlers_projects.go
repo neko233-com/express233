@@ -1,7 +1,10 @@
 package api
 
 import (
+	"archive/tar"
+	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -274,6 +277,7 @@ func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 	if rel == "" {
 		rel = hdr.Filename
 	}
+	tags := r.MultipartForm.Value["tags"]
 
 	uploadDetail := "project=" + pname + " version=" + ver + " file=" + rel
 	filename := strings.ToLower(hdr.Filename)
@@ -287,6 +291,11 @@ func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 		if err := s.Store.ExtractZipToVersion(tid, pname, ver, ra, int64(len(buf))); err != nil {
 			errJSON(w, http.StatusBadRequest, err.Error())
 			return
+		}
+		if len(tags) > 0 {
+			for _, path := range zipFilePaths(ra) {
+				_ = s.Store.SetVersionFileTags(tid, pname, ver, path, tags)
+			}
 		}
 		s.auditSession(r, "version.upload.zip", uploadDetail)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "zip extracted"})
@@ -302,6 +311,11 @@ func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 			errJSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		if len(tags) > 0 {
+			for _, path := range tarFilePaths(bytes.NewReader(buf), strings.HasSuffix(filename, ".tar.gz") || strings.HasSuffix(filename, ".tgz")) {
+				_ = s.Store.SetVersionFileTags(tid, pname, ver, path, tags)
+			}
+		}
 		s.auditSession(r, "version.upload.tar", uploadDetail)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "archive extracted"})
 		return
@@ -311,8 +325,50 @@ func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if len(tags) > 0 {
+		_ = s.Store.SetVersionFileTags(tid, pname, ver, rel, tags)
+	}
 	s.auditSession(r, "version.upload", uploadDetail)
 	writeJSON(w, http.StatusOK, map[string]string{"path": rel})
+}
+
+func zipFilePaths(r *bytes.Reader) []string {
+	zr, err := zip.NewReader(r, int64(r.Len()))
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, f := range zr.File {
+		if !f.FileInfo().IsDir() {
+			out = append(out, f.Name)
+		}
+	}
+	return out
+}
+
+func tarFilePaths(r io.Reader, gzipped bool) []string {
+	if gzipped {
+		gr, err := gzip.NewReader(r)
+		if err != nil {
+			return nil
+		}
+		defer func() { _ = gr.Close() }()
+		r = gr
+	}
+	tr := tar.NewReader(r)
+	var out []string
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return out
+		}
+		if err != nil {
+			return out
+		}
+		if hdr.Typeflag == tar.TypeReg {
+			out = append(out, hdr.Name)
+		}
+	}
 }
 
 func (s *Server) handleDeleteVersionFile(w http.ResponseWriter, r *http.Request) {

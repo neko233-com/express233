@@ -17,6 +17,15 @@ CREATE TABLE IF NOT EXISTS blobs (
 CREATE TABLE IF NOT EXISTS store_meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS version_file_tags (
+  tenant_id INTEGER NOT NULL,
+  project_name TEXT NOT NULL,
+  version TEXT NOT NULL,
+  path TEXT NOT NULL,
+  tags TEXT NOT NULL DEFAULT '*',
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(tenant_id, project_name, version, path)
 )`)
 	if err != nil {
 		return err

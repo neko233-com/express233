@@ -44,6 +44,7 @@ let state = {
   username: null,
   versions: [],
   versionFilter: "",
+  fileRows: [],
   version: null,
   versionStatus: null,
   isAdmin: false,
@@ -544,8 +545,7 @@ async function selectVersion(v) {
   document.getElementById("validateResult").innerHTML = "";
   document.getElementById("previewProject").value = state.projectName || "";
   document.getElementById("previewVersion").value = v.version;
-  const files = (await api(`/api/projects/${state.projectId}/versions/${v.version}/files`)) || [];
-  await renderVersionFileBrowser(files);
+  const rows = await loadVersionFileTags();
   try {
     const cfg = await api(`/api/projects/${state.projectId}/versions/${v.version}/config-files`);
     const dup = Object.entries(cfg.duplicates || {}).filter(([, n]) => n > 1);
@@ -558,7 +558,50 @@ async function selectVersion(v) {
   document.getElementById("verPreviewRenderedBody").textContent = "选择 server_id";
   updateDeployCmd();
   tryAutoPreviewOnVersionSelect();
-  return files;
+  return rows.map((r) => r.path);
+}
+
+async function loadVersionFileTags() {
+  if (!state.projectId || !state.version) return [];
+  const rows = (await api(`/api/projects/${state.projectId}/versions/${encodeURIComponent(state.version)}/file-tags`)) || [];
+  state.fileRows = rows;
+  renderFileList();
+  return rows;
+}
+
+function renderFileList() {
+  const fl = document.getElementById("fileList");
+  if (!fl) return;
+  if (!state.fileRows.length) {
+    fl.innerHTML = `<div class="file-row muted">暂无文件</div>`;
+    showFilePreviewMessage("当前版本无文件");
+    return;
+  }
+  showFilePreviewMessage("点击左侧文件查看内容");
+  const canEdit = canWriteProject() && state.versionStatus !== "published";
+  fl.innerHTML = state.fileRows
+    .map((row, index) => {
+      const tags = (row.tags && row.tags.length ? row.tags : ["*"]).map(
+        (tag) => `<span class="file-tag">${escapeHtml(tag)}</span>`
+      ).join("");
+      const actions = canEdit
+        ? `<button type="button" class="file-tag-action" data-action="edit-tags" data-index="${index}">编辑</button>
+           <button type="button" class="file-tag-action" data-action="clear-tags" data-index="${index}">清空</button>`
+        : "";
+      return `<div class="file-row" data-preview-index="${index}">
+        <span class="file-path">${escapeHtml(row.path)}</span>
+        <span class="file-actions">${actions}</span>
+        <span class="file-tags">${tags}</span>
+      </div>`;
+    })
+    .join("");
+}
+
+function parseTagsInput(value) {
+  return String(value || "")
+    .split(/[\s,;]+/)
+    .map((x) => x.trim().toLowerCase())
+    .filter(Boolean);
 }
 
 async function loadFileTreeModule() {
@@ -894,10 +937,12 @@ document.getElementById("btnDeleteVersion").onclick = async () => {
 };
 
 async function uploadFiles(files) {
+  const tags = parseTagsInput(document.getElementById("uploadTags")?.value || "");
   for (const file of files) {
     const fd = new FormData();
     fd.append("file", file);
     fd.append("path", file.name);
+    tags.forEach((tag) => fd.append("tags", tag));
     const headers = {};
     const t = getToken();
     if (t) headers.Authorization = `Bearer ${t}`;
@@ -911,6 +956,59 @@ async function uploadFiles(files) {
   }
   selectVersion({ version: state.version, status: state.versionStatus, created_at: "", published_at: "" });
 }
+
+document.getElementById("fileList")?.addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-action]");
+  if (!state.projectId || !state.version) return;
+  if (!btn) {
+    const item = e.target.closest("[data-preview-index]");
+    const row = item ? state.fileRows[Number(item.dataset.previewIndex)] : null;
+    if (row) previewVersionFile(row.path);
+    return;
+  }
+  const row = state.fileRows[Number(btn.dataset.index)];
+  if (!row) return;
+  try {
+    if (btn.dataset.action === "edit-tags") {
+      const next = prompt(`设置 ${row.path} 的标签（逗号分隔，空=*）`, (row.tags || ["*"]).join(","));
+      if (next === null) return;
+      await api(`/api/projects/${state.projectId}/versions/${encodeURIComponent(state.version)}/file-tags`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: row.path, tags: parseTagsInput(next) }),
+      });
+      await loadVersionFileTags();
+    }
+    if (btn.dataset.action === "clear-tags") {
+      await api(`/api/projects/${state.projectId}/versions/${encodeURIComponent(state.version)}/file-tags?path=${encodeURIComponent(row.path)}`, {
+        method: "DELETE",
+      });
+      await loadVersionFileTags();
+    }
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+document.getElementById("btnApplyFileTags")?.addEventListener("click", async () => {
+  if (!state.projectId || !state.version) return;
+  const raw = document.getElementById("tagBatchPaths")?.value || "";
+  const items = raw.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+  const patterns = items.filter((x) => /[*?[\]]/.test(x) || x.endsWith("/**"));
+  const paths = items.filter((x) => !patterns.includes(x));
+  const tags = parseTagsInput(document.getElementById("tagBatchTags")?.value || "");
+  const mode = document.getElementById("tagBatchMode")?.value || "set";
+  try {
+    await api(`/api/projects/${state.projectId}/versions/${encodeURIComponent(state.version)}/file-tags/batch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paths, patterns, tags, mode }),
+    });
+    await loadVersionFileTags();
+  } catch (err) {
+    alert(err.message);
+  }
+});
 
 document.getElementById("fileInput").onchange = async (e) => {
   try {
@@ -962,8 +1060,12 @@ document.getElementById("btnPreview").onclick = async () => {
     alert("填写 project / version / server_id");
     return;
   }
-  const d = await fetchDeployPreview(project, version, serverId);
-  renderPreviewReport(d, document.getElementById("previewOut"));
+  try {
+    const d = await fetchDeployPreview(project, version, serverId);
+    renderPreviewReport(d, document.getElementById("previewOut"));
+  } catch (e) {
+    alert(e.message);
+  }
 };
 
 async function loadUsers() {

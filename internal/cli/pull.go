@@ -23,6 +23,9 @@ type PullOptions struct {
 	Token     string
 	Version   string
 	DestDir   string
+	OS        string
+	Arch      string
+	Tags      []string
 	SkipHook  bool
 }
 
@@ -31,6 +34,12 @@ func RunPull(opts PullOptions) error {
 	opts = MergePullOptions(opts)
 	if opts.DestDir == "" {
 		opts.DestDir = "."
+	}
+	if opts.OS == "" {
+		opts.OS = runtime.GOOS
+	}
+	if opts.Arch == "" {
+		opts.Arch = runtime.GOARCH
 	}
 	u, err := url.Parse(opts.ServerURL)
 	if err != nil {
@@ -42,6 +51,15 @@ func RunPull(opts PullOptions) error {
 	q.Set("server_id", opts.ServerID)
 	if opts.Version != "" {
 		q.Set("version", opts.Version)
+	}
+	if opts.OS != "" {
+		q.Set("os", opts.OS)
+	}
+	if opts.Arch != "" {
+		q.Set("arch", opts.Arch)
+	}
+	for _, tag := range opts.Tags {
+		q.Add("tags", tag)
 	}
 	u.Path = "/api/pull"
 	u.RawQuery = q.Encode()
@@ -64,7 +82,7 @@ func RunPull(opts PullOptions) error {
 		return err
 	}
 
-	fmt.Printf("pulled %s@%s for server_id=%s into %s\n", manifest.Project, manifest.Version, manifest.ServerID, opts.DestDir)
+	fmt.Printf("pulled %s@%s for server_id=%s os=%s arch=%s into %s\n", manifest.Project, manifest.Version, manifest.ServerID, manifest.OS, manifest.Arch, opts.DestDir)
 
 	if opts.SkipHook {
 		return nil
