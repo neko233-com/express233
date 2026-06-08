@@ -47,6 +47,7 @@ let state = {
   version: null,
   versionStatus: null,
   isAdmin: false,
+  isRoot: false,
   role: "viewer",
   tenantSlug: null,
   projectRole: null,
@@ -77,6 +78,7 @@ function showApp(username) {
     document.querySelectorAll(".admin-only").forEach((el) => el.classList.remove("hidden"));
     loadUsers();
     loadAuditLogs();
+    if (state.isRoot) loadSystemUpdateStatus();
   }
   if (state.isAdmin || state.role === "operator") {
     document.querySelectorAll(".operator-only").forEach((el) => el.classList.remove("hidden"));
@@ -103,6 +105,11 @@ function setGlobalView(view) {
   const inProject = view === "workspace" && state.projectId;
   document.getElementById("projectWorkspace").classList.toggle("hidden", !inProject);
   document.getElementById("emptyProject").classList.toggle("hidden", inProject || view !== "workspace");
+  if (view === "settings" && state.isAdmin) {
+    loadUsers();
+    loadAuditLogs();
+    if (state.isRoot) loadSystemUpdateStatus();
+  }
 }
 
 function setProjectTab(tab) {
@@ -133,6 +140,7 @@ async function init() {
     const me = await api("/api/me");
     if (me.token) setToken(me.token);
     state.isAdmin = me.is_admin;
+    state.isRoot = !!me.is_root;
     state.role = me.role || (me.is_admin ? "admin" : "viewer");
     state.tenantSlug = me.tenant_slug || null;
     showApp(me.username);
@@ -357,6 +365,7 @@ document.getElementById("btnLogin").onclick = async () => {
     });
     if (me.token) setToken(me.token);
     state.isAdmin = me.is_admin;
+    state.isRoot = !!me.is_root;
     state.role = me.role || (me.is_admin ? "admin" : "viewer");
     state.tenantSlug = me.tenant_slug || null;
     showApp(me.username);
@@ -1010,6 +1019,52 @@ async function loadAuditLogs() {
 }
 
 document.getElementById("btnReloadAudit")?.addEventListener("click", loadAuditLogs);
+
+async function loadSystemUpdateStatus() {
+  if (!state.isRoot) return;
+  const panel = document.getElementById("systemMaintenance");
+  if (panel) panel.classList.remove("hidden");
+  try {
+    const st = await api("/api/system/update");
+    renderSystemUpdateStatus(st);
+  } catch (e) {
+    const out = document.getElementById("systemUpdateStatus");
+    if (out) out.textContent = e.message;
+  }
+}
+
+function renderSystemUpdateStatus(st) {
+  const versionEl = document.getElementById("currentServerVersion");
+  if (versionEl) versionEl.textContent = `${st.current_version || "dev"} ${st.current_commit || ""}`.trim();
+  const btn = document.getElementById("btnSystemUpdate");
+  if (btn) btn.disabled = !!st.running;
+  const lines = [];
+  lines.push(st.running ? "状态: 更新中" : st.finished_at ? (st.ok ? "状态: 完成" : "状态: 失败") : "状态: 空闲");
+  if (st.target_version) lines.push(`目标: ${st.target_version}`);
+  if (st.started_at) lines.push(`开始: ${st.started_at}`);
+  if (st.finished_at) lines.push(`结束: ${st.finished_at}`);
+  if (st.error) lines.push(`错误: ${st.error}`);
+  if (st.output) lines.push("", st.output);
+  const out = document.getElementById("systemUpdateStatus");
+  if (out) out.textContent = lines.join("\n");
+  if (st.running) setTimeout(loadSystemUpdateStatus, 2000);
+}
+
+document.getElementById("btnSystemUpdateStatus")?.addEventListener("click", loadSystemUpdateStatus);
+
+document.getElementById("btnSystemUpdate")?.addEventListener("click", async () => {
+  if (!state.isRoot) return;
+  if (!confirm("更新中央服到最新 Release？更新过程中服务会短暂重启。")) return;
+  const btn = document.getElementById("btnSystemUpdate");
+  if (btn) btn.disabled = true;
+  try {
+    const st = await api("/api/system/update", { method: "POST" });
+    renderSystemUpdateStatus(st);
+  } catch (e) {
+    alert(e.message);
+    if (btn) btn.disabled = false;
+  }
+});
 
 document.getElementById("btnChangeMyPass")?.addEventListener("click", async () => {
   await api("/api/me/password", {

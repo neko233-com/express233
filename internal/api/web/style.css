@@ -519,6 +519,28 @@ html, body {
 }
 .card-title-row { display: flex; align-items: center; justify-content: space-between; }
 .card-inner { margin-top: 1rem; }
+.maintenance-panel {
+  margin: 0.85rem 0 1rem;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+}
+.maintenance-panel .card-title { margin-bottom: 0.35rem; }
+.update-status {
+  margin: 0.65rem 0 0;
+  padding: 0.75rem;
+  max-height: 12rem;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-base);
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
 .panel-label {
   font-size: 0.72rem;
   font-weight: 600;

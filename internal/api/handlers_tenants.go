@@ -52,6 +52,7 @@ func (s *Server) mePayload(sess session, token string) map[string]any {
 	out := map[string]any{
 		"username":    sess.Username,
 		"is_admin":    sess.IsAdmin,
+		"is_root":     sess.Username == "root",
 		"role":        role,
 		"tenant_id":   sess.TenantID,
 		"tenant_slug": slug,

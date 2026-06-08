@@ -19,6 +19,9 @@ type Server struct {
 	jwt            *jwtAuth
 	serverMu       sync.RWMutex
 	serverByTenant map[int64]*config.ServerFile
+	updateMu       sync.RWMutex
+	updateStatus   systemUpdateStatus
+	updateRunner   func(target, dataDir string) (string, error)
 }
 
 // New 创建 API 服务。
@@ -61,6 +64,8 @@ func (s *Server) Router() http.Handler {
 				r.Get("/audit-logs", s.handleListAuditLogs)
 				r.Get("/tenants", s.handleListTenants)
 				r.Post("/tenants", s.handleCreateTenant)
+				r.Get("/system/update", s.handleSystemUpdateStatus)
+				r.Post("/system/update", s.handleSystemUpdate)
 				r.Get("/servers", s.handleListServerEntries)
 				r.Get("/servers/{serverID}", s.handleGetServerEntry)
 				r.Put("/servers/{serverID}", s.handlePutServerEntry)
