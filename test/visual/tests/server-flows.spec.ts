@@ -39,8 +39,8 @@ test.describe("express233 控制台全流程", () => {
     const validate = page.getByTestId("validate-result");
     await expect(validate).toContainText("可以发布", { timeout: 10_000 });
 
-    page.once("dialog", (d) => d.accept());
     await page.getByTestId("publish-version").click();
+    await page.locator(".modal-card").getByRole("button", { name: "发布" }).click();
     await expect(page.getByTestId("version-list")).toContainText("published", { timeout: 15_000 });
     await expect(page.getByTestId("ver-status")).toContainText("published", { timeout: 5_000 });
     await expect(page.getByTestId("download-version")).toBeVisible();

@@ -121,6 +121,13 @@ func (s *Server) Router() http.Handler {
 			r.Get("/projects/{id}/versions/{ver}/files", s.handleListVersionFiles)
 			r.Get("/projects/{id}/versions/{ver}/file-tags", s.handleListVersionFileTags)
 			r.Get("/projects/{id}/versions/{ver}/config-files", s.handleListConfigFiles)
+
+			r.Get("/storage/overview", s.handleStorageOverview)
+			r.Get("/storage/tree", s.handleStorageTree)
+			r.Get("/storage/search", s.handleStorageSearch)
+			r.Get("/storage/delete-plan", s.handleStorageDeletePlan)
+			r.Post("/storage/reindex", s.handleStorageReindex)
+			r.Delete("/storage/items", s.handleStorageDelete)
 		})
 	})
 

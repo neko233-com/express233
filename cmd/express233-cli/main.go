@@ -72,6 +72,7 @@ func pullFlags(args []string) (cli.PullOptions, *flag.FlagSet) {
 	fs.StringVar(&opts.OS, "os", "", "client OS tag (default: current GOOS)")
 	fs.StringVar(&opts.Arch, "arch", "", "client arch tag (default: current GOARCH)")
 	fs.Var((*stringSliceFlag)(&opts.Tags), "tag", "extra selection tag; repeatable")
+	fs.IntVar(&opts.Retries, "retries", 3, "download retries before extraction")
 	fs.BoolVar(&opts.SkipHook, "skip-hook", false, "skip post_hook script")
 	_ = fs.Parse(args)
 	return opts, fs
@@ -98,6 +99,7 @@ func runPullBatch(args []string) {
 	fs.StringVar(&opts.OS, "os", "", "client OS tag (default: current GOOS)")
 	fs.StringVar(&opts.Arch, "arch", "", "client arch tag (default: current GOARCH)")
 	fs.Var((*stringSliceFlag)(&opts.Tags), "tag", "extra selection tag; repeatable")
+	fs.IntVar(&opts.Retries, "retries", 3, "download retries before extraction")
 	fs.BoolVar(&opts.SkipHook, "skip-hook", false, "skip post_hook")
 	_ = fs.Parse(args)
 	if *list == "" || opts.ServerURL == "" || opts.Project == "" || opts.Token == "" {

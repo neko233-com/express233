@@ -26,6 +26,7 @@ type PullOptions struct {
 	OS        string
 	Arch      string
 	Tags      []string
+	Retries   int
 	SkipHook  bool
 }
 
@@ -40,6 +41,9 @@ func RunPull(opts PullOptions) error {
 	}
 	if opts.Arch == "" {
 		opts.Arch = runtime.GOARCH
+	}
+	if opts.Retries <= 0 {
+		opts.Retries = 3
 	}
 	u, err := url.Parse(opts.ServerURL)
 	if err != nil {
@@ -64,20 +68,20 @@ func RunPull(opts PullOptions) error {
 	u.Path = "/api/pull"
 	u.RawQuery = q.Encode()
 
-	resp, err := http.Get(u.String())
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("pull failed %d: %s", resp.StatusCode, string(b))
-	}
-
 	if err := os.MkdirAll(opts.DestDir, 0o755); err != nil {
 		return err
 	}
-	manifest, err := pull.ExtractBundle(resp.Body, opts.DestDir)
+	tmp, err := downloadBundleWithRetry(u.String(), opts.Retries)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(tmp) }()
+	f, err := os.Open(tmp)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	manifest, err := pull.ExtractBundle(f, opts.DestDir)
 	if err != nil {
 		return err
 	}
@@ -95,6 +99,51 @@ func RunPull(opts PullOptions) error {
 		return nil
 	}
 	return runPostHook(opts.DestDir, manifest)
+}
+
+func downloadBundleWithRetry(rawURL string, retries int) (string, error) {
+	var last error
+	for attempt := 1; attempt <= retries; attempt++ {
+		tmp, err := downloadBundle(rawURL)
+		if err == nil {
+			if attempt > 1 {
+				fmt.Printf("download succeeded after retry %d/%d\n", attempt, retries)
+			}
+			return tmp, nil
+		}
+		last = err
+		if attempt < retries {
+			fmt.Printf("download failed (%v), retrying %d/%d...\n", err, attempt+1, retries)
+		}
+	}
+	return "", last
+}
+
+func downloadBundle(rawURL string) (string, error) {
+	resp, err := http.Get(rawURL)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("pull failed %d: %s", resp.StatusCode, string(b))
+	}
+	tmp, err := os.CreateTemp("", "express233-pull-*.tar.gz")
+	if err != nil {
+		return "", err
+	}
+	tmpPath := tmp.Name()
+	if _, err := io.Copy(tmp, resp.Body); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", err
+	}
+	return tmpPath, nil
 }
 
 func hookEnvMap(m *pull.Manifest) map[string]string {

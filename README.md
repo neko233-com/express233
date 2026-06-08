@@ -6,6 +6,43 @@
 
 游戏逻辑服 **拉模式** 部署：中央上传一次，SSH 集群 `express233-cli deploy` 拉齐；按 `server_id` 预览配置 diff。
 
+## 功能概览
+
+| 能力 | 说明 |
+|------|------|
+| **多版本管理** | 草稿 / 审批 / 发布；语义化版本；列表搜索与批量操作 |
+| **文件标签** | 为版本内文件打平台/架构标签，拉取时按标签过滤 |
+| **配置替换预览** | 按 `server_id` 查看替换前后全文 diff（YAML / JSON / properties） |
+| **版本 diff** | 对比任意两发布版本在同一 `server_id` 下的有效配置 |
+| **存储空间** | 磁盘占用总览、目录树、索引搜索、关联删除（草稿文件 / 版本 / 项目） |
+| **安全部署** | CLI `deploy` = 拉取到 `.tmp` → stop → swap → start（见 [SAFE_DEPLOY](docs/SAFE_DEPLOY.md)） |
+| **多租户与 RBAC** | 租户隔离、`viewer` / `operator` / `admin`、项目邀请链接 |
+| **Blob 去重** | 内容寻址存储，多版本共享相同文件块，删除时按引用计数回收 |
+
+### 界面截图
+
+多版本列表与搜索：
+
+![多版本管理](.assets/multi-version.png)
+
+版本文件标签（上传时或批量打标）：
+
+![文件标签](.assets/file-tags.png)
+
+版本间配置 diff（双栏 + 文件树）：
+
+![版本 diff](.assets/version-diff.png)
+
+`server_id` 模板替换后的拉取预览：
+
+![模板替换预览](.assets/template-replacement.png)
+
+存储空间：磁盘分类、目录树、索引搜索：
+
+![存储空间](.assets/storage-space.png)
+
+> 截图由 `test/visual/tests/readme-assets.spec.ts` 在本地控制台生成，存放于 [.assets/](.assets/)（非 `.github/`）。
+
 ## 工作流
 
 | 步骤 | 说明 |
@@ -232,6 +269,19 @@ make run-server # :23380 root/root
 | [helm.yml](.github/workflows/helm.yml) | Helm 变更 | `helm lint` + template |
 
 详见 [docs/GITHUB_ACTIONS.md](docs/GITHUB_ACTIONS.md)。
+
+## 存储空间（Web）
+
+左侧导航 **存储空间** 提供中央服数据目录的可视化运维：
+
+| 功能 | API | 说明 |
+|------|-----|------|
+| 占用总览 | `GET /api/storage/overview` | 分类统计（userdata / blobs / SQLite / run）、Blob 去重、可用磁盘 |
+| 目录树 | `GET /api/storage/tree?path=` | 租户 `userdata/{slug}/...` 与 `blobs/` 结构 |
+| 索引搜索 | `GET /api/storage/search?q=` | SQLite `storage_index` 表，重建：`POST /api/storage/reindex` |
+| 关联删除 | `GET /api/storage/delete-plan` + `DELETE /api/storage/items` | 草稿文件、版本、项目；孤立 blob 需 admin |
+
+数据布局：`{dataDir}/userdata/{slug}/projects/{name}/{version}/`；去重块在 `{dataDir}/blobs/`。
 
 ## 文档
 

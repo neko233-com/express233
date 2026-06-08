@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/neko233-com/express233/internal/config"
 	"github.com/neko233-com/express233/internal/template"
@@ -27,13 +28,23 @@ type FileDelta struct {
 	Keys     []KeyDelta `json:"keys"`
 }
 
+// RenderedFileDelta 文件级有效内容差异，用于 Web 双栏 diff。
+type RenderedFileDelta struct {
+	Path     string `json:"path"`
+	Basename string `json:"basename"`
+	From     string `json:"from"`
+	To       string `json:"to"`
+	Change   string `json:"change"` // added | removed | modified
+}
+
 // VersionDiffReport 两版本在指定 server_id 下的有效配置差异。
 type VersionDiffReport struct {
-	Project     string      `json:"project"`
-	FromVersion string      `json:"from_version"`
-	ToVersion   string      `json:"to_version"`
-	ServerID    string      `json:"server_id"`
-	Files       []FileDelta `json:"files"`
+	Project     string              `json:"project"`
+	FromVersion string              `json:"from_version"`
+	ToVersion   string              `json:"to_version"`
+	ServerID    string              `json:"server_id"`
+	Files       []FileDelta         `json:"files"`
+	FileDiffs   []RenderedFileDelta `json:"file_diffs,omitempty"`
 }
 
 // DiffVersions 对比两版本经 server_id 替换后的配置键值。
@@ -99,7 +110,101 @@ func DiffVersions(fromRoot, toRoot, project, fromVer, toVer, serverID string, en
 			report.Files = append(report.Files, fd)
 		}
 	}
+	rendered, err := diffEffectiveFiles(fromRoot, toRoot, entry)
+	if err != nil {
+		return nil, err
+	}
+	report.FileDiffs = rendered
 	return report, nil
+}
+
+func diffEffectiveFiles(fromRoot, toRoot string, entry *config.ServerEntry) ([]RenderedFileDelta, error) {
+	fromFiles, err := renderEffectiveFiles(fromRoot, entry)
+	if err != nil {
+		return nil, err
+	}
+	toFiles, err := renderEffectiveFiles(toRoot, entry)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(fromFiles)+len(toFiles))
+	for path := range fromFiles {
+		seen[path] = true
+	}
+	for path := range toFiles {
+		seen[path] = true
+	}
+	paths := make([]string, 0, len(seen))
+	for path := range seen {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	out := make([]RenderedFileDelta, 0, len(paths))
+	for _, path := range paths {
+		from, fok := fromFiles[path]
+		to, tok := toFiles[path]
+		d := RenderedFileDelta{Path: path, Basename: filepath.Base(path), From: from, To: to}
+		switch {
+		case !fok && tok:
+			d.Change = "added"
+		case fok && !tok:
+			d.Change = "removed"
+		case from != to:
+			d.Change = "modified"
+		default:
+			continue
+		}
+		out = append(out, d)
+	}
+	return out, nil
+}
+
+func renderEffectiveFiles(root string, entry *config.ServerEntry) (map[string]string, error) {
+	replacements := map[string]map[string]any{}
+	var err error
+	if entry != nil {
+		replacements, err = config.PrepareReplacements(entry.Replacements)
+		if err != nil {
+			return nil, err
+		}
+	}
+	replacements, err = template.NormalizeFileOverrides(replacements)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if tree := replacements[filepath.Base(rel)]; len(tree) > 0 {
+			if merged, err := template.MergeBytes(filepath.Base(rel), data, tree); err == nil {
+				data = merged
+			}
+		}
+		out[rel] = displayContent(data)
+		return nil
+	})
+	return out, err
+}
+
+func displayContent(data []byte) string {
+	if utf8.Valid(data) {
+		return string(data)
+	}
+	return fmt.Sprintf("[binary file, %d bytes]", len(data))
 }
 
 func renderEffectiveConfig(root string, entry *config.ServerEntry) (map[string]map[string]string, error) {

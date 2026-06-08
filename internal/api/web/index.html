@@ -75,6 +75,10 @@
           <svg class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
           <span>server.yaml</span>
         </button>
+        <button type="button" class="sidebar-nav-item" data-global="storage" data-testid="nav-storage">
+          <svg class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/></svg>
+          <span>存储空间</span>
+        </button>
         <button type="button" class="sidebar-nav-item admin-only hidden" data-global="settings">
           <svg class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           <span>系统设置</span>
@@ -123,7 +127,36 @@
             <input id="previewVersion" placeholder="version" class="input" />
             <button type="button" id="btnPreview" class="btn btn-secondary">预览 diff</button>
           </div>
-          <div id="previewOut" class="card-inner"></div>
+          <div id="previewOut" class="card-inner diff-workspace compact-diff"></div>
+        </div>
+      </div>
+
+      <div id="globalStorage" class="global-panel hidden" data-testid="storage-panel">
+        <header class="page-header">
+          <h1>存储空间</h1>
+          <p class="subtitle">本地磁盘占用、目录树浏览与关联删除</p>
+        </header>
+        <div class="card storage-overview-card">
+          <div class="storage-stats" id="storageStats" data-testid="storage-stats"></div>
+          <div class="storage-bars" id="storageBars" data-testid="storage-bars"></div>
+          <div class="toolbar compact">
+            <input id="storageSearch" type="search" placeholder="搜索已索引文件…" class="input search-input storage-search" data-testid="storage-search" />
+            <button type="button" id="btnStorageReindex" class="btn btn-secondary btn-sm" data-testid="storage-reindex">重建索引</button>
+          </div>
+        </div>
+        <div class="storage-layout card">
+          <aside class="storage-tree-panel">
+            <div class="panel-label">目录树</div>
+            <div id="storageTree" class="storage-tree" data-testid="storage-tree"></div>
+          </aside>
+          <section class="storage-detail">
+            <div class="panel-label">详情</div>
+            <div id="storageDetail" class="storage-detail-body" data-testid="storage-detail">选择左侧节点或搜索命中项</div>
+            <div id="storageSearchHits" class="storage-search-hits hidden" data-testid="storage-search-hits"></div>
+            <div class="toolbar compact">
+              <button type="button" id="btnStorageDelete" class="btn btn-danger btn-sm hidden" data-testid="storage-delete">删除选中项</button>
+            </div>
+          </section>
         </div>
       </div>
 
@@ -269,16 +302,21 @@
               <input id="verPreviewServerId" list="serverIdList" placeholder="server_id" class="input" data-testid="preview-server-id" />
               <button type="button" id="btnVerPreview" class="btn btn-primary btn-sm" data-testid="preview-submit">刷新预览</button>
             </div>
-            <div class="preview-split">
-              <div class="preview-keys">
-                <div class="panel-label">键级变更</div>
-                <div id="verPreviewTable" data-testid="preview-table"></div>
-              </div>
-              <div class="preview-rendered">
-                <div class="panel-label">替换后全文</div>
-                <div id="verPreviewRenderedTabs" class="rendered-tabs"></div>
-                <pre id="verPreviewRenderedBody" class="rendered-body" data-testid="preview-rendered-body">选择 server_id</pre>
-              </div>
+            <div id="verPreviewTable" class="diff-workspace" data-testid="preview-table">
+              <aside class="diff-tree-panel">
+                <div class="panel-label">文件树</div>
+                <div class="empty-diff">选择 server_id</div>
+              </aside>
+              <section class="diff-main">
+                <div class="diff-pane">
+                  <div class="diff-pane-head">原版</div>
+                  <pre id="verPreviewOriginalBody" class="diff-code language-none"><code>选择 server_id</code></pre>
+                </div>
+                <div class="diff-pane">
+                  <div class="diff-pane-head">替换后</div>
+                  <pre id="verPreviewRenderedBody" class="diff-code language-none" data-testid="preview-rendered-body"><code>选择 server_id</code></pre>
+                </div>
+              </section>
             </div>
           </div>
         </div>
@@ -328,12 +366,14 @@
               <input id="diffServerId" list="serverIdList" placeholder="server_id" class="input" />
               <button type="button" id="btnVersionDiff" class="btn btn-primary btn-sm">生成 diff</button>
             </div>
-            <div id="versionDiffOut"></div>
+            <div id="versionDiffOut" class="diff-workspace"></div>
           </div>
         </div>
       </div>
     </main>
   </div>
+  <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="true"></div>
+  <div id="modalHost" class="modal-host hidden"></div>
   <script src="/vendor/driver.js/driver.js.iife.js"></script>
   <script src="/vendor/prismjs/prism.js"></script>
   <script src="/vendor/prismjs/prism-markup.min.js"></script>

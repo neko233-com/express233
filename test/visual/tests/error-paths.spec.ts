@@ -91,14 +91,9 @@ test.describe("版本管理", () => {
 
   test("删除版本需要确认", async ({ page }) => {
     await createVersion(page, "3.0.0");
-    // 拦截 dialog
-    let dialogSeen = false;
-    page.on("dialog", (d) => {
-      dialogSeen = true;
-      d.dismiss();
-    });
     await page.getByRole("button", { name: "删除版本" }).click();
-    await expect.poll(() => dialogSeen, { timeout: 5_000 }).toBeTruthy();
+    await expect(page.locator(".modal-card")).toBeVisible({ timeout: 5_000 });
+    await page.locator(".modal-card").getByRole("button", { name: "取消" }).click();
   });
 });
 
@@ -113,27 +108,14 @@ test.describe("拉取预览 — 未注册 serverId 报错", () => {
   test("使用不存在的 server_id 预览应报错", async ({ page }) => {
     await page.getByRole("button", { name: "拉取预览" }).click();
     await page.getByTestId("preview-server-id").fill("nonexistent-server-id");
-    // 拦截 alert dialog
-    let alertMsg = "";
-    page.once("dialog", (d) => {
-      alertMsg = d.message();
-      d.accept();
-    });
     await page.getByTestId("preview-submit").click();
-    // 应该弹出错误提示
-    await expect.poll(() => alertMsg).toContain("server_id", { timeout: 10_000 });
+    await expect(page.locator(".toast")).toContainText("server_id", { timeout: 10_000 });
   });
 
   test("空 server_id 预览应报错", async ({ page }) => {
     await page.getByRole("button", { name: "拉取预览" }).click();
-    // server_id 留空
-    let alertMsg = "";
-    page.once("dialog", (d) => {
-      alertMsg = d.message();
-      d.accept();
-    });
     await page.getByTestId("preview-submit").click();
-    await expect.poll(() => alertMsg, { timeout: 5_000 }).toBeTruthy();
+    await expect(page.locator(".toast")).toBeVisible({ timeout: 5_000 });
   });
 });
 
@@ -185,8 +167,8 @@ test.describe("发布前检查与发布", () => {
     await page.getByTestId("file-input").setInputFiles(fixture);
     await expect(page.getByTestId("file-list")).toContainText("game.properties", { timeout: 15_000 });
 
-    page.once("dialog", (d) => d.accept());
     await page.getByTestId("publish-version").click();
+    await page.locator(".modal-card").getByRole("button", { name: "发布" }).click();
     await expect(page.getByTestId("version-list")).toContainText("published", { timeout: 15_000 });
     await expect(page.getByTestId("ver-status")).toContainText("published", { timeout: 5_000 });
     await expect(page.getByTestId("download-version")).toBeVisible();
@@ -257,14 +239,8 @@ test.describe("server.yaml 页签", () => {
   test("server.yaml 保存按钮可点击", async ({ page }) => {
     await page.locator('.sidebar-nav-item[data-global="server"]').click();
     await expect(page.getByTestId("server-yaml-editor")).toBeVisible();
-    // 拦截保存成功的 alert
-    let alertMsg = "";
-    page.once("dialog", (d) => {
-      alertMsg = d.message();
-      d.accept();
-    });
     await page.getByRole("button", { name: "保存" }).click();
-    await expect.poll(() => alertMsg).toContain("保存", { timeout: 5_000 });
+    await expect(page.locator(".toast")).toContainText("已保存", { timeout: 5_000 });
   });
 
   test("server.yaml 页面预览 — 未注册 server_id 报错", async ({ page }) => {
@@ -272,13 +248,8 @@ test.describe("server.yaml 页签", () => {
     await page.locator("#previewServerId").fill("this-server-does-not-exist");
     await page.locator("#previewProject").fill("some-project");
     await page.locator("#previewVersion").fill("1.0.0");
-    let alertMsg = "";
-    page.once("dialog", (d) => {
-      alertMsg = d.message();
-      d.accept();
-    });
     await page.getByRole("button", { name: "预览 diff" }).click();
-    await expect.poll(() => alertMsg, { timeout: 10_000 }).toBeTruthy();
+    await expect(page.locator(".toast")).toBeVisible({ timeout: 10_000 });
   });
 });
 

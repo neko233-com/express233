@@ -61,6 +61,62 @@ let fileTree = null;
 let fileTreeModulePromise = null;
 let filePreviewRequestID = 0;
 
+function showToast(message, type = "ok", timeout = 3200) {
+  const host = document.getElementById("toastHost");
+  if (!host) return;
+  const el = document.createElement("div");
+  el.className = `toast ${type}`;
+  el.textContent = message;
+  host.appendChild(el);
+  window.setTimeout(() => el.remove(), timeout);
+}
+
+function showConfirm({ title = "确认操作", message = "", confirmText = "确认", cancelText = "取消", danger = false } = {}) {
+  return showModal({ title, message, confirmText, cancelText, danger, mode: "confirm" });
+}
+
+function showPrompt({ title = "输入内容", message = "", value = "", confirmText = "保存", cancelText = "取消" } = {}) {
+  return showModal({ title, message, value, confirmText, cancelText, mode: "prompt" });
+}
+
+function showModal({ title, message, value = "", confirmText, cancelText, danger = false, mode }) {
+  const host = document.getElementById("modalHost");
+  if (!host) return Promise.resolve(mode === "prompt" ? null : false);
+  return new Promise((resolve) => {
+    host.classList.remove("hidden");
+    host.innerHTML = `<div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <h2 id="modalTitle" class="modal-title">${escapeHtml(title)}</h2>
+      <p class="modal-message">${escapeHtml(message)}</p>
+      ${mode === "prompt" ? `<input class="input modal-input" value="${escapeAttr(value)}" />` : ""}
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" data-modal="cancel">${escapeHtml(cancelText)}</button>
+        <button type="button" class="btn ${danger ? "btn-danger" : "btn-primary"}" data-modal="ok">${escapeHtml(confirmText)}</button>
+      </div>
+    </div>`;
+    const input = host.querySelector(".modal-input");
+    const close = (result) => {
+      host.classList.add("hidden");
+      host.innerHTML = "";
+      resolve(result);
+    };
+    host.querySelector("[data-modal='cancel']").onclick = () => close(mode === "prompt" ? null : false);
+    host.querySelector("[data-modal='ok']").onclick = () => close(mode === "prompt" ? input.value : true);
+    host.onclick = (e) => {
+      if (e.target === host) close(mode === "prompt" ? null : false);
+    };
+    host.onkeydown = (e) => {
+      if (e.key === "Escape") close(mode === "prompt" ? null : false);
+      if (e.key === "Enter" && mode === "prompt") close(input.value);
+    };
+    if (input) {
+      input.focus();
+      input.select();
+    } else {
+      host.querySelector("[data-modal='ok']").focus();
+    }
+  });
+}
+
 function showLogin() {
   document.getElementById("login").classList.remove("hidden");
   document.getElementById("app").classList.add("hidden");
@@ -102,6 +158,7 @@ function setGlobalView(view) {
     b.classList.toggle("active", b.dataset.global === view);
   });
   document.getElementById("globalServer").classList.toggle("hidden", view !== "server");
+  document.getElementById("globalStorage").classList.toggle("hidden", view !== "storage");
   document.getElementById("globalSettings").classList.toggle("hidden", view !== "settings");
   const inProject = view === "workspace" && state.projectId;
   document.getElementById("projectWorkspace").classList.toggle("hidden", !inProject);
@@ -111,6 +168,7 @@ function setGlobalView(view) {
     loadAuditLogs();
     if (state.isRoot) loadSystemUpdateStatus();
   }
+  if (view === "storage") loadStorageOverview();
 }
 
 function setProjectTab(tab) {
@@ -387,6 +445,7 @@ document.querySelectorAll(".sidebar-nav-item[data-global]").forEach((btn) => {
   btn.onclick = () => {
     if (btn.dataset.global === "workspace") setGlobalView("workspace");
     else if (btn.dataset.global === "server") setGlobalView("server");
+    else if (btn.dataset.global === "storage") setGlobalView("storage");
     else if (btn.dataset.global === "settings") setGlobalView("settings");
   };
 });
@@ -553,9 +612,7 @@ async function selectVersion(v) {
       showFilePreviewMessage(`重复配置文件 basename: ${dup.map(([b]) => b).join(", ")}`);
     }
   } catch (_) {}
-  document.getElementById("verPreviewTable").innerHTML = "";
-  document.getElementById("verPreviewRenderedTabs").innerHTML = "";
-  document.getElementById("verPreviewRenderedBody").textContent = "选择 server_id";
+  renderFileDiffWorkspace([], document.getElementById("verPreviewTable"), { empty: "选择 server_id" });
   updateDeployCmd();
   tryAutoPreviewOnVersionSelect();
   return rows.map((r) => r.path);
@@ -579,18 +636,42 @@ function renderFileList() {
   }
   showFilePreviewMessage("点击左侧文件查看内容");
   const canEdit = canWriteProject() && state.versionStatus !== "published";
-  fl.innerHTML = state.fileRows
-    .map((row, index) => {
-      const tags = (row.tags && row.tags.length ? row.tags : ["*"]).map(
-        (tag) => `<span class="file-tag">${escapeHtml(tag)}</span>`
-      ).join("");
-      const actions = canEdit
+  fl.innerHTML = buildFileTreeRows(state.fileRows, {
+    canEdit,
+    rowAttr: (row, index) => `data-preview-index="${index}"`,
+    tags: (row) => row.tags || ["*"],
+    actions: (row, index) =>
+      canEdit
         ? `<button type="button" class="file-tag-action" data-action="edit-tags" data-index="${index}">编辑</button>
            <button type="button" class="file-tag-action" data-action="clear-tags" data-index="${index}">清空</button>`
-        : "";
-      return `<div class="file-row" data-preview-index="${index}">
-        <span class="file-path">${escapeHtml(row.path)}</span>
-        <span class="file-actions">${actions}</span>
+        : "",
+  });
+}
+
+function buildFileTreeRows(rows, opts = {}) {
+  const files = (rows || []).map((row, index) => ({ row, index, path: row.path || row }));
+  const folders = new Set();
+  files.forEach(({ path }) => {
+    const parts = String(path).split("/");
+    for (let i = 1; i < parts.length; i += 1) folders.add(parts.slice(0, i).join("/"));
+  });
+  const folderRows = [...folders].sort().map((path) => ({ path, type: "folder" }));
+  const fileRows = files.map((x) => ({ ...x, type: "file" }));
+  return [...folderRows, ...fileRows]
+    .sort((a, b) => a.path.localeCompare(b.path))
+    .map((item) => {
+      const depth = Math.max(0, item.path.split("/").length - 1);
+      if (item.type === "folder") {
+        return `<div class="file-row tree-folder" style="--depth:${depth}">
+          <span class="file-path">▾ ${escapeHtml(item.path.split("/").pop())}</span>
+        </div>`;
+      }
+      const tags = (opts.tags ? opts.tags(item.row, item.index) : ["*"]).map(
+        (tag) => `<span class="file-tag">${escapeHtml(tag)}</span>`
+      ).join("");
+      return `<div class="file-row tree-file" style="--depth:${depth}" ${opts.rowAttr ? opts.rowAttr(item.row, item.index) : ""}>
+        <span class="file-path">${escapeHtml(item.path.split("/").pop())}</span>
+        <span class="file-actions">${opts.actions ? opts.actions(item.row, item.index) : ""}</span>
         <span class="file-tags">${tags}</span>
       </div>`;
     })
@@ -739,56 +820,151 @@ async function runDeployPreviewAuto() {
 }
 
 function renderPreviewReport(report, container) {
-  let html = `<p class="hint"><strong>${escapeHtml(report.project)}</strong> / ${escapeHtml(report.version)} / <code>${escapeHtml(report.server_id)}</code></p>`;
-  (report.warnings || []).forEach((w) => {
-    html += `<p class="warn">⚠ ${escapeHtml(w)}</p>`;
+  const rendered = (report.rendered_files || []).map((f) => ({
+    path: f.path || f.basename,
+    basename: f.basename,
+    from: f.before || "",
+    to: f.after || "",
+    change: f.before === f.after ? "unchanged" : "modified",
+  })).filter((f) => f.change !== "unchanged");
+  const meta = [];
+  meta.push(`<strong>${escapeHtml(report.project)}</strong>`);
+  meta.push(escapeHtml(report.version));
+  meta.push(`<code>${escapeHtml(report.server_id)}</code>`);
+  if (report.post_hook) meta.push(`post_hook <code>${escapeHtml(report.post_hook)}</code>`);
+  const warnings = (report.warnings || []).map((w) => `<span class="diff-count warn">${escapeHtml(w)}</span>`).join("");
+  renderFileDiffWorkspace(rendered, container, {
+    empty: "无 replacements 或未匹配配置文件",
+    summary: `${meta.join(" / ")} ${warnings}`,
+    beforeTitle: "原版",
+    afterTitle: "替换后",
+    preservePreviewIds: container?.id === "verPreviewTable",
   });
-  if (!report.files?.length) {
-    html += "<p>无 replacements 或未匹配配置文件</p>";
-  } else {
-    html += `<table class="preview-table"><thead><tr><th>文件</th><th>路径</th><th>键</th><th>前</th><th>后</th><th></th></tr></thead><tbody>`;
-    for (const f of report.files) {
-      const path = (f.paths && f.paths[0]) || "—";
-      for (const c of f.changes || []) {
-        const cls =
-          c.action === "add" ? "action-add" : c.action === "unchanged" ? "action-unchanged" : "action-replace";
-        html += `<tr><td>${escapeHtml(f.basename)}</td><td><code>${escapeHtml(path)}</code></td><td>${escapeHtml(c.key)}</td><td>${escapeHtml(c.before || "")}</td><td>${escapeHtml(c.after || "")}</td><td class="${cls}">${c.action}</td></tr>`;
-      }
-    }
-    html += "</tbody></table>";
-  }
-  if (report.post_hook) html += `<p class="hint">post_hook: <code>${escapeHtml(report.post_hook)}</code></p>`;
-  if (report.post_hook_plan?.length) {
-    html += `<p class="hint">计划: ${report.post_hook_plan.map((x) => `<code>${escapeHtml(x)}</code>`).join(" ")}</p>`;
-  }
-  container.innerHTML = html;
-  renderRenderedFiles(report.rendered_files || []);
 }
 
-function renderRenderedFiles(files) {
-  const tabs = document.getElementById("verPreviewRenderedTabs");
-  const body = document.getElementById("verPreviewRenderedBody");
-  if (!tabs || !body) return;
-  if (!files.length) {
-    tabs.innerHTML = "";
-    body.textContent = "无 replacements 或未匹配配置文件";
-    return;
-  }
-  if (renderedPreviewIndex >= files.length) renderedPreviewIndex = 0;
-  tabs.innerHTML = files
-    .map(
-      (f, i) =>
-        `<button type="button" class="${i === renderedPreviewIndex ? "active" : ""}" data-idx="${i}">${escapeHtml(f.basename)}</button>`
-    )
-    .join("");
-  tabs.querySelectorAll("button").forEach((btn) => {
+function renderFileDiffWorkspace(files, container, opts = {}) {
+  if (!container) return;
+  const list = files || [];
+  const selected = Math.min(container.__diffIndex || 0, Math.max(0, list.length - 1));
+  container.__diffIndex = selected;
+  const beforeId = opts.preservePreviewIds ? "verPreviewOriginalBody" : "";
+  const afterId = opts.preservePreviewIds ? "verPreviewRenderedBody" : "";
+  const testAttr = opts.preservePreviewIds ? 'data-testid="preview-rendered-body"' : "";
+  container.classList.add("diff-workspace");
+  container.innerHTML = `${opts.summary ? `<div class="diff-summary">${opts.summary}</div>` : ""}
+    <aside class="diff-tree-panel">
+      <div class="panel-label">文件树</div>
+      ${list.length ? buildDiffTree(list, selected) : `<div class="empty-diff">${escapeHtml(opts.empty || "无差异")}</div>`}
+    </aside>
+    <section class="diff-main">
+      <div class="diff-pane">
+        <div class="diff-pane-head">${escapeHtml(opts.beforeTitle || "旧版本")}</div>
+        <pre ${beforeId ? `id="${beforeId}"` : ""} class="diff-code language-none"><code></code></pre>
+      </div>
+      <div class="diff-pane">
+        <div class="diff-pane-head">${escapeHtml(opts.afterTitle || "新版本")}</div>
+        <pre ${afterId ? `id="${afterId}"` : ""} class="diff-code language-none" ${testAttr}><code></code></pre>
+      </div>
+    </section>`;
+  container.querySelectorAll("[data-diff-index]").forEach((btn) => {
     btn.onclick = () => {
-      renderedPreviewIndex = Number(btn.dataset.idx);
-      renderRenderedFiles(files);
+      container.__diffIndex = Number(btn.dataset.diffIndex);
+      renderFileDiffWorkspace(list, container, opts);
     };
   });
-  const cur = files[renderedPreviewIndex];
-  body.textContent = `# ${cur.path}\n\n${cur.after}`;
+  if (!list.length) {
+    const msg = opts.empty || "无差异";
+    renderCodeLines(container.querySelector(".diff-pane:first-child .diff-code code"), msg);
+    renderCodeLines(container.querySelector(".diff-pane:last-child .diff-code code"), msg);
+    return;
+  }
+  const current = list[selected];
+  const [left, right] = buildSideBySideDiff(current.from || "", current.to || "");
+  renderCodeLines(container.querySelector(".diff-pane:first-child .diff-code code"), left);
+  renderCodeLines(container.querySelector(".diff-pane:last-child .diff-code code"), right);
+}
+
+function buildDiffTree(files, selected) {
+  const folders = new Set();
+  files.forEach((f) => {
+    const parts = String(f.path).split("/");
+    for (let i = 1; i < parts.length; i += 1) folders.add(parts.slice(0, i).join("/"));
+  });
+  const rows = [
+    ...[...folders].map((path) => ({ path, type: "folder" })),
+    ...files.map((f, index) => ({ ...f, index, type: "file" })),
+  ].sort((a, b) => a.path.localeCompare(b.path));
+  return `<div class="diff-tree">${rows.map((item) => {
+    const depth = Math.max(0, String(item.path).split("/").length - 1);
+    if (item.type === "folder") {
+      return `<div class="diff-tree-row folder" style="padding-left:${0.45 + depth * 1.1}rem">
+        <span class="diff-tree-name">▾ ${escapeHtml(item.path.split("/").pop())}</span>
+      </div>`;
+    }
+    return `<button type="button" class="diff-tree-row ${item.index === selected ? "active" : ""}" style="padding-left:${0.45 + depth * 1.1}rem" data-diff-index="${item.index}">
+      <span class="diff-tree-name">${escapeHtml(item.path.split("/").pop())}</span>
+      <span class="diff-tree-badges"><span class="file-tag">${escapeHtml(item.change || "modified")}</span></span>
+    </button>`;
+  }).join("")}</div>`;
+}
+
+function buildSideBySideDiff(before, after) {
+  const a = splitLines(before);
+  const b = splitLines(after);
+  if (a.length * b.length > 120000) return buildSimpleDiff(a, b);
+  const dp = Array.from({ length: a.length + 1 }, () => Array(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i -= 1) {
+    for (let j = b.length - 1; j >= 0; j -= 1) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const left = [];
+  const right = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && a[i] === b[j]) {
+      left.push({ no: i + 1, text: a[i], cls: "" });
+      right.push({ no: j + 1, text: b[j], cls: "" });
+      i += 1;
+      j += 1;
+    } else if (j < b.length && (i === a.length || dp[i][j + 1] >= dp[i + 1][j])) {
+      left.push({ no: "", text: "", cls: "no" });
+      right.push({ no: j + 1, text: b[j], cls: "added" });
+      j += 1;
+    } else {
+      left.push({ no: i + 1, text: a[i], cls: "removed" });
+      right.push({ no: "", text: "", cls: "no" });
+      i += 1;
+    }
+  }
+  return [left, right];
+}
+
+function buildSimpleDiff(a, b) {
+  const max = Math.max(a.length, b.length);
+  const left = [];
+  const right = [];
+  for (let i = 0; i < max; i += 1) {
+    const same = a[i] === b[i];
+    left.push({ no: i < a.length ? i + 1 : "", text: a[i] || "", cls: same ? "" : (i < a.length ? "changed" : "no") });
+    right.push({ no: i < b.length ? i + 1 : "", text: b[i] || "", cls: same ? "" : (i < b.length ? "changed" : "no") });
+  }
+  return [left, right];
+}
+
+function splitLines(text) {
+  const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
+  if (lines.length && lines[lines.length - 1] === "") lines.pop();
+  return lines.length ? lines : [""];
+}
+
+function renderCodeLines(code, rows) {
+  if (!code) return;
+  code.innerHTML = rows.map((row) => `<span class="diff-line ${row.cls || ""}">
+    <span class="diff-line-num">${escapeHtml(row.no)}</span>
+    <span class="diff-line-text">${escapeHtml(row.text || "")}</span>
+  </span>`).join("");
 }
 
 function escapeHtml(s) {
@@ -807,14 +983,14 @@ async function fetchDeployPreview(project, version, serverId) {
 document.getElementById("btnVerPreview").onclick = async () => {
   const sid = document.getElementById("verPreviewServerId").value.trim();
   if (!state.projectName || !state.version || !sid) {
-    alert("请选择版本并填写 server_id");
+    showToast("请选择版本并填写 server_id", "warn");
     return;
   }
   try {
     const d = await fetchDeployPreview(state.projectName, state.version, sid);
     renderPreviewReport(d, document.getElementById("verPreviewTable"));
   } catch (e) {
-    alert(e.message);
+    showToast(e.message, "error");
   }
 };
 
@@ -824,7 +1000,8 @@ function tryAutoPreviewOnVersionSelect() {
 }
 
 document.getElementById("btnDelProject").onclick = async () => {
-  if (!state.projectId || !confirm("删除项目及所有版本？")) return;
+  if (!state.projectId) return;
+  if (!(await showConfirm({ title: "删除项目", message: "删除项目及所有版本？", confirmText: "删除", danger: true }))) return;
   await api(`/api/projects/${state.projectId}`, { method: "DELETE" });
   state.projectId = null;
   setGlobalView("workspace");
@@ -863,7 +1040,7 @@ document.getElementById("btnValidate").onclick = async () => {
     (r.warnings || []).forEach((w) => (html += `<p class="hint">⚠ ${escapeHtml(w)}</p>`));
     el.innerHTML = html;
   } catch (e) {
-    alert(e.message);
+    showToast(e.message, "error");
   }
 };
 
@@ -876,13 +1053,14 @@ document.getElementById("btnSubmitReview")?.addEventListener("click", async () =
 });
 
 document.getElementById("btnRejectReview")?.addEventListener("click", async () => {
-  if (!state.projectId || !state.version || !confirm("驳回？")) return;
+  if (!state.projectId || !state.version) return;
+  if (!(await showConfirm({ title: "驳回版本", message: "确认驳回当前版本？", confirmText: "驳回" }))) return;
   await api(`/api/projects/${state.projectId}/versions/${encodeURIComponent(state.version)}/reject`, { method: "POST" });
   selectProject({ id: state.projectId, name: state.projectName });
 });
 
 document.getElementById("btnPublish").onclick = async () => {
-  if (!confirm("发布后不可修改。确认？")) return;
+  if (!(await showConfirm({ title: "正式发布", message: "发布后不可修改。确认发布当前版本？", confirmText: "发布" }))) return;
   const ver = state.version;
   await api(`/api/projects/${state.projectId}/versions/${encodeURIComponent(ver)}/publish`, { method: "POST" });
   await selectProject({ id: state.projectId, name: state.projectName });
@@ -896,11 +1074,11 @@ document.getElementById("btnVersionDiff")?.addEventListener("click", async () =>
   const to = document.getElementById("diffToVer")?.value;
   const sid = document.getElementById("diffServerId")?.value.trim();
   if (!state.projectName || !from || !to || !sid) {
-    alert("选择 from/to 版本并填写 server_id");
+    showToast("选择 from/to 版本并填写 server_id", "warn");
     return;
   }
   if (from === to) {
-    alert("from 和 to 不能相同");
+    showToast("from 和 to 不能相同", "warn");
     return;
   }
   try {
@@ -908,30 +1086,31 @@ document.getElementById("btnVersionDiff")?.addEventListener("click", async () =>
     const d = await api("/api/deploy/diff?" + q);
     renderVersionDiff(d, document.getElementById("versionDiffOut"));
   } catch (e) {
-    alert(e.message);
+    showToast(e.message, "error");
   }
 });
 
 function renderVersionDiff(report, container) {
   if (!container) return;
-  let html = `<p>${escapeHtml(report.from_version)} → ${escapeHtml(report.to_version)}</p>`;
-  if (!report.files?.length) {
-    container.innerHTML = html + "<p>无差异</p>";
-    return;
-  }
-  for (const f of report.files) {
-    html += `<h4>${escapeHtml(f.basename)}</h4><table class="preview-table"><thead><tr><th>键</th><th></th><th>from</th><th>to</th></tr></thead><tbody>`;
-    for (const k of f.keys || []) {
-      html += `<tr><td>${escapeHtml(k.key)}</td><td>${escapeHtml(k.change)}</td><td>${escapeHtml(k.from || "")}</td><td>${escapeHtml(k.to || "")}</td></tr>`;
-    }
-    html += "</tbody></table>";
-  }
-  container.innerHTML = html;
+  const files = (report.file_diffs || []).map((f) => ({
+    path: f.path || f.basename,
+    basename: f.basename,
+    from: f.from || "",
+    to: f.to || "",
+    change: f.change || "modified",
+  }));
+  const keyChanges = (report.files || []).reduce((n, f) => n + (f.keys || []).length, 0);
+  renderFileDiffWorkspace(files, container, {
+    empty: "无文件差异",
+    summary: `<strong>${escapeHtml(report.from_version)}</strong> → <strong>${escapeHtml(report.to_version)}</strong> <code>${escapeHtml(report.server_id)}</code> <span class="diff-count">${files.length} 个文件</span> <span class="diff-count">${keyChanges} 个配置键</span>`,
+    beforeTitle: `旧版本 ${report.from_version}`,
+    afterTitle: `新版本 ${report.to_version}`,
+  });
 }
 
 document.getElementById("btnDeleteVersion").onclick = async () => {
-  if (!confirm("删除版本 " + state.version + "？")) return;
-  if (!confirm("再次确认删除")) return;
+  if (!(await showConfirm({ title: "删除版本", message: `删除版本 ${state.version}？`, confirmText: "继续", danger: true }))) return;
+  if (!(await showConfirm({ title: "再次确认", message: "该操作会删除版本文件，确认继续？", confirmText: "删除", danger: true }))) return;
   await api(`/api/projects/${state.projectId}/versions/${state.version}?confirm=yes`, { method: "DELETE" });
   selectProject({ id: state.projectId, name: state.projectName });
 };
@@ -939,22 +1118,56 @@ document.getElementById("btnDeleteVersion").onclick = async () => {
 async function uploadFiles(files) {
   const tags = parseTagsInput(document.getElementById("uploadTags")?.value || "");
   for (const file of files) {
+    await uploadOneFileWithRetry(file, tags, 3);
+  }
+  selectVersion({ version: state.version, status: state.versionStatus, created_at: "", published_at: "" });
+}
+
+async function uploadOneFileWithRetry(file, tags, retries) {
+  let lastErr = null;
+  for (let attempt = 1; attempt <= retries; attempt += 1) {
+    try {
+      await uploadOneFile(file, tags, attempt);
+      return;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < retries) {
+        showToast(`${file.name} 上传失败，正在重试 ${attempt + 1}/${retries}`, "warn", 2200);
+        await sleep(650 * attempt);
+      }
+    }
+  }
+  throw lastErr;
+}
+
+function uploadOneFile(file, tags, attempt) {
+  return new Promise((resolve, reject) => {
     const fd = new FormData();
     fd.append("file", file);
     fd.append("path", file.name);
     tags.forEach((tag) => fd.append("tags", tag));
-    const headers = {};
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/projects/${state.projectId}/versions/${state.version}/files`);
+    xhr.withCredentials = true;
+    xhr.timeout = 5 * 60 * 1000;
     const t = getToken();
-    if (t) headers.Authorization = `Bearer ${t}`;
-    const r = await fetch(`/api/projects/${state.projectId}/versions/${state.version}/files`, {
-      method: "POST",
-      credentials: "include",
-      headers,
-      body: fd,
-    });
-    if (!r.ok) throw new Error(await readErrorMessage(r));
-  }
-  selectVersion({ version: state.version, status: state.versionStatus, created_at: "", published_at: "" });
+    if (t) xhr.setRequestHeader("Authorization", `Bearer ${t}`);
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        if (attempt > 1) showToast(`${file.name} 上传成功`, "ok");
+        resolve();
+        return;
+      }
+      reject(new Error(xhr.responseText || `upload failed ${xhr.status}`));
+    };
+    xhr.onerror = () => reject(new Error(`${file.name} 网络错误`));
+    xhr.ontimeout = () => reject(new Error(`${file.name} 上传超时`));
+    xhr.send(fd);
+  });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 document.getElementById("fileList")?.addEventListener("click", async (e) => {
@@ -970,7 +1183,11 @@ document.getElementById("fileList")?.addEventListener("click", async (e) => {
   if (!row) return;
   try {
     if (btn.dataset.action === "edit-tags") {
-      const next = prompt(`设置 ${row.path} 的标签（逗号分隔，空=*）`, (row.tags || ["*"]).join(","));
+      const next = await showPrompt({
+        title: "设置文件标签",
+        message: `${row.path}（逗号分隔，空=*）`,
+        value: (row.tags || ["*"]).join(","),
+      });
       if (next === null) return;
       await api(`/api/projects/${state.projectId}/versions/${encodeURIComponent(state.version)}/file-tags`, {
         method: "PUT",
@@ -986,7 +1203,7 @@ document.getElementById("fileList")?.addEventListener("click", async (e) => {
       await loadVersionFileTags();
     }
   } catch (err) {
-    alert(err.message);
+    showToast(err.message, "error");
   }
 });
 
@@ -1006,7 +1223,7 @@ document.getElementById("btnApplyFileTags")?.addEventListener("click", async () 
     });
     await loadVersionFileTags();
   } catch (err) {
-    alert(err.message);
+    showToast(err.message, "error");
   }
 });
 
@@ -1014,7 +1231,7 @@ document.getElementById("fileInput").onchange = async (e) => {
   try {
     await uploadFiles(e.target.files);
   } catch (err) {
-    alert(err.message);
+    showToast(err.message, "error");
   }
 };
 
@@ -1032,7 +1249,7 @@ if (dropZone) {
     try {
       await uploadFiles(e.dataTransfer.files);
     } catch (err) {
-      alert(err.message);
+      showToast(err.message, "error");
     }
   });
 }
@@ -1048,7 +1265,7 @@ document.getElementById("btnSaveYaml").onclick = async () => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content: document.getElementById("serverYaml").value }),
   });
-  alert("已保存");
+  showToast("已保存", "ok");
   loadServerIDs();
 };
 
@@ -1057,14 +1274,14 @@ document.getElementById("btnPreview").onclick = async () => {
   const version = document.getElementById("previewVersion").value.trim();
   const serverId = document.getElementById("previewServerId").value.trim();
   if (!project || !version || !serverId) {
-    alert("填写 project / version / server_id");
+    showToast("填写 project / version / server_id", "warn");
     return;
   }
   try {
     const d = await fetchDeployPreview(project, version, serverId);
     renderPreviewReport(d, document.getElementById("previewOut"));
   } catch (e) {
-    alert(e.message);
+    showToast(e.message, "error");
   }
 };
 
@@ -1087,7 +1304,7 @@ async function loadUsers() {
   });
   tbody.querySelectorAll(".del").forEach((b) => {
     b.onclick = async () => {
-      if (!confirm("删除用户？")) return;
+      if (!(await showConfirm({ title: "删除用户", message: "确认删除该账号？", confirmText: "删除", danger: true }))) return;
       await api(`/api/users/${b.dataset.id}`, { method: "DELETE" });
       loadUsers();
     };
@@ -1156,14 +1373,18 @@ document.getElementById("btnSystemUpdateStatus")?.addEventListener("click", load
 
 document.getElementById("btnSystemUpdate")?.addEventListener("click", async () => {
   if (!state.isRoot) return;
-  if (!confirm("更新中央服到最新 Release？更新过程中服务会短暂重启。")) return;
+  if (!(await showConfirm({
+    title: "更新中央服",
+    message: "更新到最新 Release？更新过程中服务会短暂重启。",
+    confirmText: "开始更新",
+  }))) return;
   const btn = document.getElementById("btnSystemUpdate");
   if (btn) btn.disabled = true;
   try {
     const st = await api("/api/system/update", { method: "POST" });
     renderSystemUpdateStatus(st);
   } catch (e) {
-    alert(e.message);
+    showToast(e.message, "error");
     if (btn) btn.disabled = false;
   }
 });
@@ -1177,7 +1398,7 @@ document.getElementById("btnChangeMyPass")?.addEventListener("click", async () =
       new_password: document.getElementById("myNewPass").value,
     }),
   });
-  alert("密码已更新");
+  showToast("密码已更新", "ok");
 });
 
 async function parseInviteHash() {
@@ -1196,7 +1417,7 @@ async function parseInviteHash() {
     text.textContent = `邀请加入「${info.project_name}」· ${info.role === "admin" ? "管理员" : "只读"}${info.expired ? "（已过期）" : ""}`;
     document.getElementById("btnAcceptInvite").disabled = !!info.expired;
   } catch (e) {
-    alert("邀请无效: " + e.message);
+    showToast("邀请无效: " + e.message, "error");
   }
 }
 
@@ -1213,7 +1434,7 @@ document.getElementById("btnAcceptInvite")?.addEventListener("click", async () =
     const found = state.projects.find((x) => x.name === p.name);
     if (found) selectProject(found);
   } catch (e) {
-    alert(e.message);
+    showToast(e.message, "error");
     if (e.message.includes("登录")) showLogin();
   }
 });
@@ -1473,7 +1694,7 @@ async function startOnboarding({ force = true } = {}) {
   if (!force && hasSeenOnboarding()) return;
   const makeDriver = driverFactory();
   if (!makeDriver) {
-    alert("新手引导组件加载失败，请稍后重试。");
+    showToast("新手引导组件加载失败，请稍后重试。", "error");
     return;
   }
   let preparing = false;
@@ -1616,7 +1837,7 @@ document.getElementById("btnDemoProject")?.addEventListener("click", async () =>
   try {
     await ensureDemoProject({ select: true });
   } catch (e) {
-    alert("创建演示项目失败: " + e.message);
+    showToast("创建演示项目失败: " + e.message, "error");
   } finally {
     btn.disabled = false;
     btn.textContent = "添加演示项目";
@@ -1638,9 +1859,171 @@ document.getElementById("btnCreateInvite")?.addEventListener("click", async () =
   if (el) {
     el.value = d.url;
     navigator.clipboard.writeText(d.url);
-    alert("已复制邀请链接");
+    showToast("已复制邀请链接", "ok");
   }
 });
 
-document.title = "BEFORE_INIT";
-init().then(() => { document.title = "AFTER_INIT:" + (document.getElementById('login')?.classList.contains('hidden') ? 'OK' : 'LOGIN'); }).catch(e => { document.title = "INIT_CATCH:" + String(e); });
+let storageSelectedPath = null;
+
+function formatStorageKind(kind) {
+  const map = { project: "项目", version: "版本", file: "文件", folder: "目录", tenant: "租户", blob: "Blob", orphan_blob: "孤立 Blob" };
+  return map[kind] || kind;
+}
+
+async function loadStorageOverview() {
+  try {
+    const ov = await api("/api/storage/overview");
+    renderStorageStats(ov);
+    renderStorageBars(ov);
+    const tree = await api("/api/storage/tree");
+    renderStorageTree(tree);
+    storageSelectedPath = null;
+    updateStorageDetail(null);
+  } catch (e) {
+    showToast("加载存储信息失败: " + e.message, "error");
+  }
+}
+
+function renderStorageStats(ov) {
+  const el = document.getElementById("storageStats");
+  if (!el) return;
+  const avail = ov.available_bytes ? ` · 可用 ${formatBytes(ov.available_bytes)}` : "";
+  el.innerHTML = `<div class="storage-stat-row">
+    <span>数据目录 <code>${escapeHtml(ov.data_dir || "")}</code></span>
+    <span>已用 ${formatBytes(ov.total_bytes)}${avail}</span>
+    <span>${ov.project_count || 0} 项目 · ${ov.version_count || 0} 版本</span>
+    <span>索引 ${ov.index_entry_count || 0} 条${ov.index_updated_at ? " · " + escapeHtml(ov.index_updated_at) : ""}</span>
+    <span>Blob ${ov.blob_stats?.blob_count || 0} 个 · 去重 ${formatBytes(ov.blob_stats?.total_bytes || 0)}</span>
+  </div>`;
+}
+
+function renderStorageBars(ov) {
+  const el = document.getElementById("storageBars");
+  if (!el) return;
+  const cats = ov.categories || [];
+  const total = cats.reduce((s, c) => s + (c.bytes || 0), 0) || ov.total_bytes || 1;
+  el.innerHTML = cats.map((c) => {
+    const pct = Math.max(2, Math.round((c.bytes / total) * 100));
+    return `<div class="storage-bar-row">
+      <div class="storage-bar-label"><span>${escapeHtml(c.label || c.name)}</span><span class="text-muted">${formatBytes(c.bytes)}</span></div>
+      <div class="storage-bar-track"><div class="storage-bar-fill" style="width:${pct}%"></div></div>
+    </div>`;
+  }).join("");
+}
+
+function renderStorageTree(node, container) {
+  const root = container || document.getElementById("storageTree");
+  if (!root || !node) return;
+  const renderNode = (n, depth = 0) => {
+    const hasKids = n.children && n.children.length;
+    const kids = hasKids ? `<div class="storage-tree-children">${n.children.map((c) => renderNode(c, depth + 1)).join("")}</div>` : "";
+    const meta = n.meta?.status ? ` <span class="badge badge-${n.meta.status === "published" ? "ok" : "draft"}">${escapeHtml(n.meta.status)}</span>` : "";
+    return `<button type="button" class="storage-tree-row${storageSelectedPath === n.path ? " active" : ""}" data-path="${escapeAttr(n.path)}" style="padding-left:${8 + depth * 12}px">
+      <span class="storage-tree-kind">${escapeHtml(formatStorageKind(n.kind))}</span>
+      <span class="storage-tree-name">${escapeHtml(n.name)}</span>${meta}
+      <span class="storage-tree-size text-muted">${formatBytes(n.size_bytes)}</span>
+    </button>${kids}`;
+  };
+  root.innerHTML = renderNode(node);
+  root.querySelectorAll(".storage-tree-row").forEach((btn) => {
+    btn.onclick = () => selectStoragePath(btn.dataset.path);
+  });
+}
+
+async function selectStoragePath(path) {
+  storageSelectedPath = path;
+  document.getElementById("storageSearchHits")?.classList.add("hidden");
+  document.querySelectorAll(".storage-tree-row").forEach((b) => b.classList.toggle("active", b.dataset.path === path));
+  try {
+    const plan = await api("/api/storage/delete-plan?path=" + encodeURIComponent(path));
+    updateStorageDetail(plan);
+  } catch (e) {
+    updateStorageDetail({ path, deny_reason: e.message, allowed: false });
+  }
+}
+
+function updateStorageDetail(plan) {
+  const el = document.getElementById("storageDetail");
+  const delBtn = document.getElementById("btnStorageDelete");
+  if (!el) return;
+  if (!plan) {
+    el.textContent = "选择左侧节点或搜索命中项";
+    delBtn?.classList.add("hidden");
+    return;
+  }
+  const warnings = (plan.warnings || []).map((w) => `<li>${escapeHtml(w)}</li>`).join("");
+  const related = (plan.related || []).map((r) => `<li>${escapeHtml(r)}</li>`).join("");
+  el.innerHTML = `<dl class="storage-detail-dl">
+    <dt>路径</dt><dd><code>${escapeHtml(plan.path || "")}</code></dd>
+    <dt>类型</dt><dd>${escapeHtml(formatStorageKind(plan.kind || ""))}</dd>
+    <dt>大小</dt><dd>${formatBytes(plan.size_bytes || 0)}</dd>
+    ${plan.deny_reason ? `<dt>不可删</dt><dd class="err">${escapeHtml(plan.deny_reason)}</dd>` : ""}
+    ${warnings ? `<dt>提示</dt><dd><ul>${warnings}</ul></dd>` : ""}
+    ${related ? `<dt>关联</dt><dd><ul>${related}</ul></dd>` : ""}
+  </dl>`;
+  if (plan.allowed) delBtn?.classList.remove("hidden");
+  else delBtn?.classList.add("hidden");
+}
+
+async function runStorageSearch() {
+  const q = document.getElementById("storageSearch")?.value.trim();
+  const hitsEl = document.getElementById("storageSearchHits");
+  if (!q) {
+    hitsEl?.classList.add("hidden");
+    return;
+  }
+  const data = await api("/api/storage/search?q=" + encodeURIComponent(q));
+  const hits = data.hits || [];
+  if (!hitsEl) return;
+  hitsEl.classList.remove("hidden");
+  hitsEl.innerHTML = hits.length
+    ? hits.map((h) => `<button type="button" class="storage-hit-row" data-path="${escapeAttr(h.path)}">
+        <span>${escapeHtml(h.name)}</span>
+        <span class="text-muted">${escapeHtml(h.project_name || "")} ${escapeHtml(h.version || "")}</span>
+        <span class="text-muted">${formatBytes(h.size_bytes)}</span>
+      </button>`).join("")
+    : `<p class="hint">无匹配结果，可尝试重建索引</p>`;
+  hitsEl.querySelectorAll(".storage-hit-row").forEach((btn) => {
+    btn.onclick = () => selectStoragePath(btn.dataset.path);
+  });
+}
+
+document.getElementById("btnStorageReindex")?.addEventListener("click", async () => {
+  try {
+    const d = await api("/api/storage/reindex", { method: "POST" });
+    showToast(`索引已重建（${d.entries} 条）`, "ok");
+    await loadStorageOverview();
+  } catch (e) {
+    showToast("重建索引失败: " + e.message, "error");
+  }
+});
+
+document.getElementById("storageSearch")?.addEventListener("input", () => {
+  clearTimeout(window._storageSearchTimer);
+  window._storageSearchTimer = setTimeout(() => runStorageSearch().catch((e) => showToast(e.message, "error")), 300);
+});
+
+document.getElementById("btnStorageDelete")?.addEventListener("click", async () => {
+  if (!storageSelectedPath) return;
+  const plan = await api("/api/storage/delete-plan?path=" + encodeURIComponent(storageSelectedPath));
+  const ok = await showConfirm({
+    title: "确认删除",
+    message: `将删除 ${storageSelectedPath}（${formatBytes(plan.size_bytes || 0)}）。此操作不可撤销。`,
+    confirmText: "删除",
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await api("/api/storage/items", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: storageSelectedPath }),
+    });
+    showToast("已删除", "ok");
+    await loadStorageOverview();
+  } catch (e) {
+    showToast("删除失败: " + e.message, "error");
+  }
+});
+
+init();
