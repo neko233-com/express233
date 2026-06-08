@@ -6,6 +6,8 @@
   <meta name="color-scheme" content="dark" />
   <title>express233</title>
   <link rel="stylesheet" href="/vendor/driver.js/driver.css" />
+  <link rel="stylesheet" href="/vendor/file-tree/file-tree.css" />
+  <link rel="stylesheet" href="/vendor/prismjs/prism-tomorrow.css" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
@@ -222,7 +224,16 @@
                 <input type="file" id="fileInput" multiple data-testid="file-input" />
                 <span>点击或拖拽上传文件 / zip 包</span>
               </label>
-              <ul id="fileList" class="file-list" data-testid="file-list"></ul>
+              <div class="file-browser">
+                <div id="fileList" class="file-list" data-testid="file-list"></div>
+                <div class="file-preview">
+                  <div class="file-preview-head">
+                    <span id="filePreviewPath" class="file-preview-path">选择文件</span>
+                    <span id="filePreviewMeta" class="file-preview-meta"></span>
+                  </div>
+                  <pre id="filePreviewBody" class="file-preview-body language-none"><code>点击左侧文件查看内容</code></pre>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -299,6 +310,15 @@
     </main>
   </div>
   <script src="/vendor/driver.js/driver.js.iife.js"></script>
+  <script src="/vendor/prismjs/prism.js"></script>
+  <script src="/vendor/prismjs/prism-markup.min.js"></script>
+  <script src="/vendor/prismjs/prism-css.min.js"></script>
+  <script src="/vendor/prismjs/prism-javascript.min.js"></script>
+  <script src="/vendor/prismjs/prism-json.min.js"></script>
+  <script src="/vendor/prismjs/prism-yaml.min.js"></script>
+  <script src="/vendor/prismjs/prism-bash.min.js"></script>
+  <script src="/vendor/prismjs/prism-go.min.js"></script>
+  <script src="/vendor/prismjs/prism-properties.min.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

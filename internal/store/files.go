@@ -13,6 +13,8 @@ import (
 	"github.com/neko233-com/express233/internal/template"
 )
 
+const MaxPreviewFileBytes = 1 << 20
+
 // WriteVersionFile 写入版本内文件（仅 draft）。
 func (s *Store) WriteVersionFile(tenantID int64, projectName, version, relPath string, r io.Reader) error {
 	if err := s.assertDraft(tenantID, projectName, version); err != nil {
@@ -38,6 +40,32 @@ func (s *Store) DeleteVersionFile(tenantID int64, projectName, version, relPath 
 		return err
 	}
 	return s.releaseBlobLink(path)
+}
+
+// ReadVersionTextFile 读取版本内文本文件预览内容。
+func (s *Store) ReadVersionTextFile(tenantID int64, projectName, version, relPath string) ([]byte, int64, error) {
+	path, err := s.versionFilePath(tenantID, projectName, version, relPath)
+	if err != nil {
+		return nil, 0, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	if info.IsDir() {
+		return nil, 0, fmt.Errorf("path is directory")
+	}
+	if info.Size() > MaxPreviewFileBytes {
+		return nil, info.Size(), fmt.Errorf("file too large for preview")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, info.Size(), err
+	}
+	if !isLikelyText(data) {
+		return nil, info.Size(), fmt.Errorf("binary file preview not supported")
+	}
+	return data, info.Size(), nil
 }
 
 // ExtractZipToVersion 解压 zip 到版本目录（仅 draft）。
@@ -188,6 +216,15 @@ func (s *Store) versionFilePath(tenantID int64, projectName, version, relPath st
 		return "", err
 	}
 	return SafeJoinVersion(root, relPath)
+}
+
+func isLikelyText(data []byte) bool {
+	for _, b := range data {
+		if b == 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func validateZipConfigBasenames(zr *zip.Reader) error {

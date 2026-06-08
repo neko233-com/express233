@@ -55,6 +55,10 @@ let state = {
   projectTab: "versions",
 };
 
+let fileTree = null;
+let fileTreeModulePromise = null;
+let filePreviewRequestID = 0;
+
 function showLogin() {
   document.getElementById("login").classList.remove("hidden");
   document.getElementById("app").classList.add("hidden");
@@ -532,13 +536,12 @@ async function selectVersion(v) {
   document.getElementById("previewProject").value = state.projectName || "";
   document.getElementById("previewVersion").value = v.version;
   const files = (await api(`/api/projects/${state.projectId}/versions/${v.version}/files`)) || [];
-  const fl = document.getElementById("fileList");
-  fl.innerHTML = files.map((f) => `<li>${escapeHtml(f)}</li>`).join("");
+  await renderVersionFileBrowser(files);
   try {
     const cfg = await api(`/api/projects/${state.projectId}/versions/${v.version}/config-files`);
     const dup = Object.entries(cfg.duplicates || {}).filter(([, n]) => n > 1);
     if (dup.length) {
-      fl.innerHTML += `<li class="warn">重复: ${dup.map(([b]) => b).join(", ")}</li>`;
+      showFilePreviewMessage(`重复配置文件 basename: ${dup.map(([b]) => b).join(", ")}`);
     }
   } catch (_) {}
   document.getElementById("verPreviewTable").innerHTML = "";
@@ -547,6 +550,115 @@ async function selectVersion(v) {
   updateDeployCmd();
   tryAutoPreviewOnVersionSelect();
   return files;
+}
+
+async function loadFileTreeModule() {
+  if (!fileTreeModulePromise) {
+    fileTreeModulePromise = import("/vendor/file-tree/file-tree.js");
+  }
+  return fileTreeModulePromise;
+}
+
+async function renderVersionFileBrowser(files) {
+  const container = document.getElementById("fileList");
+  if (!container) return;
+  if (fileTree) {
+    fileTree.destroy();
+    fileTree = null;
+  }
+  container.innerHTML = "";
+  showFilePreviewMessage(files.length ? "点击左侧文件查看内容" : "当前版本无文件");
+  if (!files.length) {
+    container.innerHTML = `<p class="hint">暂无文件</p>`;
+    return;
+  }
+  try {
+    const { FileTree } = await loadFileTreeModule();
+    fileTree = new FileTree(container, {
+      data: files.map((path) => ({ path, type: "file" })),
+      theme: "dark",
+      dragAndDrop: false,
+      toolbar: {
+        createFile: false,
+        createFolder: false,
+        expandAll: true,
+        collapseAll: true,
+        custom: [],
+      },
+      contextMenu: false,
+    });
+    fileTree.expandAll();
+    fileTree.on("select", (e) => {
+      if (e.node?.type === "file") previewVersionFile(e.path);
+    });
+  } catch (e) {
+    container.innerHTML = files.map((f) => `<button type="button" class="file-row" data-path="${escapeAttr(f)}">${escapeHtml(f)}</button>`).join("");
+    container.querySelectorAll(".file-row").forEach((btn) => {
+      btn.onclick = () => previewVersionFile(btn.dataset.path || "");
+    });
+  }
+}
+
+async function previewVersionFile(path) {
+  if (!state.projectId || !state.version || !path) return;
+  const requestID = ++filePreviewRequestID;
+  setFilePreviewHeader(path, "加载中...");
+  setHighlightedFileContent(path, "加载中...");
+  try {
+    const q = new URLSearchParams({ path });
+    const d = await api(`/api/projects/${state.projectId}/versions/${encodeURIComponent(state.version)}/files/content?${q}`);
+    if (requestID !== filePreviewRequestID) return;
+    setFilePreviewHeader(d.path, formatBytes(d.size));
+    setHighlightedFileContent(d.path, d.content || "");
+  } catch (e) {
+    if (requestID !== filePreviewRequestID) return;
+    setFilePreviewHeader(path, "");
+    setHighlightedFileContent(path, e.message || "无法预览");
+  }
+}
+
+function showFilePreviewMessage(message) {
+  setFilePreviewHeader("选择文件", "");
+  setHighlightedFileContent("", message);
+}
+
+function setFilePreviewHeader(path, meta) {
+  const title = document.getElementById("filePreviewPath");
+  const hint = document.getElementById("filePreviewMeta");
+  if (title) title.textContent = path || "选择文件";
+  if (hint) hint.textContent = meta || "";
+}
+
+function setHighlightedFileContent(path, content) {
+  const pre = document.getElementById("filePreviewBody");
+  if (!pre) return;
+  const lang = languageForPath(path);
+  pre.className = `file-preview-body language-${lang}`;
+  pre.innerHTML = `<code class="language-${lang}"></code>`;
+  const code = pre.querySelector("code");
+  code.textContent = content;
+  if (window.Prism) Prism.highlightElement(code);
+}
+
+function languageForPath(path) {
+  const lower = String(path || "").toLowerCase();
+  const ext = lower.split(".").pop() || "";
+  if (["yaml", "yml"].includes(ext)) return "yaml";
+  if (ext === "json") return "json";
+  if (["js", "mjs", "cjs"].includes(ext)) return "javascript";
+  if (["html", "xml", "svg"].includes(ext)) return "markup";
+  if (ext === "css") return "css";
+  if (["sh", "bash", "cmd", "bat", "ps1"].includes(ext)) return "bash";
+  if (ext === "go") return "go";
+  if (["properties", "conf", "ini", "env"].includes(ext)) return "properties";
+  return "none";
+}
+
+function formatBytes(size) {
+  const n = Number(size) || 0;
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
 let previewDebounceTimer = null;
@@ -629,6 +741,10 @@ function renderRenderedFiles(files) {
 
 function escapeHtml(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function escapeAttr(s) {
+  return escapeHtml(s).replace(/"/g, "&quot;");
 }
 
 async function fetchDeployPreview(project, version, serverId) {

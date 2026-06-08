@@ -109,6 +109,7 @@ func (s *Server) Router() http.Handler {
 			r.Get("/projects/{id}/versions", s.handleListVersions)
 			r.Get("/projects/{id}/versions/{ver}/validate", s.handleValidateVersion)
 			r.Get("/projects/{id}/versions/{ver}/download", s.handleDownloadVersion)
+			r.Get("/projects/{id}/versions/{ver}/files/content", s.handleReadVersionFile)
 			r.Get("/projects/{id}/versions/{ver}/files", s.handleListVersionFiles)
 			r.Get("/projects/{id}/versions/{ver}/config-files", s.handleListConfigFiles)
 		})

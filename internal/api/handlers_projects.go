@@ -224,6 +224,32 @@ func (s *Server) handleListVersionFiles(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, files)
 }
 
+func (s *Server) handleReadVersionFile(w http.ResponseWriter, r *http.Request) {
+	pid, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	ver := chi.URLParam(r, "ver")
+	rel := r.URL.Query().Get("path")
+	if rel == "" {
+		errJSON(w, http.StatusBadRequest, "path query required")
+		return
+	}
+	pc, err := s.projectByID(r, pid)
+	if err != nil {
+		errJSON(w, http.StatusNotFound, "project not found")
+		return
+	}
+	tid, pname := pc.TenantID, pc.ProjectName
+	data, size, err := s.Store.ReadVersionTextFile(tid, pname, ver, rel)
+	if err != nil {
+		errJSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"path":    rel,
+		"size":    size,
+		"content": string(data),
+	})
+}
+
 func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 	pid, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	ver := chi.URLParam(r, "ver")
