@@ -100,6 +100,11 @@ func runStart(args []string) error {
 		return err
 	}
 	dataDir := resolveDataDir(data.Value(), data.IsSet())
+	listen, err := resolveListenAddr(dataDir, addr.Value(), addr.IsSet())
+	if err != nil {
+		return err
+	}
+	listen = normalizeListenAddr(listen)
 	if status, err := detectAutostartStatus(dataDir); err == nil && status.Enabled {
 		if addr.IsSet() || data.IsSet() {
 			return fmt.Errorf("autostart is enabled via %s; rerun enable-autostart to change addr/data", status.Backend)
@@ -107,18 +112,13 @@ func runStart(args []string) error {
 		if err := startManagedAutostart(dataDir); err != nil {
 			return err
 		}
-		fmt.Printf("started express233-server via %s\n", status.Backend)
+		fmt.Printf("started express233-server via %s url=%s addr=%s data=%s\n", status.Backend, browserURL(listen), listen, dataDir)
 		return nil
 	}
-	listen, err := resolveListenAddr(dataDir, addr.Value(), addr.IsSet())
-	if err != nil {
-		return err
-	}
-	listen = normalizeListenAddr(listen)
-	if _, _, ok, err := loadRuntimeState(dataDir); err != nil {
+	if st, _, ok, err := loadRuntimeState(dataDir); err != nil {
 		return err
 	} else if ok {
-		return fmt.Errorf("express233-server already running")
+		return fmt.Errorf("express233-server already running url=%s addr=%s data=%s", browserURL(st.Addr), st.Addr, st.DataDir)
 	}
 	if err := saveRuntimeConfig(dataDir, runtimeConfig{Addr: listen}); err != nil {
 		return err

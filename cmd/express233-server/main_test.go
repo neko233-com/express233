@@ -42,6 +42,18 @@ func TestRuntimeConfigRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStartTimeoutErrorIncludesURL(t *testing.T) {
+	dir := t.TempDir()
+	err := startRuntimeStateTimeoutError(dir, "127.0.0.1:23380")
+	msg := err.Error()
+	if !strings.Contains(msg, "url=http://127.0.0.1:23380") {
+		t.Fatalf("missing url in start error: %q", msg)
+	}
+	if !strings.Contains(msg, "data="+dir) {
+		t.Fatalf("missing data dir in start error: %q", msg)
+	}
+}
+
 func TestBackupAndRestoreServerConfig(t *testing.T) {
 	dir := t.TempDir()
 	path, err := serverConfigPath(dir)

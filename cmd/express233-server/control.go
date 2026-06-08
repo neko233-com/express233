@@ -508,7 +508,11 @@ func startDetachedServer(dataDir, listen string) (*runtimeState, error) {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	return nil, fmt.Errorf("server started but runtime state was not published in time; check %s", runtimeLogPath(dataDir))
+	return nil, startRuntimeStateTimeoutError(dataDir, listen)
+}
+
+func startRuntimeStateTimeoutError(dataDir, listen string) error {
+	return fmt.Errorf("server started but runtime state was not published in time; url=%s addr=%s data=%s log=%s", browserURL(listen), listen, dataDir, runtimeLogPath(dataDir))
 }
 
 func stopServer(st runtimeState) error {
