@@ -12,5 +12,5 @@ func diskAvailable(path string) int64 {
 	if err := syscall.Statfs(filepath.Clean(path), &stat); err != nil {
 		return 0
 	}
-	return int64(stat.Bavail) * stat.Bsize
+	return int64(stat.Bavail) * int64(stat.Bsize) // Bsize is uint32 on darwin
 }
