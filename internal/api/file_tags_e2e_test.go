@@ -70,6 +70,46 @@ func TestFileTagsFilterPullBundle(t *testing.T) {
 	}
 }
 
+func TestFileTagsAllAliasMatchesEveryTarget(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	srv := New(st)
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+	jar := login(t, ts, "root", "root")
+
+	mustPOST(t, ts, jar, "/api/projects", map[string]string{"name": "all-alias"})
+	projects := mustGET[[]map[string]any](t, ts, jar, "/api/projects")
+	pid := int(projects[0]["id"].(float64))
+	mustPOST(t, ts, jar, "/api/projects/"+itoa(pid)+"/versions", map[string]string{"name": "1.0.0"})
+	uploadTaggedFile(t, ts, jar, pid, "1.0.0", "bin/common-tool", "common", "all")
+	uploadTaggedFile(t, ts, jar, pid, "1.0.0", "bin/linux-tool", "linux", "linux-amd64")
+
+	rows, err := st.ListVersionFileTags(1, "all-alias", "1.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row.Path == "bin/common-tool" && (len(row.Tags) != 1 || row.Tags[0] != "*") {
+			t.Fatalf("all alias tags = %+v", row.Tags)
+		}
+	}
+
+	_ = os.WriteFile(mustServerYAML(st), []byte("servers:\n  s1:\n    replacements: {}\n"), 0o644)
+	srv.reloadServerYAML(1)
+	mustPOST(t, ts, jar, "/api/projects/"+itoa(pid)+"/versions/1.0.0/publish", nil)
+	users, _ := st.ListUsers(1)
+	token := users[0].Token
+
+	win := pullBundleFiles(t, ts.URL+"/api/pull?token="+token+"&project=all-alias&version=1.0.0&server_id=s1&os=windows&arch=amd64")
+	if !win["bin/common-tool"] || win["bin/linux-tool"] {
+		t.Fatalf("windows files with all alias: %+v", win)
+	}
+}
+
 func uploadTaggedFile(t *testing.T, ts *httptest.Server, jar []*http.Cookie, pid int, ver, path, content, tags string) {
 	t.Helper()
 	var buf bytes.Buffer

@@ -60,6 +60,11 @@ let state = {
 let fileTree = null;
 let fileTreeModulePromise = null;
 let filePreviewRequestID = 0;
+const collapsedFileTreeFolders = {
+  version: new Set(),
+  diff: new WeakMap(),
+  storage: new Set(),
+};
 
 function showToast(message, type = "ok", timeout = 3200) {
   const host = document.getElementById("toastHost");
@@ -637,14 +642,21 @@ function renderFileList() {
   showFilePreviewMessage("点击左侧文件查看内容");
   const canEdit = canWriteProject() && state.versionStatus !== "published";
   fl.innerHTML = buildFileTreeRows(state.fileRows, {
+    treeId: "version",
     canEdit,
     rowAttr: (row, index) => `data-preview-index="${index}"`,
-    tags: (row) => row.tags || ["*"],
+    tags: (row) => displayTags(row.tags),
     actions: (row, index) =>
       canEdit
         ? `<button type="button" class="file-tag-action" data-action="edit-tags" data-index="${index}">编辑</button>
            <button type="button" class="file-tag-action" data-action="clear-tags" data-index="${index}">清空</button>`
         : "",
+  });
+  fl.querySelectorAll("[data-tree-folder]").forEach((btn) => {
+    btn.onclick = () => {
+      toggleTreeFolder("version", btn.dataset.treeFolder);
+      renderFileList();
+    };
   });
 }
 
@@ -657,16 +669,21 @@ function buildFileTreeRows(rows, opts = {}) {
   });
   const folderRows = [...folders].sort().map((path) => ({ path, type: "folder" }));
   const fileRows = files.map((x) => ({ ...x, type: "file" }));
+  const treeId = opts.treeId || "version";
+  const collapsed = getCollapsedTreeSet(treeId);
   return [...folderRows, ...fileRows]
     .sort((a, b) => a.path.localeCompare(b.path))
+    .filter((item) => !hasCollapsedParent(item.path, collapsed))
     .map((item) => {
       const depth = Math.max(0, item.path.split("/").length - 1);
       if (item.type === "folder") {
-        return `<div class="file-row tree-folder" style="--depth:${depth}">
-          <span class="file-path">▾ ${escapeHtml(item.path.split("/").pop())}</span>
-        </div>`;
+        const isCollapsed = collapsed.has(item.path);
+        return `<button type="button" class="file-row tree-folder" style="--depth:${depth}" data-tree-folder="${escapeAttr(item.path)}" aria-expanded="${isCollapsed ? "false" : "true"}">
+          <span class="tree-caret" aria-hidden="true">${isCollapsed ? "▸" : "▾"}</span>
+          <span class="file-path">${escapeHtml(item.path.split("/").pop())}</span>
+        </button>`;
       }
-      const tags = (opts.tags ? opts.tags(item.row, item.index) : ["*"]).map(
+      const tags = (opts.tags ? opts.tags(item.row, item.index) : ["all"]).map(
         (tag) => `<span class="file-tag">${escapeHtml(tag)}</span>`
       ).join("");
       return `<div class="file-row tree-file" style="--depth:${depth}" ${opts.rowAttr ? opts.rowAttr(item.row, item.index) : ""}>
@@ -678,11 +695,36 @@ function buildFileTreeRows(rows, opts = {}) {
     .join("");
 }
 
+function getCollapsedTreeSet(treeId) {
+  if (!collapsedFileTreeFolders[treeId]) collapsedFileTreeFolders[treeId] = new Set();
+  return collapsedFileTreeFolders[treeId];
+}
+
+function toggleTreeFolder(treeId, path) {
+  if (!path) return;
+  const collapsed = getCollapsedTreeSet(treeId);
+  if (collapsed.has(path)) collapsed.delete(path);
+  else collapsed.add(path);
+}
+
+function hasCollapsedParent(path, collapsed) {
+  const parts = String(path || "").split("/");
+  for (let i = 1; i < parts.length; i += 1) {
+    if (collapsed.has(parts.slice(0, i).join("/"))) return true;
+  }
+  return false;
+}
+
 function parseTagsInput(value) {
   return String(value || "")
     .split(/[\s,;]+/)
     .map((x) => x.trim().toLowerCase())
     .filter(Boolean);
+}
+
+function displayTags(tags) {
+  const values = Array.isArray(tags) && tags.length ? tags : ["*"];
+  return values.map((tag) => (tag === "*" ? "all" : tag));
 }
 
 async function loadFileTreeModule() {
@@ -720,7 +762,7 @@ async function renderVersionFileBrowser(files) {
       },
       contextMenu: false,
     });
-    fileTree.expandAll();
+    expandInitialFileTreeFolders(files);
     fileTree.on("select", (e) => {
       if (e.node?.type === "file") previewVersionFile(e.path);
     });
@@ -730,6 +772,16 @@ async function renderVersionFileBrowser(files) {
       btn.onclick = () => previewVersionFile(btn.dataset.path || "");
     });
   }
+}
+
+function expandInitialFileTreeFolders(files) {
+  if (!fileTree) return;
+  const roots = new Set();
+  for (const file of files) {
+    const root = String(file || "").split("/")[0];
+    if (root && root !== file) roots.add(root);
+  }
+  roots.forEach((root) => fileTree.expand(root));
 }
 
 async function previewVersionFile(path) {
@@ -854,7 +906,7 @@ function renderFileDiffWorkspace(files, container, opts = {}) {
   container.innerHTML = `${opts.summary ? `<div class="diff-summary">${opts.summary}</div>` : ""}
     <aside class="diff-tree-panel">
       <div class="panel-label">文件树</div>
-      ${list.length ? buildDiffTree(list, selected) : `<div class="empty-diff">${escapeHtml(opts.empty || "无差异")}</div>`}
+      ${list.length ? buildDiffTree(list, selected, container) : `<div class="empty-diff">${escapeHtml(opts.empty || "无差异")}</div>`}
     </aside>
     <section class="diff-main">
       <div class="diff-pane">
@@ -872,6 +924,12 @@ function renderFileDiffWorkspace(files, container, opts = {}) {
       renderFileDiffWorkspace(list, container, opts);
     };
   });
+  container.querySelectorAll("[data-diff-folder]").forEach((btn) => {
+    btn.onclick = () => {
+      toggleDiffFolder(container, btn.dataset.diffFolder);
+      renderFileDiffWorkspace(list, container, opts);
+    };
+  });
   if (!list.length) {
     const msg = opts.empty || "无差异";
     renderCodeLines(container.querySelector(".diff-pane:first-child .diff-code code"), msg);
@@ -884,7 +942,7 @@ function renderFileDiffWorkspace(files, container, opts = {}) {
   renderCodeLines(container.querySelector(".diff-pane:last-child .diff-code code"), right);
 }
 
-function buildDiffTree(files, selected) {
+function buildDiffTree(files, selected, container) {
   const folders = new Set();
   files.forEach((f) => {
     const parts = String(f.path).split("/");
@@ -894,18 +952,38 @@ function buildDiffTree(files, selected) {
     ...[...folders].map((path) => ({ path, type: "folder" })),
     ...files.map((f, index) => ({ ...f, index, type: "file" })),
   ].sort((a, b) => a.path.localeCompare(b.path));
+  const collapsed = getDiffCollapsedSet(container);
   return `<div class="diff-tree">${rows.map((item) => {
+    if (hasCollapsedParent(item.path, collapsed)) return "";
     const depth = Math.max(0, String(item.path).split("/").length - 1);
     if (item.type === "folder") {
-      return `<div class="diff-tree-row folder" style="padding-left:${0.45 + depth * 1.1}rem">
-        <span class="diff-tree-name">▾ ${escapeHtml(item.path.split("/").pop())}</span>
-      </div>`;
+      const isCollapsed = collapsed.has(item.path);
+      return `<button type="button" class="diff-tree-row folder" style="padding-left:${0.45 + depth * 1.1}rem" data-diff-folder="${escapeAttr(item.path)}" aria-expanded="${isCollapsed ? "false" : "true"}">
+        <span class="diff-tree-name"><span class="tree-caret" aria-hidden="true">${isCollapsed ? "▸" : "▾"}</span>${escapeHtml(item.path.split("/").pop())}</span>
+      </button>`;
     }
     return `<button type="button" class="diff-tree-row ${item.index === selected ? "active" : ""}" style="padding-left:${0.45 + depth * 1.1}rem" data-diff-index="${item.index}">
       <span class="diff-tree-name">${escapeHtml(item.path.split("/").pop())}</span>
       <span class="diff-tree-badges"><span class="file-tag">${escapeHtml(item.change || "modified")}</span></span>
     </button>`;
   }).join("")}</div>`;
+}
+
+function getDiffCollapsedSet(container) {
+  if (!container) return new Set();
+  let set = collapsedFileTreeFolders.diff.get(container);
+  if (!set) {
+    set = new Set();
+    collapsedFileTreeFolders.diff.set(container, set);
+  }
+  return set;
+}
+
+function toggleDiffFolder(container, path) {
+  if (!path) return;
+  const collapsed = getDiffCollapsedSet(container);
+  if (collapsed.has(path)) collapsed.delete(path);
+  else collapsed.add(path);
 }
 
 function buildSideBySideDiff(before, after) {
@@ -1185,8 +1263,8 @@ document.getElementById("fileList")?.addEventListener("click", async (e) => {
     if (btn.dataset.action === "edit-tags") {
       const next = await showPrompt({
         title: "设置文件标签",
-        message: `${row.path}（逗号分隔，空=*）`,
-        value: (row.tags || ["*"]).join(","),
+        message: `${row.path}（逗号分隔，空=all）`,
+        value: displayTags(row.tags).join(","),
       });
       if (next === null) return;
       await api(`/api/projects/${state.projectId}/versions/${encodeURIComponent(state.version)}/file-tags`, {
@@ -1916,9 +1994,11 @@ function renderStorageTree(node, container) {
   if (!root || !node) return;
   const renderNode = (n, depth = 0) => {
     const hasKids = n.children && n.children.length;
-    const kids = hasKids ? `<div class="storage-tree-children">${n.children.map((c) => renderNode(c, depth + 1)).join("")}</div>` : "";
+    const isCollapsed = hasKids && collapsedFileTreeFolders.storage.has(n.path);
+    const kids = hasKids && !isCollapsed ? `<div class="storage-tree-children">${n.children.map((c) => renderNode(c, depth + 1)).join("")}</div>` : "";
     const meta = n.meta?.status ? ` <span class="badge badge-${n.meta.status === "published" ? "ok" : "draft"}">${escapeHtml(n.meta.status)}</span>` : "";
-    return `<button type="button" class="storage-tree-row${storageSelectedPath === n.path ? " active" : ""}" data-path="${escapeAttr(n.path)}" style="padding-left:${8 + depth * 12}px">
+    return `<button type="button" class="storage-tree-row${storageSelectedPath === n.path ? " active" : ""}" data-path="${escapeAttr(n.path)}" ${hasKids ? `data-storage-folder="${escapeAttr(n.path)}" aria-expanded="${isCollapsed ? "false" : "true"}"` : ""} style="padding-left:${8 + depth * 12}px">
+      <span class="tree-caret" aria-hidden="true">${hasKids ? (isCollapsed ? "▸" : "▾") : ""}</span>
       <span class="storage-tree-kind">${escapeHtml(formatStorageKind(n.kind))}</span>
       <span class="storage-tree-name">${escapeHtml(n.name)}</span>${meta}
       <span class="storage-tree-size text-muted">${formatBytes(n.size_bytes)}</span>
@@ -1926,7 +2006,15 @@ function renderStorageTree(node, container) {
   };
   root.innerHTML = renderNode(node);
   root.querySelectorAll(".storage-tree-row").forEach((btn) => {
-    btn.onclick = () => selectStoragePath(btn.dataset.path);
+    btn.onclick = () => {
+      if (btn.dataset.storageFolder) {
+        const p = btn.dataset.storageFolder;
+        if (collapsedFileTreeFolders.storage.has(p)) collapsedFileTreeFolders.storage.delete(p);
+        else collapsedFileTreeFolders.storage.add(p);
+        renderStorageTree(node, container);
+      }
+      selectStoragePath(btn.dataset.path);
+    };
   });
 }
 

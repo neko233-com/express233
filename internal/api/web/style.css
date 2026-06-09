@@ -682,8 +682,8 @@ html, body {
 }
 .file-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(180px, auto);
-  gap: 0.75rem;
+  grid-template-columns: minmax(0, 1fr) auto minmax(4rem, max-content);
+  gap: 0.55rem;
   align-items: center;
   min-height: 2.6rem;
 }
@@ -715,9 +715,8 @@ html, body {
 }
 .file-tags {
   display: flex;
-  flex-direction: row-reverse;
   flex-wrap: wrap;
-  justify-content: flex-start;
+  justify-content: flex-end;
   gap: 0.35rem;
   min-width: 0;
 }
@@ -729,7 +728,7 @@ html, body {
   border-radius: 999px;
   border: 1px solid rgba(16, 185, 129, 0.22);
   background: rgba(16, 185, 129, 0.08);
-  color: #a7f3d0;
+  color: var(--primary-hover);
   font-size: 0.875rem;
   font-family: var(--mono);
   white-space: nowrap;
@@ -871,14 +870,16 @@ html, body {
 /* —— Version file browser —— */
 .file-browser {
   display: grid;
-  grid-template-columns: minmax(16rem, 0.38fr) minmax(0, 1fr);
+  grid-template-columns: minmax(22rem, 55fr) minmax(0, 45fr);
   gap: var(--space-3);
   min-height: 30rem;
+  align-items: stretch;
 }
 
 .file-browser .file-list {
   min-width: 0;
-  max-height: 36rem;
+  height: min(58vh, 42rem);
+  max-height: none;
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -888,9 +889,12 @@ html, body {
 
 .file-preview {
   min-width: 0;
+  height: min(58vh, 42rem);
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: #0a0d12;
+  background: var(--bg-base);
   overflow: hidden;
 }
 
@@ -920,14 +924,15 @@ html, body {
 }
 
 .file-preview-body[class*="language-"] {
-  min-height: 27rem;
-  max-height: 35rem;
+  min-height: 0;
+  flex: 1 1 auto;
+  max-height: none;
   margin: 0;
   padding: 0.85rem 1rem;
   overflow: auto;
   border: 0;
   border-radius: 0;
-  background: #0a0d12;
+  background: var(--bg-base);
   font-family: var(--mono);
   font-size: 0.875rem;
   line-height: 1.55;
@@ -1030,6 +1035,9 @@ html, body {
   padding-left: calc(0.55rem + var(--depth, 0) * 1rem);
 }
 .file-row.tree-folder {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
   color: var(--text-faint);
   font-weight: 600;
 }
@@ -1156,11 +1164,13 @@ html, body {
   box-shadow: inset 3px 0 0 var(--primary);
 }
 .diff-tree-row.folder {
-  cursor: default;
   color: var(--text-faint);
   font-weight: 600;
 }
 .diff-tree-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1593,7 +1603,7 @@ pre.cmdbox,
 .storage-tree { display: flex; flex-direction: column; gap: 2px; }
 .storage-tree-row {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: 0.8rem auto minmax(0, 1fr) auto auto;
   gap: var(--space-2);
   align-items: center;
   width: 100%;
@@ -1612,6 +1622,12 @@ pre.cmdbox,
   box-shadow: inset 3px 0 0 var(--primary);
 }
 .storage-tree-kind { font-size: 0.6875rem; color: var(--text-faint); text-transform: uppercase; }
+.storage-tree-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .storage-tree-size { font-size: 0.75rem; }
 .storage-detail { display: flex; flex-direction: column; gap: var(--space-3); }
 .storage-detail-dl { margin: 0; font-size: 0.8125rem; }

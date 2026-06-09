@@ -4,7 +4,7 @@
 
 ## 标签规则
 
-- 未设置标签等价于 `*`，表示所有下载方都会拉取。
+- 未设置标签等价于 `all`（内部兼容 `*`），表示所有下载方都会拉取。
 - 下载方匹配任一标签即可下载该文件。
 - 新版 CLI 会自动上报：
   - `os`: `runtime.GOOS`，如 `linux`、`windows`、`darwin`
@@ -16,7 +16,7 @@
 
 | 文件 | 标签 |
 |------|------|
-| `config/application.yaml` | `*` |
+| `config/application.yaml` | `all` |
 | `scripts/restart.sh` | `linux` |
 | `bin/game-server-linux-amd64` | `linux-amd64` |
 | `bin/game-server-linux-arm64` | `linux-arm64` |

@@ -269,16 +269,16 @@
                 <span>点击或拖拽上传文件 / zip 包</span>
               </label>
               <div class="tag-toolbar project-write">
-                <input id="uploadTags" class="input" placeholder="上传标签，空=*，如 linux-amd64" data-testid="upload-tags" />
+                <input id="uploadTags" class="input" placeholder="上传标签，空=all，如 linux-amd64" data-testid="upload-tags" />
               </div>
               <div class="tag-batch project-write">
                 <textarea id="tagBatchPaths" class="input tag-paths" placeholder="批量路径或 glob，每行一个，如 bin/windows/**" data-testid="tag-batch-paths"></textarea>
-                <input id="tagBatchTags" class="input" placeholder="标签，如 windows-amd64,windows" data-testid="tag-batch-tags" />
+                <input id="tagBatchTags" class="input" placeholder="标签，如 all,windows-amd64,windows" data-testid="tag-batch-tags" />
                 <select id="tagBatchMode" class="input input-select" data-testid="tag-batch-mode">
                   <option value="set">设置</option>
                   <option value="add">追加</option>
                   <option value="remove">移除</option>
-                  <option value="clear">清空为 *</option>
+                  <option value="clear">清空为 all</option>
                 </select>
                 <button type="button" id="btnApplyFileTags" class="btn btn-secondary btn-sm" data-testid="tag-batch-apply">批量处理</button>
               </div>

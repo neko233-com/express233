@@ -6,6 +6,7 @@ import (
 )
 
 const All = "*"
+const AllAlias = "all"
 
 // Normalize turns comma/space separated user input into stable lowercase tags.
 // Empty input means "all platforms".
@@ -18,6 +19,9 @@ func Normalize(input []string) []string {
 			tag := strings.ToLower(strings.TrimSpace(part))
 			if tag == "" {
 				continue
+			}
+			if tag == AllAlias {
+				tag = All
 			}
 			seen[tag] = true
 		}
