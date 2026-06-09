@@ -147,13 +147,19 @@ func downloadBundle(rawURL string) (string, error) {
 }
 
 func hookEnvMap(m *pull.Manifest) map[string]string {
-	env := make(map[string]string, len(m.PostHookEnv)+3)
+	env := make(map[string]string, len(m.PostHookEnv)+5)
 	for k, v := range m.PostHookEnv {
 		env[k] = v
 	}
 	env["EXPRESS233_PROJECT"] = m.Project
 	env["EXPRESS233_VERSION"] = m.Version
 	env["EXPRESS233_SERVER_ID"] = m.ServerID
+	if m.OS != "" {
+		env["EXPRESS233_OS"] = m.OS
+	}
+	if m.Arch != "" {
+		env["EXPRESS233_ARCH"] = m.Arch
+	}
 	return env
 }
 
@@ -178,6 +184,12 @@ func runPostHook(dest string, m *pull.Manifest) error {
 		"EXPRESS233_VERSION="+m.Version,
 		"EXPRESS233_SERVER_ID="+m.ServerID,
 	)
+	if m.OS != "" {
+		cmd.Env = append(cmd.Env, "EXPRESS233_OS="+m.OS)
+	}
+	if m.Arch != "" {
+		cmd.Env = append(cmd.Env, "EXPRESS233_ARCH="+m.Arch)
+	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if runtime.GOOS != "windows" {
