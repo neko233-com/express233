@@ -121,6 +121,7 @@ func (s *Server) Router() http.Handler {
 			r.Get("/projects/{id}/versions/{ver}/files", s.handleListVersionFiles)
 			r.Get("/projects/{id}/versions/{ver}/file-tags", s.handleListVersionFileTags)
 			r.Get("/projects/{id}/versions/{ver}/config-files", s.handleListConfigFiles)
+			r.Get("/projects/{id}/logs", s.handleListProjectLogs)
 
 			r.Get("/storage/overview", s.handleStorageOverview)
 			r.Get("/storage/tree", s.handleStorageTree)

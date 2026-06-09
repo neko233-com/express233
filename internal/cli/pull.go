@@ -21,6 +21,8 @@ type PullOptions struct {
 	Project   string
 	ServerID  string
 	Token     string
+	Username  string
+	Password  string
 	Version   string
 	DestDir   string
 	OS        string
@@ -50,7 +52,9 @@ func RunPull(opts PullOptions) error {
 		return err
 	}
 	q := u.Query()
-	q.Set("token", opts.Token)
+	if opts.Token != "" {
+		q.Set("token", opts.Token)
+	}
 	q.Set("project", opts.Project)
 	q.Set("server_id", opts.ServerID)
 	if opts.Version != "" {
@@ -71,7 +75,7 @@ func RunPull(opts PullOptions) error {
 	if err := os.MkdirAll(opts.DestDir, 0o755); err != nil {
 		return err
 	}
-	tmp, err := downloadBundleWithRetry(u.String(), opts.Retries)
+	tmp, err := downloadBundleWithRetry(u.String(), opts.Retries, opts.Username, opts.Password)
 	if err != nil {
 		return err
 	}
@@ -101,10 +105,10 @@ func RunPull(opts PullOptions) error {
 	return runPostHook(opts.DestDir, manifest)
 }
 
-func downloadBundleWithRetry(rawURL string, retries int) (string, error) {
+func downloadBundleWithRetry(rawURL string, retries int, username, password string) (string, error) {
 	var last error
 	for attempt := 1; attempt <= retries; attempt++ {
-		tmp, err := downloadBundle(rawURL)
+		tmp, err := downloadBundle(rawURL, username, password)
 		if err == nil {
 			if attempt > 1 {
 				fmt.Printf("download succeeded after retry %d/%d\n", attempt, retries)
@@ -119,8 +123,15 @@ func downloadBundleWithRetry(rawURL string, retries int) (string, error) {
 	return "", last
 }
 
-func downloadBundle(rawURL string) (string, error) {
-	resp, err := http.Get(rawURL)
+func downloadBundle(rawURL, username, password string) (string, error) {
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return "", err
+	}
+	if username != "" || password != "" {
+		req.SetBasicAuth(username, password)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", err
 	}

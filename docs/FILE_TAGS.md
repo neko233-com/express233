@@ -34,6 +34,13 @@ express233-cli pull \
   --dest /opt/game/game-logic-01
 ```
 
+账号密码方式：
+
+```bash
+EXPRESS233_USERNAME=root EXPRESS233_PASSWORD=root \
+express233-cli pull --server http://central:23380 --project mygame --server-id game-logic-01
+```
+
 默认会自动带当前机器的 `os/arch`。
 
 手动指定：

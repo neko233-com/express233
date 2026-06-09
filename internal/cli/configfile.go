@@ -10,10 +10,12 @@ import (
 
 // UserConfig ~/.express233/config.yaml
 type UserConfig struct {
-	Server  string `yaml:"server"`
-	Token   string `yaml:"token"`
-	Project string `yaml:"project"`
-	Dest    string `yaml:"default_dest"`
+	Server   string `yaml:"server"`
+	Token    string `yaml:"token"`
+	Username string `yaml:"username,omitempty"`
+	Password string `yaml:"password,omitempty"`
+	Project  string `yaml:"project"`
+	Dest     string `yaml:"default_dest"`
 }
 
 // ConfigPath 返回配置文件路径。
@@ -76,6 +78,12 @@ func MergePullOptions(opts PullOptions) PullOptions {
 	}
 	if opts.Token == "" {
 		opts.Token = cfg.Token
+	}
+	if opts.Username == "" {
+		opts.Username = cfg.Username
+	}
+	if opts.Password == "" {
+		opts.Password = cfg.Password
 	}
 	if opts.Project == "" {
 		opts.Project = cfg.Project

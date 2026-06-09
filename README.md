@@ -158,6 +158,15 @@ export EXPRESS233_TOKEN=<token>
 express233-cli deploy --project mygame --server-id game-logic-042 --dest /opt/game/042
 ```
 
+也可不用 pull token，改用账号密码：
+
+```bash
+export EXPRESS233_SERVER=http://10.0.0.1:23380
+export EXPRESS233_USERNAME=root
+export EXPRESS233_PASSWORD=root
+express233-cli deploy --project mygame --server-id game-logic-042 --version 1.0.0 --dest /opt/game/042
+```
+
 批量：[examples/deploy-batch.csv](examples/deploy-batch.csv) + `express233-cli pull-batch --file ...`
 
 列出中央已配置的 server_id：`express233-cli servers --server URL --token TOKEN`
@@ -167,6 +176,8 @@ express233-cli deploy --project mygame --server-id game-logic-042 --dest /opt/ga
 版本回滚：`express233-cli rollback --server-id ID`（部署上一发布版；`--to 1.0.0` 指定版本）
 
 版本 diff：`express233-cli diff --from 1.0.0 --to 1.1.0 --server-id ID`（对比两版本在 server_id 下的有效配置键）
+
+项目拉取日志：`GET /api/projects/{id}/logs?server_id=game-logic-042&version=1.0.0`（默认保留最近 30 天）
 
 审批流：operator 上传并「提交审批」→ admin「正式发布」或「驳回」
 

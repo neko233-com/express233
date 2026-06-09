@@ -91,7 +91,10 @@ CREATE TABLE IF NOT EXISTS versions (
 	if err := s.migrateBlobs(); err != nil {
 		return err
 	}
-	return s.migrateStorageIndex()
+	if err := s.migrateStorageIndex(); err != nil {
+		return err
+	}
+	return s.migrateProjectLogs()
 }
 
 func (s *Store) ensureDefaultAdmin() error {

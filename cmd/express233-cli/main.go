@@ -67,6 +67,8 @@ func pullFlags(args []string) (cli.PullOptions, *flag.FlagSet) {
 	fs.StringVar(&opts.Project, "project", os.Getenv("EXPRESS233_PROJECT"), "project name")
 	fs.StringVar(&opts.ServerID, "server-id", os.Getenv("EXPRESS233_SERVER_ID"), "server id (server.yaml key)")
 	fs.StringVar(&opts.Token, "token", os.Getenv("EXPRESS233_TOKEN"), "pull token")
+	fs.StringVar(&opts.Username, "username", os.Getenv("EXPRESS233_USERNAME"), "login username when token is not used")
+	fs.StringVar(&opts.Password, "password", os.Getenv("EXPRESS233_PASSWORD"), "login password when token is not used")
 	fs.StringVar(&opts.Version, "version", "", "version (default: latest published)")
 	fs.StringVar(&opts.DestDir, "dest", ".", "destination directory")
 	fs.StringVar(&opts.OS, "os", "", "client OS tag (default: current GOOS)")
@@ -81,8 +83,8 @@ func pullFlags(args []string) (cli.PullOptions, *flag.FlagSet) {
 func runPull(cmd string, args []string) {
 	opts, _ := pullFlags(args)
 	opts = cli.MergePullOptions(opts)
-	if opts.ServerURL == "" || opts.Project == "" || opts.ServerID == "" || opts.Token == "" {
-		fatal(fmt.Errorf("%s requires: --server --project --server-id --token (or ~/.express233/config.yaml)", cmd))
+	if opts.ServerURL == "" || opts.Project == "" || opts.ServerID == "" || (opts.Token == "" && (opts.Username == "" || opts.Password == "")) {
+		fatal(fmt.Errorf("%s requires: --server --project --server-id and either --token or --username/--password", cmd))
 	}
 	fatal(cli.RunPull(opts))
 }
@@ -94,6 +96,8 @@ func runPullBatch(args []string) {
 	fs.StringVar(&opts.ServerURL, "server", os.Getenv("EXPRESS233_SERVER"), "server URL")
 	fs.StringVar(&opts.Project, "project", os.Getenv("EXPRESS233_PROJECT"), "project")
 	fs.StringVar(&opts.Token, "token", os.Getenv("EXPRESS233_TOKEN"), "token")
+	fs.StringVar(&opts.Username, "username", os.Getenv("EXPRESS233_USERNAME"), "login username when token is not used")
+	fs.StringVar(&opts.Password, "password", os.Getenv("EXPRESS233_PASSWORD"), "login password when token is not used")
 	fs.StringVar(&opts.Version, "version", "", "version")
 	fs.StringVar(&opts.DestDir, "dest", ".", "default dest when line has only server_id")
 	fs.StringVar(&opts.OS, "os", "", "client OS tag (default: current GOOS)")
@@ -102,8 +106,8 @@ func runPullBatch(args []string) {
 	fs.IntVar(&opts.Retries, "retries", 3, "download retries before extraction")
 	fs.BoolVar(&opts.SkipHook, "skip-hook", false, "skip post_hook")
 	_ = fs.Parse(args)
-	if *list == "" || opts.ServerURL == "" || opts.Project == "" || opts.Token == "" {
-		fatal(fmt.Errorf("pull-batch requires: --file --server --project --token"))
+	if *list == "" || opts.ServerURL == "" || opts.Project == "" || (opts.Token == "" && (opts.Username == "" || opts.Password == "")) {
+		fatal(fmt.Errorf("pull-batch requires: --file --server --project and either --token or --username/--password"))
 	}
 	fatal(cli.RunPullBatch(opts, *list))
 }
@@ -117,6 +121,8 @@ func runRollback(args []string) {
 	fs.StringVar(&opts.Project, "project", os.Getenv("EXPRESS233_PROJECT"), "project")
 	fs.StringVar(&opts.ServerID, "server-id", os.Getenv("EXPRESS233_SERVER_ID"), "server id")
 	fs.StringVar(&opts.Token, "token", os.Getenv("EXPRESS233_TOKEN"), "token")
+	fs.StringVar(&opts.Username, "username", os.Getenv("EXPRESS233_USERNAME"), "login username when token is not used")
+	fs.StringVar(&opts.Password, "password", os.Getenv("EXPRESS233_PASSWORD"), "login password when token is not used")
 	fs.StringVar(&opts.DestDir, "dest", ".", "dest")
 	fs.BoolVar(&opts.SkipHook, "skip-hook", false, "skip post_hook")
 	_ = fs.Parse(args)
@@ -164,16 +170,18 @@ func runConfig(args []string) {
 		fatal(cli.PrintConfig())
 	case "init":
 		cfg := cli.UserConfig{
-			Server:  os.Getenv("EXPRESS233_SERVER"),
-			Token:   os.Getenv("EXPRESS233_TOKEN"),
-			Project: os.Getenv("EXPRESS233_PROJECT"),
+			Server:   os.Getenv("EXPRESS233_SERVER"),
+			Token:    os.Getenv("EXPRESS233_TOKEN"),
+			Username: os.Getenv("EXPRESS233_USERNAME"),
+			Password: os.Getenv("EXPRESS233_PASSWORD"),
+			Project:  os.Getenv("EXPRESS233_PROJECT"),
 		}
 		fatal(cli.SaveUserConfig(cfg))
 		p, _ := cli.ConfigPath()
 		fmt.Println("wrote", p)
 	case "set":
 		if len(args) != 3 {
-			fatal(fmt.Errorf("usage: express233-cli config set <server|token|project|dest> <value>"))
+			fatal(fmt.Errorf("usage: express233-cli config set <server|token|username|password|project|dest> <value>"))
 		}
 		cfg, err := cli.LoadUserConfig()
 		fatal(err)
@@ -182,6 +190,10 @@ func runConfig(args []string) {
 			cfg.Server = args[2]
 		case "token":
 			cfg.Token = args[2]
+		case "username":
+			cfg.Username = args[2]
+		case "password":
+			cfg.Password = args[2]
 		case "project":
 			cfg.Project = args[2]
 		case "dest":
@@ -256,13 +268,13 @@ func usage() {
   version
 
 pull/deploy 参数:
-  --server --project --server-id --token [--version] [--dest] [--os] [--arch] [--tag] [--skip-hook]
+  --server --project --server-id (--token 或 --username --password) [--version] [--dest] [--os] [--arch] [--tag] [--skip-hook]
 
 pull-batch:
-  --file servers.csv --server URL --project NAME --token TOKEN
+  --file servers.csv --server URL --project NAME (--token TOKEN 或 --username USER --password PASS)
 
 环境变量:
-  EXPRESS233_SERVER / EXPRESS233_TOKEN / EXPRESS233_PROJECT / EXPRESS233_SERVER_ID
+  EXPRESS233_SERVER / EXPRESS233_TOKEN / EXPRESS233_USERNAME / EXPRESS233_PASSWORD / EXPRESS233_PROJECT / EXPRESS233_SERVER_ID
 
 `)
 }
