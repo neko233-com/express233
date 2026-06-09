@@ -1,0 +1,598 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>express233 架构流程</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #080b10;
+      --panel: #11161f;
+      --panel-2: #151c27;
+      --line: #273241;
+      --muted: #9aa8ba;
+      --text: #e6edf6;
+      --primary: #10b981;
+      --primary-2: #34d399;
+      --blue: #3b82f6;
+      --amber: #f59e0b;
+      --red: #ef4444;
+      --radius: 8px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); }
+    body {
+      overflow-x: hidden;
+      background:
+        linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+        radial-gradient(circle at 50% -10%, rgba(16, 185, 129, 0.14), transparent 32rem),
+        var(--bg);
+      background-size: 32px 32px, 32px 32px, auto;
+    }
+
+    .page {
+      width: min(1240px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 32px 0 40px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 20px;
+      align-items: end;
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(28px, 4vw, 52px);
+      line-height: 1.04;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      max-width: 760px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.7;
+    }
+
+    .mode {
+      display: inline-flex;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(17, 22, 31, 0.92);
+    }
+
+    .mode button {
+      border: 0;
+      border-radius: 6px;
+      padding: 8px 12px;
+      background: transparent;
+      color: var(--muted);
+      font: 600 13px var(--sans);
+      cursor: pointer;
+    }
+
+    .mode button.active {
+      color: #062017;
+      background: var(--primary);
+    }
+
+    .board {
+      position: relative;
+      display: grid;
+      grid-template-columns: 1fr 1.06fr 1fr;
+      gap: 18px;
+      min-height: 640px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(12, 16, 23, 0.82);
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+      overflow: hidden;
+    }
+
+    .lane {
+      position: relative;
+      z-index: 2;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(17, 22, 31, 0.82);
+      overflow: hidden;
+    }
+
+    .lane-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(21, 28, 39, 0.86);
+    }
+
+    .lane-title {
+      margin: 0;
+      font-size: 14px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 3px 8px;
+      border: 1px solid rgba(16, 185, 129, 0.32);
+      border-radius: 999px;
+      background: rgba(16, 185, 129, 0.1);
+      color: var(--primary-2);
+      font: 12px var(--mono);
+      white-space: nowrap;
+    }
+
+    .lane-body {
+      position: relative;
+      display: grid;
+      align-content: start;
+      gap: 14px;
+      padding: 16px;
+      min-height: 540px;
+    }
+
+    .node {
+      position: relative;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: linear-gradient(180deg, rgba(24, 32, 44, 0.96), rgba(14, 19, 27, 0.96));
+      padding: 14px;
+      overflow: hidden;
+    }
+
+    .node.active {
+      border-color: rgba(16, 185, 129, 0.55);
+      box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.12), 0 0 28px rgba(16, 185, 129, 0.12);
+    }
+
+    .node h2, .node h3 {
+      margin: 0 0 8px;
+      font-size: 16px;
+      letter-spacing: 0;
+    }
+
+    .node p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .list {
+      display: grid;
+      gap: 8px;
+      margin: 12px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .list li {
+      display: grid;
+      grid-template-columns: 10px 1fr;
+      gap: 8px;
+      align-items: baseline;
+      color: #c8d2df;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .list li::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--primary);
+      box-shadow: 0 0 12px rgba(16, 185, 129, 0.55);
+    }
+
+    .code {
+      margin-top: 12px;
+      padding: 10px;
+      border: 1px solid rgba(148, 163, 184, 0.16);
+      border-radius: 6px;
+      background: #080c12;
+      color: #c7d2fe;
+      font: 12px/1.55 var(--mono);
+      white-space: pre-wrap;
+    }
+
+    .central {
+      display: grid;
+      grid-template-rows: auto auto auto;
+      gap: 14px;
+    }
+
+    .server-grid {
+      display: grid;
+      gap: 12px;
+    }
+
+    .server {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 10px;
+      align-items: start;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(10, 14, 20, 0.72);
+    }
+
+    .server .dot {
+      width: 10px;
+      height: 10px;
+      margin-top: 5px;
+      border-radius: 50%;
+      background: var(--blue);
+      box-shadow: 0 0 16px rgba(59, 130, 246, 0.7);
+    }
+
+    .server strong { display: block; font-size: 14px; margin-bottom: 4px; }
+    .server span { color: var(--muted); font-size: 12px; line-height: 1.45; }
+
+    .flow-layer {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    .flow-svg {
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+    }
+
+    .flow-path {
+      fill: none;
+      stroke: rgba(148, 163, 184, 0.32);
+      stroke-width: 2;
+      stroke-dasharray: 7 9;
+    }
+
+    .flow-path.hot {
+      stroke: rgba(16, 185, 129, 0.72);
+      filter: drop-shadow(0 0 6px rgba(16, 185, 129, 0.45));
+    }
+
+    .packet {
+      position: absolute;
+      z-index: 3;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 84px;
+      height: 30px;
+      padding: 0 10px;
+      border-radius: 999px;
+      background: var(--primary);
+      color: #061b14;
+      font: 700 12px var(--mono);
+      box-shadow: 0 0 24px rgba(16, 185, 129, 0.44);
+      opacity: 0;
+      transform: translate(-50%, -50%);
+    }
+
+    .packet.push { animation: pushPacket 7.5s infinite ease-in-out; }
+    .packet.preview { animation: previewPacket 7.5s infinite ease-in-out; }
+    .packet.pull-a { animation: pullPacketA 7.5s infinite ease-in-out; }
+    .packet.pull-b { animation: pullPacketB 7.5s infinite ease-in-out; }
+    .packet.pull-c { animation: pullPacketC 7.5s infinite ease-in-out; }
+
+    .phase {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .step {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 12px;
+      background: rgba(17, 22, 31, 0.82);
+    }
+
+    .step strong {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    .step span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .step.current {
+      border-color: rgba(16, 185, 129, 0.55);
+      background: rgba(16, 185, 129, 0.09);
+    }
+
+    .note {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      margin-top: 18px;
+    }
+
+    .note-card {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(17, 22, 31, 0.88);
+    }
+
+    .note-card strong { display: block; margin-bottom: 8px; font-size: 14px; }
+    .note-card p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+
+    @keyframes pushPacket {
+      0%, 7% { opacity: 0; left: 14%; top: 36%; }
+      12% { opacity: 1; }
+      24% { opacity: 1; left: 50%; top: 31%; }
+      29%, 100% { opacity: 0; left: 50%; top: 31%; }
+    }
+
+    @keyframes previewPacket {
+      0%, 28% { opacity: 0; left: 50%; top: 54%; }
+      34% { opacity: 1; }
+      45% { opacity: 1; left: 50%; top: 42%; }
+      51%, 100% { opacity: 0; left: 50%; top: 42%; }
+    }
+
+    @keyframes pullPacketA {
+      0%, 50% { opacity: 0; left: 50%; top: 35%; }
+      57% { opacity: 1; }
+      70% { opacity: 1; left: 85%; top: 24%; }
+      76%, 100% { opacity: 0; left: 85%; top: 24%; }
+    }
+
+    @keyframes pullPacketB {
+      0%, 55% { opacity: 0; left: 50%; top: 49%; }
+      62% { opacity: 1; }
+      76% { opacity: 1; left: 85%; top: 48%; }
+      82%, 100% { opacity: 0; left: 85%; top: 48%; }
+    }
+
+    @keyframes pullPacketC {
+      0%, 60% { opacity: 0; left: 50%; top: 63%; }
+      67% { opacity: 1; }
+      82% { opacity: 1; left: 85%; top: 72%; }
+      88%, 100% { opacity: 0; left: 85%; top: 72%; }
+    }
+
+    body.paused .packet { animation-play-state: paused; }
+    body.push-only .pull-a,
+    body.push-only .pull-b,
+    body.push-only .pull-c,
+    body.push-only .preview { display: none; }
+    body.pull-only .push,
+    body.pull-only .preview { display: none; }
+
+    @media (max-width: 980px) {
+      header { grid-template-columns: 1fr; }
+      .board { grid-template-columns: 1fr; min-height: auto; }
+      .lane-body { min-height: auto; }
+      .flow-layer, .packet { display: none; }
+      .phase, .note { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <div>
+        <h1>express233 架构流程</h1>
+        <p class="subtitle">CI 是推模型：开发者把版本包推到中央控制台。CD 是拉模型：每台服务器只向中央拉取自己被允许拿到的、已经替换稳定的最终内容。</p>
+      </div>
+      <div class="mode" aria-label="动画模式">
+        <button type="button" data-mode="all" class="active">全流程</button>
+        <button type="button" data-mode="push">只看 CI</button>
+        <button type="button" data-mode="pull">只看 CD</button>
+        <button type="button" data-mode="pause">暂停</button>
+      </div>
+    </header>
+
+    <section class="board" aria-label="express233 架构图">
+      <div class="flow-layer" aria-hidden="true">
+        <svg class="flow-svg" viewBox="0 0 1200 640" preserveAspectRatio="none">
+          <path class="flow-path hot" d="M 168 214 C 330 150, 440 170, 588 206" />
+          <path class="flow-path" d="M 600 345 C 590 300, 595 270, 600 235" />
+          <path class="flow-path hot" d="M 625 230 C 770 150, 920 122, 1035 145" />
+          <path class="flow-path hot" d="M 625 310 C 780 298, 925 304, 1035 310" />
+          <path class="flow-path hot" d="M 625 395 C 770 470, 925 488, 1035 465" />
+        </svg>
+      </div>
+
+      <span class="packet push">CI push</span>
+      <span class="packet preview">render</span>
+      <span class="packet pull-a">linux</span>
+      <span class="packet pull-b">windows</span>
+      <span class="packet pull-c">canary</span>
+
+      <section class="lane">
+        <div class="lane-head">
+          <h2 class="lane-title">开发 / CI</h2>
+          <span class="badge">push model</span>
+        </div>
+        <div class="lane-body">
+          <article class="node active">
+            <h3>版本包上传</h3>
+            <p>CI 产出二进制、配置模板、脚本、静态资源，然后推送到中央。</p>
+            <ul class="list">
+              <li>版本：1.0.1、1.1.0、hotfix</li>
+              <li>平台标签：all、linux-amd64、windows-amd64</li>
+              <li>状态：draft → review → published</li>
+            </ul>
+          </article>
+          <article class="node">
+            <h3>只负责交付原始模板</h3>
+            <p>CI 不关心每台服务器的 server_id，也不在节点侧做替换。</p>
+            <pre class="code">config/application.yaml
+bin/game-server-linux-amd64
+scripts/restart.sh</pre>
+          </article>
+        </div>
+      </section>
+
+      <section class="lane central">
+        <div class="lane-head">
+          <h2 class="lane-title">中央控制台</h2>
+          <span class="badge">stable render</span>
+        </div>
+        <div class="lane-body">
+          <article class="node active">
+            <h3>权限与内容选择中心</h3>
+            <p>中央决定每台服务器能拉到什么文件，而不是节点自由选择。</p>
+            <ul class="list">
+              <li>按 project / version / server_id 生成清单</li>
+              <li>按 os / arch / tag 过滤文件</li>
+              <li>按 token、团队权限、发布状态控制下载</li>
+            </ul>
+          </article>
+          <article class="node active">
+            <h3>中央式模板替换</h3>
+            <p>server.yaml replacements 在中央完成，节点拿到的是已经渲染好的最终配置。</p>
+            <pre class="code">server_id: game-logic-01
+application.yaml:
+  game.serverId: game-logic-01
+  mysql.url: jdbc:mysql://db-a/game</pre>
+          </article>
+          <article class="node">
+            <h3>稳定性边界</h3>
+            <p>替换逻辑只有中央一份实现。所有节点拉取结果可预览、可审计、可复现。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="lane">
+        <div class="lane-head">
+          <h2 class="lane-title">游戏服务器 / CD</h2>
+          <span class="badge">pull model</span>
+        </div>
+        <div class="lane-body server-grid">
+          <article class="server">
+            <span class="dot"></span>
+            <div>
+              <strong>game-logic-01</strong>
+              <span>linux-amd64，只拉 all + linux-amd64；配置已替换为 logic-01。</span>
+            </div>
+          </article>
+          <article class="server">
+            <span class="dot"></span>
+            <div>
+              <strong>game-logic-02</strong>
+              <span>windows-amd64，只拉 all + windows-amd64；不会拿到 Linux 二进制。</span>
+            </div>
+          </article>
+          <article class="server">
+            <span class="dot"></span>
+            <div>
+              <strong>canary-03</strong>
+              <span>额外 tag=canary，只拉允许的灰度文件和稳定渲染配置。</span>
+            </div>
+          </article>
+          <article class="node">
+            <h3>安全部署</h3>
+            <p>节点拉取到临时目录，再 stop → swap → start，保留 logs/run。</p>
+            <pre class="code">pull to .tmp/server_id
+stop old process
+rsync swap
+run scripts/restart.sh</pre>
+          </article>
+        </div>
+      </section>
+    </section>
+
+    <section class="phase" aria-label="流程步骤">
+      <article class="step current">
+        <strong>1. CI 推送版本</strong>
+        <span>构建产物与模板上传中央，附带平台标签和版本状态。</span>
+      </article>
+      <article class="step">
+        <strong>2. 中央发布与审计</strong>
+        <span>发布前检查 server.yaml、配置 basename、文件标签与权限。</span>
+      </article>
+      <article class="step">
+        <strong>3. 中央渲染最终配置</strong>
+        <span>按 server_id 在中央替换 JSON / YAML / properties。</span>
+      </article>
+      <article class="step">
+        <strong>4. CD 节点拉取</strong>
+        <span>服务器只拉自己可见的最终内容，部署过程幂等安全。</span>
+      </article>
+    </section>
+
+    <section class="note">
+      <article class="note-card">
+        <strong>核心差异</strong>
+        <p>CI 推模型解决“版本从哪里来”；CD 拉模型解决“节点何时、拉什么、怎么安全切换”。</p>
+      </article>
+      <article class="note-card">
+        <strong>为什么中央替换</strong>
+        <p>所有模板替换集中在中央，避免每台服务器脚本版本不同、环境不同导致结果漂移。</p>
+      </article>
+      <article class="note-card">
+        <strong>为什么可控</strong>
+        <p>中央用 project、version、server_id、token、tag 共同决定下载清单，每台服务器拿到的内容可解释、可追踪。</p>
+      </article>
+    </section>
+  </main>
+
+  <script>
+    const buttons = document.querySelectorAll("[data-mode]");
+    const steps = document.querySelectorAll(".step");
+    let stepIndex = 0;
+    let timer = window.setInterval(tick, 1900);
+
+    function setMode(mode) {
+      document.body.classList.toggle("push-only", mode === "push");
+      document.body.classList.toggle("pull-only", mode === "pull");
+      document.body.classList.toggle("paused", mode === "pause");
+      buttons.forEach((button) => button.classList.toggle("active", button.dataset.mode === mode));
+      if (mode === "pause") {
+        window.clearInterval(timer);
+      } else {
+        window.clearInterval(timer);
+        timer = window.setInterval(tick, 1900);
+      }
+    }
+
+    function tick() {
+      steps[stepIndex]?.classList.remove("current");
+      stepIndex = (stepIndex + 1) % steps.length;
+      steps[stepIndex]?.classList.add("current");
+    }
+
+    buttons.forEach((button) => {
+      button.addEventListener("click", () => setMode(button.dataset.mode));
+    });
+  </script>
+</body>
+</html>
