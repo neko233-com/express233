@@ -122,6 +122,11 @@ curl --fail -u "$EXPRESS233_BASIC_AUTH" \
   "$EXPRESS233_SERVER/api/deploy/preview?project=demo-auto&version=$VERSION_2&server_id=game-a"
 ```
 
+返回值同时包含：
+
+- `files`: 兼容脚本使用的键级变更摘要
+- `rendered_files`: Web/自动化可直接展示的文件全文 before/after，用于双栏 diff
+
 对比两个版本在 `game-a` 上的有效配置差异：
 
 ```bash
@@ -133,6 +138,7 @@ curl --fail -u "$EXPRESS233_BASIC_AUTH" \
 
 - `game.properties.server.port` 最终都会变成 `9001`，所以不应再被报告为版本差异
 - `feature.flag` 会从 `base` 变成 `blue`
+- `file_diffs` 会返回文件级 from/to 全文，适合做 VSCode/JetBrains 风格双栏对比
 
 ## 6. 发布并拉取
 
@@ -172,6 +178,18 @@ tar -xOf /tmp/demo-auto-latest.tar.gz ./conf/application.yaml
 - `feature.flag=blue`
 - `spring.profiles.active: game-a`
 
+CLI 拉取默认会先把 gzip 包完整下载到临时文件，成功后再解压；弱网中断不会把半截包直接写进目标目录。可按网络情况调大重试次数：
+
+```bash
+express233-cli pull \
+  --server "$EXPRESS233_SERVER" \
+  --token "$PULL_TOKEN" \
+  --project demo-auto \
+  --server-id game-a \
+  --dest /opt/game/game-a \
+  --retries 5
+```
+
 ## 7. 细粒度 CRUD
 
 删除单个 server_id：
@@ -189,3 +207,10 @@ curl --fail -u "$EXPRESS233_BASIC_AUTH" \
   -X PUT "$EXPRESS233_SERVER/api/server-yaml" \
   -d @server-yaml-update.json
 ```
+
+## 8. 压缩与弱网建议
+
+- 上传支持单文件、`.zip`、`.tar`、`.tar.gz`/`.tgz`。大量小文件推荐打成 `.tar.gz` 或 `.zip` 后上传，减少 HTTP 往返与表单开销。
+- 下载端已经返回 `application/gzip` 的 tar.gz 包。不要再对 `.zip` 套一层 gzip；zip 内部通常已经压缩，二次压缩收益很小，还会增加 CPU 和失败恢复成本。
+- Go 编译出的二进制通常可压缩，但跨平台大包更应该配合文件标签，让 Linux 节点只下载 `linux` / `linux-amd64` 等匹配文件。
+- 弱网场景优先使用 CLI `--retries`，以及上传端的整包归档；Web 上传会对单个文件自动重试。

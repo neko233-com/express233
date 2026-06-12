@@ -85,6 +85,24 @@ test.describe("express233 控制台全流程", () => {
     await page.getByTestId("tag-batch-apply").click();
     await expect(page.getByTestId("file-list")).toContainText("linux");
     await expect(page.getByTestId("file-list")).toContainText("linux-amd64");
+
+    await page.evaluate(async ({ projectName }) => {
+      const projects = await fetch("/api/projects").then((r) => r.json());
+      const project = projects.find((p) => p.name === projectName);
+      const fd = new FormData();
+      fd.append("file", new Blob(["#!/bin/sh\necho linux\n"], { type: "text/plain" }), "game-server");
+      fd.append("path", "bin/linux/game-server");
+      fd.append("tags", "linux-amd64");
+      const r = await fetch(`/api/projects/${project.id}/versions/1.0.0/files`, { method: "POST", body: fd });
+      if (!r.ok) throw new Error(await r.text());
+    }, { projectName });
+    await page.getByTestId("version-list").getByText("1.0.0").click();
+    await expect(page.getByTestId("file-list")).toContainText("bin", { timeout: 15_000 });
+    await page.getByTestId("file-list").getByRole("button", { name: /bin/ }).click();
+    await expect(page.getByTestId("file-list")).not.toContainText("game-server");
+    await page.getByTestId("file-search").fill("linux-amd64");
+    await expect(page.getByTestId("file-list")).toContainText("game-server");
+    await expect(page.getByTestId("file-list")).toContainText("linux-amd64");
   });
 
   test("演示项目引导素材包含 JSON/YAML/properties 替换", async ({ page }) => {

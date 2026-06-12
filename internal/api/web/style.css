@@ -220,6 +220,22 @@ html, body {
   position: relative;
   margin-bottom: 0.55rem;
 }
+.file-search-wrap,
+.diff-search-wrap {
+  position: relative;
+  margin-bottom: 0.65rem;
+}
+.file-search-wrap .search-input,
+.diff-search-wrap .search-input {
+  min-width: 100%;
+}
+.diff-search-wrap {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding-bottom: 0.45rem;
+  background: var(--bg-elevated);
+}
 .version-search-wrap .search-input {
   min-width: 100%;
 }

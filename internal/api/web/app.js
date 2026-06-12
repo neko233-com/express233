@@ -44,6 +44,7 @@ let state = {
   username: null,
   versions: [],
   versionFilter: "",
+  fileFilter: "",
   fileRows: [],
   version: null,
   versionStatus: null,
@@ -478,6 +479,11 @@ document.getElementById("versionSearch")?.addEventListener("input", (e) => {
   renderVersionList();
 });
 
+document.getElementById("fileSearch")?.addEventListener("input", (e) => {
+  state.fileFilter = e.target.value.trim().toLowerCase();
+  renderFileList();
+});
+
 function renderProjectList() {
   const ul = document.getElementById("projectList");
   if (!ul) return;
@@ -641,22 +647,38 @@ function renderFileList() {
   }
   showFilePreviewMessage("点击左侧文件查看内容");
   const canEdit = canWriteProject() && state.versionStatus !== "published";
-  fl.innerHTML = buildFileTreeRows(state.fileRows, {
+  const rows = filterFileRows(state.fileRows, state.fileFilter);
+  if (!rows.length) {
+    fl.innerHTML = `<div class="file-row muted">没有匹配文件</div>`;
+    showFilePreviewMessage("没有匹配文件");
+    return;
+  }
+  fl.innerHTML = buildFileTreeRows(rows, {
     treeId: "version",
     canEdit,
-    rowAttr: (row, index) => `data-preview-index="${index}"`,
+    rowAttr: (row) => `data-preview-index="${state.fileRows.indexOf(row)}"`,
     tags: (row) => displayTags(row.tags),
-    actions: (row, index) =>
+    actions: (row) =>
       canEdit
-        ? `<button type="button" class="file-tag-action" data-action="edit-tags" data-index="${index}">编辑</button>
-           <button type="button" class="file-tag-action" data-action="clear-tags" data-index="${index}">清空</button>`
+        ? `<button type="button" class="file-tag-action" data-action="edit-tags" data-index="${state.fileRows.indexOf(row)}">编辑</button>
+           <button type="button" class="file-tag-action" data-action="clear-tags" data-index="${state.fileRows.indexOf(row)}">清空</button>`
         : "",
+    forceExpand: !!state.fileFilter,
   });
   fl.querySelectorAll("[data-tree-folder]").forEach((btn) => {
     btn.onclick = () => {
       toggleTreeFolder("version", btn.dataset.treeFolder);
       renderFileList();
     };
+  });
+}
+
+function filterFileRows(rows, query) {
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return rows || [];
+  return (rows || []).filter((row) => {
+    const tags = displayTags(row.tags).join(" ");
+    return `${row.path || ""} ${tags}`.toLowerCase().includes(q);
   });
 }
 
@@ -670,7 +692,7 @@ function buildFileTreeRows(rows, opts = {}) {
   const folderRows = [...folders].sort().map((path) => ({ path, type: "folder" }));
   const fileRows = files.map((x) => ({ ...x, type: "file" }));
   const treeId = opts.treeId || "version";
-  const collapsed = getCollapsedTreeSet(treeId);
+  const collapsed = opts.forceExpand ? new Set() : getCollapsedTreeSet(treeId);
   return [...folderRows, ...fileRows]
     .sort((a, b) => a.path.localeCompare(b.path))
     .filter((item) => !hasCollapsedParent(item.path, collapsed))
@@ -897,7 +919,13 @@ function renderPreviewReport(report, container) {
 function renderFileDiffWorkspace(files, container, opts = {}) {
   if (!container) return;
   const list = files || [];
-  const selected = Math.min(container.__diffIndex || 0, Math.max(0, list.length - 1));
+  const oldSearch = container.querySelector("[data-diff-search]");
+  const keepSearchFocus = oldSearch === document.activeElement;
+  const oldCaret = keepSearchFocus ? oldSearch.selectionStart : null;
+  const filter = String(container.__diffFilter || "").trim().toLowerCase();
+  const visible = filterDiffFiles(list, filter);
+  let selected = Math.min(container.__diffIndex || 0, Math.max(0, list.length - 1));
+  if (visible.length && !visible.some((f) => f.__index === selected)) selected = visible[0].__index;
   container.__diffIndex = selected;
   const beforeId = opts.preservePreviewIds ? "verPreviewOriginalBody" : "";
   const afterId = opts.preservePreviewIds ? "verPreviewRenderedBody" : "";
@@ -906,7 +934,10 @@ function renderFileDiffWorkspace(files, container, opts = {}) {
   container.innerHTML = `${opts.summary ? `<div class="diff-summary">${opts.summary}</div>` : ""}
     <aside class="diff-tree-panel">
       <div class="panel-label">文件树</div>
-      ${list.length ? buildDiffTree(list, selected, container) : `<div class="empty-diff">${escapeHtml(opts.empty || "无差异")}</div>`}
+      <div class="diff-search-wrap">
+        <input type="search" class="search-input diff-search-input" placeholder="搜索路径 / 变更…" value="${escapeAttr(filter)}" data-diff-search />
+      </div>
+      ${visible.length ? buildDiffTree(visible, selected, container, !!filter) : `<div class="empty-diff">${escapeHtml(list.length ? "没有匹配文件" : (opts.empty || "无差异"))}</div>`}
     </aside>
     <section class="diff-main">
       <div class="diff-pane">
@@ -924,16 +955,29 @@ function renderFileDiffWorkspace(files, container, opts = {}) {
       renderFileDiffWorkspace(list, container, opts);
     };
   });
+  const search = container.querySelector("[data-diff-search]");
+  if (search) {
+    search.oninput = () => {
+      container.__diffFilter = search.value;
+      renderFileDiffWorkspace(list, container, opts);
+    };
+    if (keepSearchFocus) {
+      search.focus();
+      const caret = oldCaret == null ? search.value.length : oldCaret;
+      search.setSelectionRange(caret, caret);
+    }
+  }
   container.querySelectorAll("[data-diff-folder]").forEach((btn) => {
     btn.onclick = () => {
       toggleDiffFolder(container, btn.dataset.diffFolder);
       renderFileDiffWorkspace(list, container, opts);
     };
   });
-  if (!list.length) {
-    const msg = opts.empty || "无差异";
-    renderCodeLines(container.querySelector(".diff-pane:first-child .diff-code code"), msg);
-    renderCodeLines(container.querySelector(".diff-pane:last-child .diff-code code"), msg);
+  if (!visible.length) {
+    const msg = list.length ? "没有匹配文件" : (opts.empty || "无差异");
+    const emptyRows = [{ no: "", text: msg, cls: "no" }];
+    renderCodeLines(container.querySelector(".diff-pane:first-child .diff-code code"), emptyRows);
+    renderCodeLines(container.querySelector(".diff-pane:last-child .diff-code code"), emptyRows);
     return;
   }
   const current = list[selected];
@@ -942,7 +986,14 @@ function renderFileDiffWorkspace(files, container, opts = {}) {
   renderCodeLines(container.querySelector(".diff-pane:last-child .diff-code code"), right);
 }
 
-function buildDiffTree(files, selected, container) {
+function filterDiffFiles(files, query) {
+  const q = String(query || "").trim().toLowerCase();
+  return (files || [])
+    .map((f, index) => ({ ...f, __index: index }))
+    .filter((f) => !q || `${f.path || ""} ${f.basename || ""} ${f.change || ""}`.toLowerCase().includes(q));
+}
+
+function buildDiffTree(files, selected, container, forceExpand = false) {
   const folders = new Set();
   files.forEach((f) => {
     const parts = String(f.path).split("/");
@@ -950,9 +1001,9 @@ function buildDiffTree(files, selected, container) {
   });
   const rows = [
     ...[...folders].map((path) => ({ path, type: "folder" })),
-    ...files.map((f, index) => ({ ...f, index, type: "file" })),
+    ...files.map((f) => ({ ...f, index: f.__index, type: "file" })),
   ].sort((a, b) => a.path.localeCompare(b.path));
-  const collapsed = getDiffCollapsedSet(container);
+  const collapsed = forceExpand ? new Set() : getDiffCollapsedSet(container);
   return `<div class="diff-tree">${rows.map((item) => {
     if (hasCollapsedParent(item.path, collapsed)) return "";
     const depth = Math.max(0, String(item.path).split("/").length - 1);
