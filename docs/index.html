@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>express233 使用文档</title>
+  <style>
+    :root {
+      --bg: #09090b;
+      --panel: #141416;
+      --panel-2: #1e1e22;
+      --text: #f0f0f2;
+      --muted: #a1a1aa;
+      --faint: #71717a;
+      --line: rgba(255, 255, 255, 0.1);
+      --primary: #10b981;
+      --primary-2: #34d399;
+      --warn: #f59e0b;
+      --danger: #ef4444;
+      --info: #3b82f6;
+      --radius: 8px;
+      --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+      --font: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--font);
+      font-size: 16px;
+      line-height: 1.65;
+      color: var(--text);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 360px),
+        var(--bg);
+    }
+    a { color: var(--primary-2); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, pre { font-family: var(--mono); }
+    code {
+      padding: 0.12rem 0.35rem;
+      border: 1px solid rgba(16, 185, 129, 0.18);
+      border-radius: 5px;
+      background: rgba(16, 185, 129, 0.08);
+      color: #a7f3d0;
+    }
+    pre {
+      margin: 0;
+      padding: 1rem;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #0a0d12;
+      color: #cbd5e1;
+      line-height: 1.55;
+    }
+
+    .shell {
+      display: grid;
+      grid-template-columns: 260px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+    .nav {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 1.25rem 1rem;
+      border-right: 1px solid var(--line);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent),
+        #0c0c0e;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid var(--line);
+    }
+    .brand-mark {
+      width: 36px;
+      height: 36px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      border-radius: var(--radius);
+      background: rgba(16, 185, 129, 0.08);
+      color: var(--primary-2);
+      font-weight: 800;
+    }
+    .brand strong { display: block; font-size: 1rem; }
+    .brand span { display: block; color: var(--muted); font-size: 0.875rem; }
+    .nav h2 {
+      margin: 1rem 0 0.5rem;
+      font-size: 0.875rem;
+      color: var(--faint);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .nav a {
+      display: block;
+      padding: 0.48rem 0.55rem;
+      border-radius: 6px;
+      color: var(--muted);
+    }
+    .nav a:hover {
+      background: rgba(255, 255, 255, 0.045);
+      color: var(--text);
+      text-decoration: none;
+    }
+    .content {
+      width: min(1180px, 100%);
+      margin: 0 auto;
+      padding: 2rem clamp(1rem, 3vw, 2.5rem) 4rem;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+      gap: 1.25rem;
+      align-items: center;
+      min-height: 520px;
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid var(--line);
+    }
+    .eyebrow {
+      margin: 0 0 0.65rem;
+      color: var(--primary-2);
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      font-size: 0.875rem;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(2.4rem, 6vw, 4.6rem);
+      line-height: 1;
+      letter-spacing: 0;
+    }
+    .lead {
+      margin: 1rem 0 1.25rem;
+      max-width: 680px;
+      color: var(--muted);
+      font-size: 1.05rem;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.7rem;
+    }
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 2.55rem;
+      padding: 0.5rem 0.95rem;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel-2);
+      color: var(--text);
+      font-weight: 650;
+    }
+    .button.primary {
+      border-color: rgba(16, 185, 129, 0.35);
+      background: var(--primary);
+      color: #022c1a;
+    }
+    .button:hover { text-decoration: none; border-color: rgba(255,255,255,0.22); }
+
+    .mock {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.006)), var(--panel);
+      overflow: hidden;
+      box-shadow: 0 22px 60px rgba(0,0,0,0.36);
+    }
+    .mock-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.75rem 0.9rem;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.875rem;
+    }
+    .mock-body {
+      display: grid;
+      grid-template-columns: 34% 66%;
+      min-height: 320px;
+    }
+    .mock-side {
+      padding: 0.85rem;
+      border-right: 1px solid var(--line);
+      background: #101012;
+    }
+    .mock-row {
+      height: 34px;
+      margin-bottom: 0.45rem;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: rgba(255,255,255,0.045);
+    }
+    .mock-row.active {
+      border-color: rgba(16, 185, 129, 0.25);
+      background: rgba(16, 185, 129, 0.1);
+      box-shadow: inset 3px 0 0 var(--primary);
+    }
+    .mock-main { padding: 0.9rem; }
+    .mock-tabs {
+      display: flex;
+      gap: 0.35rem;
+      padding: 0.25rem;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255,255,255,0.025);
+    }
+    .mock-tab {
+      flex: 1;
+      height: 32px;
+      border-radius: 6px;
+      background: rgba(255,255,255,0.04);
+    }
+    .mock-tab.on { background: rgba(16,185,129,0.16); }
+    .mock-diff {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.7rem;
+      margin-top: 0.85rem;
+    }
+    .mock-code {
+      min-height: 190px;
+      padding: 0.75rem;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #0a0d12;
+    }
+    .mock-line {
+      height: 14px;
+      margin-bottom: 0.55rem;
+      border-radius: 3px;
+      background: rgba(148,163,184,0.28);
+    }
+    .mock-line.change { background: rgba(16,185,129,0.34); }
+    .mock-line.warn { background: rgba(245,158,11,0.3); }
+
+    section { padding: 2rem 0; border-bottom: 1px solid var(--line); }
+    h2 { margin: 0 0 1rem; font-size: 1.75rem; line-height: 1.2; }
+    h3 { margin: 1.25rem 0 0.55rem; font-size: 1.1rem; }
+    p { color: var(--muted); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.9rem;
+    }
+    .card {
+      padding: 1rem;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: linear-gradient(180deg, rgba(255,255,255,0.026), rgba(255,255,255,0.004)), var(--panel);
+    }
+    .card strong { display: block; margin-bottom: 0.35rem; }
+    .card p { margin: 0; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 1.7rem;
+      padding: 0 0.55rem;
+      border: 1px solid rgba(16, 185, 129, 0.28);
+      border-radius: 999px;
+      background: rgba(16, 185, 129, 0.08);
+      color: var(--primary-2);
+      font-family: var(--mono);
+      font-size: 0.875rem;
+    }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 0.6rem;
+      margin-top: 1rem;
+    }
+    .flow div {
+      min-height: 92px;
+      padding: 0.8rem;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+    }
+    .flow span {
+      display: block;
+      margin-bottom: 0.35rem;
+      color: var(--primary-2);
+      font-weight: 800;
+    }
+    .split {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 0.9rem;
+    }
+    .visual {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      overflow: hidden;
+    }
+    .visual-head {
+      padding: 0.6rem 0.8rem;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-weight: 700;
+    }
+    .tree {
+      padding: 0.8rem;
+      font-family: var(--mono);
+      color: var(--muted);
+    }
+    .tree div {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 0.35rem 0.45rem;
+      border-radius: 6px;
+    }
+    .tree div.active { background: rgba(16,185,129,0.1); color: var(--text); box-shadow: inset 3px 0 0 var(--primary); }
+    .tags { display: flex; flex-direction: row-reverse; gap: 0.35rem; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    th, td {
+      padding: 0.65rem 0.75rem;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+    }
+    th { color: var(--faint); background: rgba(255,255,255,0.025); }
+    td { color: var(--muted); }
+
+    @media (max-width: 980px) {
+      .shell { grid-template-columns: 1fr; }
+      .nav { position: static; height: auto; }
+      .hero, .split { grid-template-columns: 1fr; min-height: auto; }
+      .grid, .flow { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="nav">
+      <div class="brand">
+        <div class="brand-mark">E</div>
+        <div>
+          <strong>express233</strong>
+          <span>拉模式部署控制台</span>
+        </div>
+      </div>
+      <h2>快速导航</h2>
+      <a href="#start">1. 启动与登录</a>
+      <a href="#project">2. 项目与版本</a>
+      <a href="#tags">3. 多平台文件标签</a>
+      <a href="#replace">4. 配置替换预览</a>
+      <a href="#publish">5. 发布与拉取</a>
+      <a href="#automation">6. 自动化 HTTP</a>
+      <a href="#ops">7. 运维建议</a>
+      <h2>参考</h2>
+      <a href="openapi.yaml">OpenAPI YAML</a>
+      <a href="https://github.com/neko233-com/express233/releases">GitHub Releases</a>
+    </aside>
+
+    <main class="content">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Game Server Pull Deployment Console</p>
+          <h1>express233 使用文档</h1>
+          <p class="lead">一个中央控制台维护多项目、多版本、多平台二进制包，并按 <code>server_id</code> 做配置替换。节点只拉取自己需要的文件，减少弱网环境下的上传、下载浪费。</p>
+          <div class="actions">
+            <a class="button primary" href="#start">开始使用</a>
+            <a class="button" href="openapi.yaml">查看 OpenAPI</a>
+            <a class="button" href="https://github.com/neko233-com/express233">进入仓库</a>
+          </div>
+        </div>
+        <div class="mock" aria-label="express233 console mockup">
+          <div class="mock-bar"><span>express233 控制台</span><span>root</span></div>
+          <div class="mock-body">
+            <div class="mock-side">
+              <div class="mock-row active"></div>
+              <div class="mock-row"></div>
+              <div class="mock-row"></div>
+              <div class="mock-row"></div>
+              <div class="mock-row active"></div>
+            </div>
+            <div class="mock-main">
+              <div class="mock-tabs">
+                <div class="mock-tab on"></div>
+                <div class="mock-tab"></div>
+                <div class="mock-tab"></div>
+                <div class="mock-tab"></div>
+              </div>
+              <div class="mock-diff">
+                <div class="mock-code">
+                  <div class="mock-line"></div>
+                  <div class="mock-line warn"></div>
+                  <div class="mock-line"></div>
+                  <div class="mock-line"></div>
+                  <div class="mock-line warn"></div>
+                </div>
+                <div class="mock-code">
+                  <div class="mock-line"></div>
+                  <div class="mock-line change"></div>
+                  <div class="mock-line"></div>
+                  <div class="mock-line"></div>
+                  <div class="mock-line change"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="start">
+        <h2>1. 启动与登录</h2>
+        <div class="split">
+          <div>
+            <p>本地调试推荐直接运行项目自带脚本。它会启动中央服并监听 <code>127.0.0.1:23380</code>。</p>
+            <pre>run-server.cmd</pre>
+            <p>首次部署到服务器时，先使用 root 账号进入系统设置创建日常账号。控制台会使用 JWT 和 HttpOnly Cookie，401 会自动回到登录页。</p>
+          </div>
+          <div class="card">
+            <strong>登录后先做三件事</strong>
+            <p>创建项目，配置 <code>server.yaml</code>，上传第一个版本包。新手引导可以跳过，系统会记录已引导状态，后续也可从左下角重新打开。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="project">
+        <h2>2. 项目与版本</h2>
+        <div class="flow">
+          <div><span>01</span>左侧创建项目</div>
+          <div><span>02</span>版本页新建版本号</div>
+          <div><span>03</span>上传文件或 zip 包</div>
+          <div><span>04</span>设置平台标签</div>
+          <div><span>05</span>预览后发布</div>
+        </div>
+        <p>版本列表支持搜索。建议版本号从 <code>1.0.0</code> 开始，并把破坏性协议、配置结构或二进制布局变更记录到发布说明。</p>
+      </section>
+
+      <section id="tags">
+        <h2>3. 多平台文件标签</h2>
+        <p>一个版本可以同时上传 Windows、macOS、Linux，x86_64、arm64 等所有二进制。下载方上报自身环境后，服务端只返回匹配标签的文件。未设置标签的文件等价于 <span class="badge">*</span>，所有平台都会下载。</p>
+        <div class="visual">
+          <div class="visual-head">上传文件树预览</div>
+          <div class="tree">
+            <div><span>bin/game-linux-amd64</span><span class="tags"><span class="badge">linux</span><span class="badge">amd64</span></span></div>
+            <div><span>bin/game-linux-arm64</span><span class="tags"><span class="badge">linux</span><span class="badge">arm64</span></span></div>
+            <div><span>bin/game-windows-amd64.exe</span><span class="tags"><span class="badge">windows</span><span class="badge">amd64</span></span></div>
+            <div class="active"><span>config/default.yaml</span><span class="tags"><span class="badge">*</span></span></div>
+          </div>
+        </div>
+        <h3>推荐标签规范</h3>
+        <table>
+          <thead><tr><th>维度</th><th>建议值</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>系统</td><td><code>windows</code> <code>mac</code> <code>linux</code></td><td>按下载方操作系统过滤。</td></tr>
+            <tr><td>架构</td><td><code>amd64</code> <code>arm64</code></td><td>按 CPU 架构过滤。</td></tr>
+            <tr><td>用途</td><td><code>server</code> <code>tool</code></td><td>可选，用于自动化运维选择不同文件组。</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="replace">
+        <h2>4. 配置替换预览</h2>
+        <p>配置替换不是 key/value 列表，而是路径树、原文件、替换后文件三栏预览。左侧选文件，中间看原始内容，右侧看按 <code>server_id</code> 替换后的内容，修改行会高亮。</p>
+        <div class="split">
+          <div>
+            <h3>server.yaml 示例</h3>
+            <pre>replacements:
+  game.yaml:
+    s1:
+      db_host: 10.0.0.11
+      listen: 0.0.0.0:7001
+    s2:
+      db_host: 10.0.0.12
+      listen: 0.0.0.0:7002</pre>
+          </div>
+          <div>
+            <h3>替换原则</h3>
+            <p><code>replacements</code> 的 key 是配置文件 basename，也就是 <code>game.yaml</code>，不要求写完整目录。发布前必须在“拉取预览”确认文件树和 diff。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="publish">
+        <h2>5. 发布与拉取</h2>
+        <p>发布后，节点通过 HTTP API 拉取版本清单和文件。安全部署必须使用 stop、swap、start 流程，不能直接覆盖运行中的二进制。</p>
+        <pre># 典型节点流程
+pull 到 GAME_ROOT/.tmp/{server_id}/
+停止 GAME_ROOT/{server_id}/run/server.pid 对应进程
+rsync 临时目录到正式目录，保留 logs/ 与 run/
+执行 scripts/restart.sh</pre>
+        <p>详细部署约束见仓库内 <code>docs/SAFE_DEPLOY.md</code>。</p>
+      </section>
+
+      <section id="automation">
+        <h2>6. 自动化 HTTP 操作</h2>
+        <p>Agent 或运维脚本可以使用 API 做批量标签、上传、预览和发布。接口以 OpenAPI 为准，下面是自动化思路示例。</p>
+        <pre># 查询 OpenAPI
+curl -fsSL https://neko233-com.github.io/express233/openapi.yaml
+
+# 下载节点建议上报信息
+server_id=s1
+os=linux
+arch=amd64
+tags=linux,amd64,server</pre>
+        <p>批量运维建议把平台标签作为机器画像的一部分，避免跨平台二进制被错误拉取。</p>
+      </section>
+
+      <section id="ops">
+        <h2>7. 运维建议</h2>
+        <div class="grid">
+          <div class="card"><strong>弱网优化</strong><p>优先上传 zip 产物，服务端按文件标签选择性下载。zip 内部已压缩的二进制再 gzip 收益有限，重点应放在断点重试、校验和、分平台过滤。</p></div>
+          <div class="card"><strong>版本治理</strong><p>一个大版本只维护一个多平台包，标签决定下载范围。破坏性变更使用新的主版本号。</p></div>
+          <div class="card"><strong>安全发布</strong><p>发布前跑 CI，节点更新时串行部署，保留 <code>logs/</code> 和 <code>run/</code>，失败时保留备份目录。</p></div>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
