@@ -168,7 +168,7 @@ func (s *Store) ListPushHosts(tenantID int64) ([]PushHost, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []PushHost
 	for rows.Next() {
 		var h PushHost
@@ -269,7 +269,7 @@ func (s *Store) ListPushServerBindings(tenantID, hostID int64) ([]PushServerBind
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []PushServerBinding
 	for rows.Next() {
 		var b PushServerBinding
@@ -286,7 +286,7 @@ func (s *Store) ListPushBindingsForSelector(tenantID int64, serverIDs, labels []
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []PushServerBinding
 	serverSet := make(map[string]bool, len(serverIDs))
 	for _, id := range serverIDs {
@@ -377,7 +377,7 @@ func (s *Store) ListPushDeployments(tenantID, projectID int64, limit int) ([]Pus
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []PushDeployment
 	for rows.Next() {
 		var d PushDeployment
@@ -398,7 +398,7 @@ func (s *Store) GetPushDeployment(tenantID, projectID, id int64) (*PushDeploymen
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var t PushDeploymentTarget
 		if err := rows.Scan(&t.ID, &t.DeploymentID, &t.HostID, &t.HostName, &t.BindingID, &t.ServerID, &t.Labels, &t.Status, &t.Output, &t.CreatedAt, &t.StartedAt, &t.CompletedAt); err != nil {

@@ -111,7 +111,7 @@ func (s *Store) ListLoginIPBans(now time.Time, limit int) ([]LoginIPBan, error) 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []LoginIPBan
 	for rows.Next() {
 		var b LoginIPBan

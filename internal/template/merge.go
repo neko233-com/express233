@@ -155,9 +155,10 @@ func isYAMLScalarPlaceholder(m map[string]any) bool {
 			return false
 		}
 		for i, r := range name {
-			if !(r == '_' || r == '-' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || i > 0 && r >= '0' && r <= '9') {
-				return false
+			if r == '_' || r == '-' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || i > 0 && r >= '0' && r <= '9' {
+				continue
 			}
+			return false
 		}
 	}
 	return true

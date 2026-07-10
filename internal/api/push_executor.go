@@ -46,12 +46,12 @@ func (e sshPushExecutor) Deploy(ctx context.Context, host store.PushHost, bindin
 	if err != nil {
 		return "", fmt.Errorf("connect %s: %w", host.Name, err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	session, err := conn.NewSession()
 	if err != nil {
 		return "", err
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 	var output bytes.Buffer
 	session.Stdout, session.Stderr = &output, &output
 	// The command intentionally delegates extraction, safe swap and post hook to
