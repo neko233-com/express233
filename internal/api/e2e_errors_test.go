@@ -164,6 +164,10 @@ func TestErr_Login_WrongPassword(t *testing.T) {
 	if _, ok := body["error"]; !ok {
 		t.Fatal("want error in body")
 	}
+	message, _ := body["error"].(string)
+	if got, want := message, "4 attempt(s) remaining"; !strings.Contains(got, want) {
+		t.Fatalf("want login failure message to contain %q, got %q", want, got)
+	}
 }
 
 func TestErr_Login_EmptyUsername(t *testing.T) {

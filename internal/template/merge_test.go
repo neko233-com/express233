@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestMergeYAMLNestedPartial(t *testing.T) {
@@ -70,5 +72,36 @@ func TestMergeYAMLAcceptsNamedStringMapTrees(t *testing.T) {
 	s := string(got)
 	if !strings.Contains(s, "password: secret") || !strings.Contains(s, "host: db.internal") || !strings.Contains(s, "timeout: 5s") || !strings.Contains(s, "host: redis.internal") {
 		t.Fatalf("named map merge lost unrelated fields:\n%s", s)
+	}
+}
+
+func TestMergeYAMLReplacesUnquotedScalarTemplatePlaceholders(t *testing.T) {
+	data := []byte(`server:
+  id: {server_id}
+  http_port: {http_port}
+  name: game-server
+`)
+	override := map[string]any{
+		"server": map[string]any{
+			"id":        111,
+			"http_port": 11102,
+		},
+	}
+	got, err := MergeBytes("application.yaml", data, override)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed struct {
+		Server struct {
+			ID       int    `yaml:"id"`
+			HTTPPort int    `yaml:"http_port"`
+			Name     string `yaml:"name"`
+		} `yaml:"server"`
+	}
+	if err := yaml.Unmarshal(got, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Server.ID != 111 || parsed.Server.HTTPPort != 11102 || parsed.Server.Name != "game-server" {
+		t.Fatalf("unexpected rendered config: %+v", parsed.Server)
 	}
 }

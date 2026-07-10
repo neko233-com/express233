@@ -129,12 +129,38 @@ func DeepMergeInPlace(dst, src map[string]any) error {
 			dst[k] = dstMap
 			continue
 		}
+		// YAML parses an unquoted placeholder such as `{http_port}` as a
+		// one-key mapping (`http_port: null`), not a string.  Game server
+		// templates commonly use that concise form for numeric values. Treat
+		// only that exact shape as a scalar placeholder; ordinary maps remain
+		// protected by the type-mismatch check below.
+		if dstIsMap && !srcIsMap && isYAMLScalarPlaceholder(dstMap) {
+			dst[k] = sv
+			continue
+		}
 		if srcIsMap != dstIsMap {
 			return fmt.Errorf("type mismatch at key %q", k)
 		}
 		dst[k] = sv
 	}
 	return nil
+}
+
+func isYAMLScalarPlaceholder(m map[string]any) bool {
+	if len(m) != 1 {
+		return false
+	}
+	for name, value := range m {
+		if value != nil || name == "" {
+			return false
+		}
+		for i, r := range name {
+			if !(r == '_' || r == '-' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || i > 0 && r >= '0' && r <= '9') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func mapValue(v any) (map[string]any, bool) {

@@ -26,9 +26,10 @@ jobs:
           test "${#mains[@]}" -gt 0
           for pkg in "${mains[@]}"; do
             name=$(basename "$pkg")
-            CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o "dist/${name}-linux-amd64" "$pkg"
+            export GOOS=linux GOARCH=amd64
+            CGO_ENABLED=0 go build -trimpath -o "dist/${name}-linux-amd64" "$pkg"
           done
-      - name: Upload immutable version and deploy gateway plus logic-21
+      - name: Upload immutable version and deploy logic-111
         run: |
           set -euo pipefail
           : "${EXPRESS233_URL:?missing EXPRESS233_URL secret}"
@@ -39,22 +40,29 @@ jobs:
           trap 'rm -f "$JAR" /tmp/server-project-sf-go.tar.gz' EXIT
           # Login via HttpOnly cookie. This avoids exposing the credential in a
           # command line or relying on a forwarded Authorization header.
+          login_payload=$(python3 -c 'import json,os; print(json.dumps({"username":os.environ["EXPRESS233_USERNAME"],"password":os.environ["EXPRESS233_PASSWORD"]}))')
           curl --fail --silent --show-error -c "$JAR" -H 'Content-Type: application/json' \
             -X POST "$BASE/api/login" \
-            -d "{\"username\":\"$EXPRESS233_USERNAME\",\"password\":\"$EXPRESS233_PASSWORD\"}" >/dev/null
-          project=$(curl --fail --silent --show-error -b "$JAR" -H 'Content-Type: application/json' \
-            -X POST "$BASE/api/projects" -d "{\"name\":\"$PROJECT\"}")
-          project_id=$(printf '%s' "$project" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+            -d "$login_payload" >/dev/null
+          project_id=$(curl --fail --silent --show-error -b "$JAR" "$BASE/api/projects" | python3 -c 'import json,os,sys; print(next((str(p["id"]) for p in json.load(sys.stdin) if p["name"] == os.environ["PROJECT"]), ""))')
+          if [ -z "$project_id" ]; then
+            project_payload=$(python3 -c 'import json,os; print(json.dumps({"name":os.environ["PROJECT"]}))')
+            project=$(curl --fail --silent --show-error -b "$JAR" -H 'Content-Type: application/json' \
+              -X POST "$BASE/api/projects" -d "$project_payload")
+            project_id=$(printf '%s' "$project" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+          fi
+          version_payload=$(python3 -c 'import json,os; print(json.dumps({"name":os.environ["VERSION"]}))')
           curl --fail --silent --show-error -b "$JAR" -H 'Content-Type: application/json' \
-            -X POST "$BASE/api/projects/$project_id/versions" -d "{\"name\":\"$VERSION\"}" >/dev/null
-          tar --exclude-vcs --exclude='.gitea' --exclude='node_modules' -czf /tmp/server-project-sf-go.tar.gz . dist
+            -X POST "$BASE/api/projects/$project_id/versions" -d "$version_payload" >/dev/null
+          tar --format=pax --numeric-owner --exclude-vcs --exclude='.gitea' --exclude='node_modules' --exclude='./.deploy' -czf /tmp/server-project-sf-go.tar.gz .
           curl --fail --silent --show-error -b "$JAR" -F "file=@/tmp/server-project-sf-go.tar.gz" \
             "$BASE/api/projects/$project_id/versions/$VERSION/files" >/dev/null
           curl --fail --silent --show-error -b "$JAR" -X POST \
             "$BASE/api/projects/$project_id/versions/$VERSION/publish" >/dev/null
+          deployment_payload=$(python3 -c 'import json,os; print(json.dumps({"version":os.environ["VERSION"],"server_ids":["111"],"tags":["prod","logic","aliyun"],"tag_match":"all"}))')
           deployment=$(curl --fail --silent --show-error -b "$JAR" -H 'Content-Type: application/json' -X POST \
             "$BASE/api/projects/$project_id/push-deployments" \
-            -d "{\"version\":\"$VERSION\",\"server_ids\":[\"gateway\",\"21\"],\"tags\":[\"prod\"],\"tag_match\":\"all\"}")
+            -d "$deployment_payload")
           deployment_id=$(printf '%s' "$deployment" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
           for _ in $(seq 1 120); do
             result=$(curl --fail --silent --show-error -b "$JAR" "$BASE/api/projects/$project_id/push-deployments/$deployment_id")

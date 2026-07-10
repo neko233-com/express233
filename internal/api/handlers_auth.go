@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -22,13 +23,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	uid, admin, err := s.Store.Authenticate(req.Username, req.Password)
 	if err != nil {
-		banned, retry := s.recordLoginFailure(r, req.Username)
+		banned, retry, remaining := s.recordLoginFailure(r, req.Username)
 		if banned {
 			w.Header().Set("Retry-After", strconv.Itoa(max(1, int(retry.Seconds()))))
 			errJSON(w, http.StatusTooManyRequests, "too many login attempts; try again later")
 			return
 		}
-		errJSON(w, http.StatusUnauthorized, "invalid credentials")
+		errJSON(w, http.StatusUnauthorized, fmt.Sprintf("invalid username or password; %d attempt(s) remaining before this IP is temporarily blocked", remaining))
 		return
 	}
 	s.clearLoginFailures(r)

@@ -70,10 +70,14 @@ func (s *Server) rejectBlockedLogin(w http.ResponseWriter, r *http.Request, user
 	return true
 }
 
-func (s *Server) recordLoginFailure(r *http.Request, username string) (banned bool, retry time.Duration) {
+func (s *Server) recordLoginFailure(r *http.Request, username string) (banned bool, retry time.Duration, remaining int) {
 	ban, err := s.Store.RecordLoginIPFailure(clientIP(r), time.Now(), loginIPPolicy())
 	if err != nil {
-		return false, 0
+		return false, 0, 0
+	}
+	remaining = loginIPPolicy().FailureLimit - ban.Failures
+	if remaining < 0 {
+		remaining = 0
 	}
 	if ban.BannedUntil != "" {
 		until, err := time.Parse(time.RFC3339Nano, ban.BannedUntil)
@@ -87,7 +91,7 @@ func (s *Server) recordLoginFailure(r *http.Request, username string) (banned bo
 		detail += " banned_for=" + retry.String()
 	}
 	s.audit(r, username, "login.failure", detail)
-	return banned, retry
+	return banned, retry, remaining
 }
 
 func (s *Server) clearLoginFailures(r *http.Request) { _ = s.Store.ClearLoginIPFailures(clientIP(r)) }
