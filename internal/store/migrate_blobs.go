@@ -26,6 +26,15 @@ CREATE TABLE IF NOT EXISTS version_file_tags (
   tags TEXT NOT NULL DEFAULT '*',
   updated_at TEXT NOT NULL,
   PRIMARY KEY(tenant_id, project_name, version, path)
+);
+CREATE TABLE IF NOT EXISTS version_file_modes (
+  tenant_id INTEGER NOT NULL,
+  project_name TEXT NOT NULL,
+  version TEXT NOT NULL,
+  path TEXT NOT NULL,
+  mode INTEGER NOT NULL DEFAULT 420,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(tenant_id, project_name, version, path)
 )`)
 	if err != nil {
 		return err

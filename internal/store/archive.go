@@ -17,6 +17,10 @@ func (s *Store) StreamVersionArchive(tenantID int64, projectName, version string
 	if _, err := os.Stat(root); err != nil {
 		return err
 	}
+	modes, err := s.ListVersionFileModes(tenantID, projectName, version)
+	if err != nil {
+		return err
+	}
 	gzw := gzip.NewWriter(w)
 	defer func() { _ = gzw.Close() }()
 	tw := tar.NewWriter(gzw)
@@ -37,9 +41,13 @@ func (s *Store) StreamVersionArchive(tenantID int64, projectName, version string
 		if err != nil {
 			return err
 		}
+		mode := defaultFileMode
+		if configured, ok := modes[filepath.ToSlash(rel)]; ok {
+			mode = configured
+		}
 		hdr := &tar.Header{
 			Name:    filepath.ToSlash(rel),
-			Mode:    0o644,
+			Mode:    int64(mode),
 			Size:    int64(len(data)),
 			ModTime: info.ModTime(),
 		}

@@ -292,9 +292,9 @@ func copyBlobFile(src, dst string) error {
 
 // BlobStats 返回 blob 去重存储统计（调试/运维）。
 type BlobStats struct {
-	BlobCount   int   `json:"blob_count"`
-	TotalBytes  int64 `json:"total_bytes"`
-	TotalRefs   int   `json:"total_refs"`
+	BlobCount  int   `json:"blob_count"`
+	TotalBytes int64 `json:"total_bytes"`
+	TotalRefs  int   `json:"total_refs"`
 }
 
 func (s *Store) BlobStats() (BlobStats, error) {
@@ -334,5 +334,8 @@ func (s *Store) writeVersionBlob(tenantID int64, projectName, version, relPath s
 	if err != nil {
 		return fmt.Errorf("blob ingest: %w", err)
 	}
-	return s.linkBlobToVersion(hash, path)
+	if err := s.linkBlobToVersion(hash, path); err != nil {
+		return err
+	}
+	return s.setVersionFileMode(tenantID, projectName, version, relPath, defaultFileMode)
 }

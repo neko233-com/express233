@@ -1,7 +1,10 @@
 package pull
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -57,5 +60,77 @@ func TestBuildAndExtractBundle(t *testing.T) {
 	}
 	if string(b) != "k=v2\n" {
 		t.Fatalf("replacement failed: %q", string(b))
+	}
+}
+
+func TestBuildBundlePreservesUploadedExecutableModes(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	const tid int64 = 1
+	p, _ := st.CreateProject(tid, st.TestRootUserID(), "mode-preservation")
+	v, _ := st.CreateVersion(tid, p.ID, p.Name, "1.0.0")
+	var uploaded bytes.Buffer
+	gz := gzip.NewWriter(&uploaded)
+	tw := tar.NewWriter(gz)
+	for _, file := range []struct {
+		name string
+		mode int64
+		body string
+	}{
+		{name: "scripts/restart.sh", mode: 0o755, body: "#!/bin/sh\nexit 0\n"},
+		{name: "scripts/restart.ps1", mode: 0o644, body: "exit 0\n"},
+		{name: "docs/restart-copy.txt", mode: 0o644, body: "#!/bin/sh\nexit 0\n"},
+	} {
+		if err := tw.WriteHeader(&tar.Header{Name: file.name, Mode: file.mode, Size: int64(len(file.body))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.WriteString(tw, file.body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ExtractTarToVersion(tid, p.Name, v.Version, bytes.NewReader(uploaded.Bytes()), true); err != nil {
+		t.Fatal(err)
+	}
+
+	sf := &config.ServerFile{Servers: map[string]config.ServerEntry{"111": {}}}
+	var bundle bytes.Buffer
+	if err := BuildBundle(st, tid, sf, p.Name, v.Version, "111", &bundle); err != nil {
+		t.Fatal(err)
+	}
+	gr, err := gzip.NewReader(bytes.NewReader(bundle.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gr.Close()
+	tr := tar.NewReader(gr)
+	modes := map[string]int64{}
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		modes[hdr.Name] = hdr.Mode
+	}
+	if got := modes["scripts/restart.sh"]; got != 0o755 {
+		t.Fatalf("restart.sh mode=%#o, want 0755", got)
+	}
+	if got := modes["scripts/restart.ps1"]; got != 0o644 {
+		t.Fatalf("restart.ps1 mode=%#o, want 0644", got)
+	}
+	if got := modes["docs/restart-copy.txt"]; got != 0o644 {
+		t.Fatalf("same-content non-executable mode=%#o, want 0644", got)
 	}
 }

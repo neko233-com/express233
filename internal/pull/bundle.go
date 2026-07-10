@@ -64,7 +64,11 @@ func BuildBundleWithOptions(st *store.Store, tenantID int64, sf *config.ServerFi
 	filter := func(rel string) bool {
 		return filetags.Matches(tagByPath[filepath.ToSlash(rel)], target)
 	}
-	return buildBundleFromVersionDir(vdir, sf, projectName, version, serverID, opts, filter, w)
+	modes, err := st.ListVersionFileModes(tenantID, projectName, version)
+	if err != nil {
+		return err
+	}
+	return buildBundleFromVersionDir(vdir, sf, projectName, version, serverID, opts, filter, modes, w)
 }
 
 // BuildBundleFromDir 从本地版本目录构建包（测试/校验用）。
@@ -72,10 +76,10 @@ func BuildBundleFromDir(versionRoot string, sf *config.ServerFile, projectName, 
 	if _, err := os.Stat(versionRoot); err != nil {
 		return fmt.Errorf("version files: %w", err)
 	}
-	return buildBundleFromVersionDir(versionRoot, sf, projectName, version, serverID, BundleOptions{}, nil, w)
+	return buildBundleFromVersionDir(versionRoot, sf, projectName, version, serverID, BundleOptions{}, nil, nil, w)
 }
 
-func buildBundleFromVersionDir(vdir string, sf *config.ServerFile, projectName, version, serverID string, opts BundleOptions, filter func(string) bool, w io.Writer) error {
+func buildBundleFromVersionDir(vdir string, sf *config.ServerFile, projectName, version, serverID string, opts BundleOptions, filter func(string) bool, modes map[string]os.FileMode, w io.Writer) error {
 	entry := sf.Entry(serverID)
 	if entry == nil {
 		return fmt.Errorf("unknown server_id %q in server.yaml", serverID)
@@ -123,7 +127,7 @@ func buildBundleFromVersionDir(vdir string, sf *config.ServerFile, projectName, 
 		}
 	}
 	mb, _ := json.MarshalIndent(manifest, "", "  ")
-	if err := writeTarEntry(tw, ".express233/manifest.json", mb, time.Now()); err != nil {
+	if err := writeTarEntry(tw, ".express233/manifest.json", mb, time.Now(), 0o644); err != nil {
 		return err
 	}
 
@@ -142,7 +146,11 @@ func buildBundleFromVersionDir(vdir string, sf *config.ServerFile, projectName, 
 		if err != nil {
 			return err
 		}
-		return writeTarEntry(tw, rel, data, info.ModTime())
+		mode := info.Mode().Perm()
+		if configured, ok := modes[filepath.ToSlash(rel)]; ok {
+			mode = configured
+		}
+		return writeTarEntry(tw, rel, data, info.ModTime(), mode)
 	})
 }
 
@@ -163,7 +171,10 @@ func copyDir(src, dst string, filter func(string) bool) error {
 		if filter != nil && !filter(relSlash) {
 			return nil
 		}
-		return copyFile(path, target)
+		if err := copyFile(path, target); err != nil {
+			return err
+		}
+		return os.Chmod(target, info.Mode().Perm())
 	})
 }
 
@@ -185,10 +196,10 @@ func copyFile(src, dst string) error {
 	return err
 }
 
-func writeTarEntry(tw *tar.Writer, name string, data []byte, mod time.Time) error {
+func writeTarEntry(tw *tar.Writer, name string, data []byte, mod time.Time, mode os.FileMode) error {
 	hdr := &tar.Header{
 		Name:    filepath.ToSlash(name),
-		Mode:    0o644,
+		Mode:    int64(mode.Perm()),
 		Size:    int64(len(data)),
 		ModTime: mod,
 	}
@@ -236,7 +247,11 @@ func ExtractBundle(r io.Reader, dest string) (*Manifest, error) {
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return nil, err
 		}
-		f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(hdr.Mode))
+		mode := os.FileMode(hdr.Mode).Perm() &^ 0o022
+		if mode == 0 {
+			mode = 0o644
+		}
+		f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 		if err != nil {
 			return nil, err
 		}

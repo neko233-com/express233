@@ -107,6 +107,8 @@ bash scripts/safe-deploy.sh --server-id game-logic-01 --backup          # 带备
 bash scripts/safe-deploy.sh --server-id game-logic-01 --dry-run         # 预览不执行
 ```
 
+中央控制台的 SSH 推送始终启用 `--backup`。缺少 `scripts/restart.sh`、启动失败或可选的 `scripts/healthcheck.sh` 返回失败时，脚本会自动停止失败进程、恢复旧文件并重新执行旧版 `scripts/restart.sh`；备份默认保留最近 5 份，可通过 `EXPRESS233_BACKUP_KEEP` 调整。
+
 ### 批量（同机多服）
 
 ```bash

@@ -61,7 +61,7 @@ func (e sshPushExecutor) Deploy(ctx context.Context, host store.PushHost, bindin
 	// pre-installed host script.  A controller must never overwrite a running
 	// game binary directly. The pull token is an environment value rather than
 	// an argv argument so ordinary process listings do not disclose it.
-	script := "set -eu; command -v safe-deploy.sh >/dev/null 2>&1 || { echo 'safe-deploy.sh is required on the target'; exit 127; }; EXPRESS233_SERVER=" + shellQuote(command.CentralURL) + " EXPRESS233_TOKEN=" + shellQuote(command.PullToken) + " EXPRESS233_PROJECT=" + shellQuote(command.Project) + " EXPRESS233_SERVER_ID=" + shellQuote(command.ServerID) + " VERSION=" + shellQuote(command.Version) + " EXPRESS233_TAGS=" + shellQuote(strings.Join(splitCSV(binding.ContentTags), ",")) + " GAME_ROOT=" + shellQuote(binding.RemoteRoot) + " safe-deploy.sh --server-id " + shellQuote(command.ServerID)
+	script := "set -eu; command -v safe-deploy.sh >/dev/null 2>&1 || { echo 'safe-deploy.sh is required on the target'; exit 127; }; EXPRESS233_SERVER=" + shellQuote(command.CentralURL) + " EXPRESS233_TOKEN=" + shellQuote(command.PullToken) + " EXPRESS233_PROJECT=" + shellQuote(command.Project) + " EXPRESS233_SERVER_ID=" + shellQuote(command.ServerID) + " VERSION=" + shellQuote(command.Version) + " EXPRESS233_TAGS=" + shellQuote(strings.Join(splitCSV(binding.ContentTags), ",")) + " GAME_ROOT=" + shellQuote(binding.RemoteRoot) + " safe-deploy.sh --backup --server-id " + shellQuote(command.ServerID)
 	if err := session.Run(script); err != nil {
 		return output.String(), fmt.Errorf("remote CLI deploy: %w", err)
 	}

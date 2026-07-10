@@ -89,6 +89,9 @@ func (s *Store) DeleteProject(tenantID, id int64) error {
 	if _, err := s.db.Exec(`DELETE FROM projects WHERE id = ? AND tenant_id = ?`, id, tenantID); err != nil {
 		return err
 	}
+	if err := s.deleteProjectFileModes(tenantID, name); err != nil {
+		return err
+	}
 	root, err := s.ProjectsRoot(tenantID)
 	if err != nil {
 		return err
@@ -306,6 +309,9 @@ func (s *Store) DeleteVersion(tenantID, projectID int64, projectName, version st
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		return sql.ErrNoRows
+	}
+	if err := s.deleteVersionFileModes(tenantID, projectName, version); err != nil {
+		return err
 	}
 	dir, err := s.VersionDir(tenantID, projectName, version)
 	if err == nil {

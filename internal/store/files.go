@@ -42,7 +42,10 @@ func (s *Store) DeleteVersionFile(tenantID int64, projectName, version, relPath 
 	if err := s.releaseBlobLink(path); err != nil {
 		return err
 	}
-	return s.DeleteVersionFileTags(tenantID, projectName, version, relPath)
+	if err := s.DeleteVersionFileTags(tenantID, projectName, version, relPath); err != nil {
+		return err
+	}
+	return s.deleteVersionFileMode(tenantID, projectName, version, relPath)
 }
 
 // ReadVersionTextFile 读取版本内文本文件预览内容。
@@ -121,6 +124,9 @@ func (s *Store) ExtractZipToVersion(tenantID int64, projectName, version string,
 		if err := s.linkBlobToVersion(hash, dest); err != nil {
 			return err
 		}
+		if err := s.setVersionFileMode(tenantID, projectName, version, name, f.Mode()); err != nil {
+			return err
+		}
 	}
 	return ValidateUniqueConfigBasenames(root)
 }
@@ -192,6 +198,9 @@ func (s *Store) ExtractTarToVersion(tenantID int64, projectName, version string,
 			return err
 		}
 		if err := s.linkBlobToVersion(hash, dest); err != nil {
+			return err
+		}
+		if err := s.setVersionFileMode(tenantID, projectName, version, name, os.FileMode(hdr.Mode)); err != nil {
 			return err
 		}
 	}
