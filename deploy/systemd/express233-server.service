@@ -1,0 +1,23 @@
+[Unit]
+Description=express233 production deployment controller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=express233
+Group=express233
+EnvironmentFile=/etc/express233/server.env
+WorkingDirectory=/server/express233-server
+ExecStart=/server/express233-server/express233-server -addr 127.0.0.1:23380 -data /server/express233-server/data
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/server/express233-server
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,14 @@
+services:
+  act-runner:
+    image: docker.io/gitea/act_runner:latest
+    restart: unless-stopped
+    environment:
+      CONFIG_FILE: /config.yaml
+      GITEA_INSTANCE_URL: ${GITEA_INSTANCE_URL:?set Gitea URL}
+      GITEA_RUNNER_REGISTRATION_TOKEN: ${GITEA_RUNNER_REGISTRATION_TOKEN:?set runner token}
+      GITEA_RUNNER_NAME: express233-production
+      GITEA_RUNNER_LABELS: express233-ci:docker://express233-gitea-ci:1.26-node24
+      GITEA_RUNNER_EPHEMERAL: "1"
+    volumes:
+      - ./runner-config.yaml:/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock

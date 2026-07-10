@@ -6,20 +6,21 @@ on:
   pull_request:
     branches: [main, master]
 
-# Gitea act_runner-compatible, intentionally package-only fast path. The
-# runner image must include Node 24 and Go 1.26.
+# This label is intentionally private to the production act_runner defined in
+# deploy/gitea. It pins Go 1.26 and Node 24 rather than inheriting whatever is
+# installed on a shared runner.
 jobs:
-  build:
-    name: build binaries
-    runs-on: ubuntu-latest
+  package:
+    name: package all binaries
+    runs-on: express233-ci
     steps:
       - uses: actions/checkout@v4
-      - name: Build console and release binaries
+      - name: Build console and verified binaries
         env:
-          VERSION: 0.0.0-ci
+          VERSION: 0.0.0-ci-${{ github.sha }}
           COMMIT: ${{ github.sha }}
         run: |
-          set -eu
+          set -euo pipefail
           npm --prefix frontend ci
           npm --prefix frontend run build
           mkdir -p dist
@@ -30,7 +31,4 @@ jobs:
             CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -ldflags "$LDFLAGS" -o "dist/express233-server-${GOOS}-${GOARCH}${ext}" ./cmd/express233-server
           done
           sha256sum dist/* > dist/SHA256SUMS
-      - uses: actions/upload-artifact@v4
-        with:
-          name: express233-binaries
-          path: dist/
+          sha256sum --check dist/SHA256SUMS

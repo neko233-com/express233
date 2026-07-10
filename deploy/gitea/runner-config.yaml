@@ -1,0 +1,14 @@
+runner:
+  capacity: 1
+  timeout: 3h
+  insecure: false
+cache:
+  enabled: true
+  dir: /tmp/express233-act-cache
+  host: ""
+  port: 0
+container:
+  network: bridge
+  privileged: false
+  valid_volumes:
+    - /tmp/express233-act-cache

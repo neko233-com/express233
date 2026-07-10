@@ -1,0 +1,46 @@
+name: Release generic package
+
+on:
+  push:
+    tags: ["v*"]
+
+# Required secrets: GITEA_PACKAGE_USER and GITEA_PACKAGE_TOKEN.
+# Required variable: GITEA_URL, e.g. https://git.example.com.
+jobs:
+  publish:
+    runs-on: express233-ci
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build immutable release files
+        env:
+          VERSION: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+          mkdir -p dist
+          LDFLAGS="-s -w -X github.com/neko233-com/express233/internal/version.Version=${VERSION#v} -X github.com/neko233-com/express233/internal/version.Commit=${COMMIT}"
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            GOOS=${target%/*}; GOARCH=${target#*/}; ext=""; [ "$GOOS" = windows ] && ext=.exe
+            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -ldflags "$LDFLAGS" -o "dist/express233-cli-${GOOS}-${GOARCH}${ext}" ./cmd/express233-cli
+            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -ldflags "$LDFLAGS" -o "dist/express233-server-${GOOS}-${GOARCH}${ext}" ./cmd/express233-server
+          done
+          sha256sum dist/* > dist/SHA256SUMS
+          sha256sum --check dist/SHA256SUMS
+      - name: Upload verified files to Gitea generic registry
+        env:
+          GITEA_URL: ${{ vars.GITEA_URL }}
+          GITEA_OWNER: ${{ github.repository_owner }}
+          GITEA_PACKAGE_USER: ${{ secrets.GITEA_PACKAGE_USER }}
+          GITEA_PACKAGE_TOKEN: ${{ secrets.GITEA_PACKAGE_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          : "${GITEA_URL:?set repository variable GITEA_URL}"
+          : "${GITEA_PACKAGE_USER:?set GITEA_PACKAGE_USER secret}"
+          : "${GITEA_PACKAGE_TOKEN:?set GITEA_PACKAGE_TOKEN secret}"
+          BASE="${GITEA_URL%/}/api/packages/${GITEA_OWNER}/generic/express233/${VERSION}"
+          for file in dist/*; do
+            curl --fail --show-error --silent --user "${GITEA_PACKAGE_USER}:${GITEA_PACKAGE_TOKEN}" --upload-file "$file" "$BASE/$(basename "$file")"
+          done
