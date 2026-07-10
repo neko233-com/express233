@@ -25,3 +25,12 @@ https://git.example.com/api/packages/<owner>/generic/express233/vX.Y.Z/express23
 ```
 
 下载后必须执行 `sha256sum --check SHA256SUMS`。Gitea Generic Registry 使用 HTTP PUT 逐文件上传，冲突版本会失败，确保发布不可变。
+
+## 游戏服务器项目直接发布
+
+将 [server-project-sf-go-express233.yml](../examples/gitea/server-project-sf-go-express233.yml) 放入游戏项目的 `.gitea/workflows/`。设置以下 repository secrets 后，推送 `v*` tag 会构建全部 Go `main` 二进制、上传不可变版本、发布，并按 `prod` 标签串行部署 `gateway` 与逻辑服 `21`：
+
+- `EXPRESS233_URL`：生产 HTTPS 地址；必须解析到实际 express233 主机。
+- `EXPRESS233_USERNAME` / `EXPRESS233_PASSWORD`：只用于 CI 的 operator 账号；不会输出到日志或存进版本包。
+
+SSH 密码只在 express233 创建主机时通过 HTTPS 发送一次，数据库内只保存 AES-256-GCM 密文，API 列表/读取接口不返回它。CI 不接触 SSH 密码。

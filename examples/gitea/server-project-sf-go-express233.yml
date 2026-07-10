@@ -1,0 +1,66 @@
+name: Deploy server-project-sf-go through express233
+
+on:
+  push:
+    tags: ["v*"]
+
+# Copy this file into poke-game/server-project-sf-go/.gitea/workflows/ after
+# configuring the three repository secrets listed below. It runs only on the
+# private production runner supplied by deploy/gitea.
+jobs:
+  build-upload-deploy:
+    runs-on: express233-ci
+    env:
+      EXPRESS233_URL: ${{ secrets.EXPRESS233_URL }}
+      EXPRESS233_USERNAME: ${{ secrets.EXPRESS233_USERNAME }}
+      EXPRESS233_PASSWORD: ${{ secrets.EXPRESS233_PASSWORD }}
+      PROJECT: server-project-sf-go
+      VERSION: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build all Go main packages
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          mapfile -t mains < <(go list -f '{{if eq .Name "main"}}{{.ImportPath}}{{end}}' ./... | sed '/^$/d')
+          test "${#mains[@]}" -gt 0
+          for pkg in "${mains[@]}"; do
+            name=$(basename "$pkg")
+            CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o "dist/${name}-linux-amd64" "$pkg"
+          done
+      - name: Upload immutable version and deploy gateway plus logic-21
+        run: |
+          set -euo pipefail
+          : "${EXPRESS233_URL:?missing EXPRESS233_URL secret}"
+          : "${EXPRESS233_USERNAME:?missing EXPRESS233_USERNAME secret}"
+          : "${EXPRESS233_PASSWORD:?missing EXPRESS233_PASSWORD secret}"
+          BASE="${EXPRESS233_URL%/}"
+          JAR=$(mktemp)
+          trap 'rm -f "$JAR" /tmp/server-project-sf-go.tar.gz' EXIT
+          # Login via HttpOnly cookie. This avoids exposing the credential in a
+          # command line or relying on a forwarded Authorization header.
+          curl --fail --silent --show-error -c "$JAR" -H 'Content-Type: application/json' \
+            -X POST "$BASE/api/login" \
+            -d "{\"username\":\"$EXPRESS233_USERNAME\",\"password\":\"$EXPRESS233_PASSWORD\"}" >/dev/null
+          project=$(curl --fail --silent --show-error -b "$JAR" -H 'Content-Type: application/json' \
+            -X POST "$BASE/api/projects" -d "{\"name\":\"$PROJECT\"}")
+          project_id=$(printf '%s' "$project" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+          curl --fail --silent --show-error -b "$JAR" -H 'Content-Type: application/json' \
+            -X POST "$BASE/api/projects/$project_id/versions" -d "{\"name\":\"$VERSION\"}" >/dev/null
+          tar --exclude-vcs --exclude='.gitea' --exclude='node_modules' -czf /tmp/server-project-sf-go.tar.gz . dist
+          curl --fail --silent --show-error -b "$JAR" -F "file=@/tmp/server-project-sf-go.tar.gz" \
+            "$BASE/api/projects/$project_id/versions/$VERSION/files" >/dev/null
+          curl --fail --silent --show-error -b "$JAR" -X POST \
+            "$BASE/api/projects/$project_id/versions/$VERSION/publish" >/dev/null
+          deployment=$(curl --fail --silent --show-error -b "$JAR" -H 'Content-Type: application/json' -X POST \
+            "$BASE/api/projects/$project_id/push-deployments" \
+            -d "{\"version\":\"$VERSION\",\"server_ids\":[\"gateway\",\"21\"],\"tags\":[\"prod\"],\"tag_match\":\"all\"}")
+          deployment_id=$(printf '%s' "$deployment" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+          for _ in $(seq 1 120); do
+            result=$(curl --fail --silent --show-error -b "$JAR" "$BASE/api/projects/$project_id/push-deployments/$deployment_id")
+            status=$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')
+            [ "$status" = queued ] || [ "$status" = running ] || break
+            sleep 2
+          done
+          printf '%s\n' "$result"
+          test "$status" = success
