@@ -35,22 +35,8 @@ jobs:
 
   build:
     needs: verify-checks
-    name: build ${{ matrix.goos }}-${{ matrix.goarch }}
+    name: package all platforms
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-          - goos: linux
-            goarch: arm64
-          - goos: darwin
-            goarch: amd64
-          - goos: darwin
-            goarch: arm64
-          - goos: windows
-            goarch: amd64
     steps:
       - uses: actions/checkout@v4
         with:
@@ -73,33 +59,29 @@ jobs:
 
       - name: Build artifacts
         env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
           VERSION: ${{ steps.ver.outputs.version }}
           COMMIT: ${{ github.sha }}
         run: |
           set -euo pipefail
-          ext=""
-          [ "$GOOS" = "windows" ] && ext=".exe"
           LDFLAGS="-s -w \
             -X github.com/neko233-com/express233/internal/version.Version=${VERSION#v} \
             -X github.com/neko233-com/express233/internal/version.Commit=${COMMIT} \
             -X github.com/neko233-com/express233/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-          cli="express233-cli-${GOOS}-${GOARCH}${ext}"
-          srv="express233-server-${GOOS}-${GOARCH}${ext}"
-
-          go build -ldflags "${LDFLAGS}" -o "dist/${cli}" ./cmd/express233-cli
-          go build -ldflags "${LDFLAGS}" -o "dist/${srv}" ./cmd/express233-server
-
-          cd dist
-          sha256sum "${cli}" > "${cli}.sha256"
-          sha256sum "${srv}" > "${srv}.sha256"
-          ls -la
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            GOOS=${target%/*}; GOARCH=${target#*/}; ext=""
+            [ "$GOOS" = windows ] && ext=.exe
+            cli="express233-cli-${GOOS}-${GOARCH}${ext}"
+            srv="express233-server-${GOOS}-${GOARCH}${ext}"
+            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -ldflags "${LDFLAGS}" -o "dist/${cli}" ./cmd/express233-cli
+            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -ldflags "${LDFLAGS}" -o "dist/${srv}" ./cmd/express233-server
+          done
+          sha256sum dist/* > dist/SHA256SUMS
 
       - uses: actions/upload-artifact@v4
         with:
-          name: dist-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: dist
           path: dist/*
 
   release:
@@ -113,8 +95,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: dist-*
-          merge-multiple: true
+          name: dist
 
       - name: List release files
         run: find artifacts -type f | sort

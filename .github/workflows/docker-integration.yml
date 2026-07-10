@@ -1,0 +1,29 @@
+name: Docker integration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  bundle-and-api:
+    name: Docker bundle and API flow
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start the production image
+        run: docker compose up --build --wait
+      - name: Verify authenticated archive flow, nested config and scripts
+        run: bash scripts/ci-smoke.sh
+        env:
+          EXPRESS233_SMOKE_BASE_URL: http://127.0.0.1:23380
+      - name: Collect container diagnostics
+        if: always()
+        run: docker compose logs --no-color
+      - name: Stop stack
+        if: always()
+        run: docker compose down -v

@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+# Gitea act_runner-compatible, intentionally package-only fast path. The
+# runner image must include Node 24 and Go 1.26.
+jobs:
+  build:
+    name: build binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build console and release binaries
+        env:
+          VERSION: 0.0.0-ci
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -eu
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+          mkdir -p dist
+          LDFLAGS="-s -w -X github.com/neko233-com/express233/internal/version.Version=${VERSION} -X github.com/neko233-com/express233/internal/version.Commit=${COMMIT}"
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            GOOS=${target%/*}; GOARCH=${target#*/}; ext=""; [ "$GOOS" = windows ] && ext=.exe
+            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -ldflags "$LDFLAGS" -o "dist/express233-cli-${GOOS}-${GOARCH}${ext}" ./cmd/express233-cli
+            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -ldflags "$LDFLAGS" -o "dist/express233-server-${GOOS}-${GOARCH}${ext}" ./cmd/express233-server
+          done
+          sha256sum dist/* > dist/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: express233-binaries
+          path: dist/

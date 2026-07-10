@@ -144,6 +144,19 @@ func (s *Store) GetUserByID(id int64) (*User, error) {
 	return &u, nil
 }
 
+// GetUserByNameInTenant is used by an asynchronous deployment after the HTTP
+// request has completed. The token is passed only to the remote CLI process.
+func (s *Store) GetUserByNameInTenant(tenantID int64, username string) (*User, error) {
+	var u User
+	var admin int
+	err := s.db.QueryRow(`SELECT id, username, COALESCE(role,'operator'), is_admin, token, created_at FROM users WHERE tenant_id=? AND username=?`, tenantID, username).Scan(&u.ID, &u.Username, &u.Role, &admin, &u.Token, &u.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	u.IsAdmin = admin == 1
+	return &u, nil
+}
+
 // EnsureAdmin 确保操作者为管理员。
 func (s *Store) EnsureAdmin(userID int64) error {
 	role, err := s.UserRole(userID)

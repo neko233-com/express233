@@ -23,6 +23,16 @@ STOP_TIMEOUT="${STOP_TIMEOUT:-10}"        # 等待进程退出的秒数
 DRY_RUN=false
 BACKUP=false
 VERSION_ARGS=()
+if [[ -n "${VERSION:-}" ]]; then
+  VERSION_ARGS=(--version "$VERSION")
+fi
+TAG_ARGS=()
+if [[ -n "${EXPRESS233_TAGS:-}" ]]; then
+  IFS=',' read -r -a _express233_tags <<<"$EXPRESS233_TAGS"
+  for _express233_tag in "${_express233_tags[@]}"; do
+    [[ -n "$_express233_tag" ]] && TAG_ARGS+=(--tag "$_express233_tag")
+  done
+fi
 
 # ═══════════════ 参数解析 ═══════════════
 SERVER_ID="${EXPRESS233_SERVER_ID:-}"
@@ -68,6 +78,7 @@ else
     --server-id "$SERVER_ID" \
     --dest "$TMP_DIR" \
     --skip-hook \
+    "${TAG_ARGS[@]}" \
     "${VERSION_ARGS[@]}"
   log "pull complete: $(find "$TMP_DIR" -type f | wc -l) files"
 fi

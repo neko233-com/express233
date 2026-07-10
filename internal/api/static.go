@@ -14,6 +14,7 @@ var webFS embed.FS
 
 // webDir 非空时从磁盘读取 web 静态文件（开发热重载），由 EXPRESS233_WEB_DIR 设置。
 var webDir string
+var reactWeb bool
 
 func init() {
 	if d := os.Getenv("EXPRESS233_WEB_DIR"); d != "" {
@@ -23,6 +24,7 @@ func init() {
 			webDir = d
 		}
 	}
+	reactWeb = os.Getenv("EXPRESS233_REACT_WEB") == "1"
 }
 
 // DevWebDir 返回开发静态目录；空表示使用 go:embed。
@@ -39,7 +41,11 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) serveStaticEmbedded(w http.ResponseWriter, r *http.Request) {
-	sub, err := fs.Sub(webFS, "web")
+	root := "web"
+	if reactWeb {
+		root = "web/dist"
+	}
+	sub, err := fs.Sub(webFS, root)
 	if err != nil {
 		http.Error(w, "static fs", 500)
 		return

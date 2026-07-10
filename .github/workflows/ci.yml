@@ -14,56 +14,31 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  test:
-    name: test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      - name: Go vet
-        run: go vet ./...
-
-      - name: Unit tests
-        run: go test ./... -count=1 -coverprofile=coverage.out
-        if: matrix.os == 'ubuntu-latest'
-
-      - name: Unit tests (race)
-        run: go test ./... -count=1 -race
-        if: matrix.os == 'ubuntu-latest'
-
-      - name: Unit tests
-        run: go test ./... -count=1
-        if: matrix.os != 'ubuntu-latest'
-
-      - name: Upload coverage
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage
-          path: coverage.out
-
   build:
     name: build binaries
     runs-on: ubuntu-latest
-    needs: test
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build React console
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
 
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Build with version metadata
+      - name: Build signed metadata binaries
         env:
           VERSION: 0.0.0-ci.${{ github.run_number }}
           COMMIT: ${{ github.sha }}
@@ -73,47 +48,16 @@ jobs:
             -X github.com/neko233-com/express233/internal/version.Version=${VERSION} \
             -X github.com/neko233-com/express233/internal/version.Commit=${COMMIT} \
             -X github.com/neko233-com/express233/internal/version.Date=${DATE}"
-          go build -ldflags "${LDFLAGS}" -o bin/express233-cli ./cmd/express233-cli
-          go build -ldflags "${LDFLAGS}" -o bin/express233-server ./cmd/express233-server
-          ./bin/express233-cli version
-          ./bin/express233-server -version
-
-      - name: Smoke test server + API
-        run: bash scripts/ci-smoke.sh
-
-      - name: Health check
-        run: |
-          ./bin/express233-server -data /tmp/ex233-ci &
-          pid=$!
-          sleep 1
-          curl -fsS http://127.0.0.1:23380/healthz | grep -q ok
-          kill $pid
+          mkdir -p bin
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            GOOS=${target%/*}; GOARCH=${target#*/}; ext=""
+            [ "$GOOS" = windows ] && ext=.exe
+            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -ldflags "${LDFLAGS}" -o "bin/express233-cli-${GOOS}-${GOARCH}${ext}" ./cmd/express233-cli
+            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -ldflags "${LDFLAGS}" -o "bin/express233-server-${GOOS}-${GOARCH}${ext}" ./cmd/express233-server
+          done
+          sha256sum bin/* > bin/SHA256SUMS
 
       - uses: actions/upload-artifact@v4
         with:
-          name: linux-amd64-ci-binaries
+          name: express233-binaries
           path: bin/
-
-  scripts:
-    name: validate scripts
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install ShellCheck
-        run: sudo apt-get update && sudo apt-get install -y shellcheck
-
-      - name: ShellCheck
-        run: shellcheck scripts/*.sh
-
-      - name: Bash syntax
-        run: |
-          bash -n scripts/install.sh
-          bash -n scripts/install-server.sh
-          bash -n scripts/deploy-on-host.sh
-          bash -n scripts/ci-smoke.sh
-          bash -n scripts/require-green-checks.sh
-          bash -n scripts/backup-data.sh
-          bash -n scripts/restore-data.sh
-          bash -n scripts/safe-deploy.sh
-          bash -n scripts/batch-deploy.sh

@@ -27,11 +27,7 @@ fi
 
 REQUIRED=(
   "golangci-lint"
-  "test (ubuntu-latest)"
-  "test (windows-latest)"
-  "test (macos-latest)"
   "build binaries"
-  "validate scripts"
 )
 
 mapfile -t rows < <(

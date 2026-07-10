@@ -1,0 +1,498 @@
+package store
+
+import (
+	"database/sql"
+	"fmt"
+	"strings"
+	"time"
+)
+
+// PushHost is an SSH endpoint used by the push deployment controller. The
+// private key is deliberately never included in API responses.
+type PushHost struct {
+	ID                 int64  `json:"id"`
+	TenantID           int64  `json:"tenant_id,omitempty"`
+	Name               string `json:"name"`
+	Address            string `json:"address"`
+	Port               int    `json:"port"`
+	Username           string `json:"username"`
+	AuthMode           string `json:"auth_mode"`
+	HostKey            string `json:"host_key"`
+	HostKeyFingerprint string `json:"host_key_fingerprint,omitempty"`
+	CreatedAt          string `json:"created_at"`
+	UpdatedAt          string `json:"updated_at"`
+}
+
+// PushServerBinding describes one independently deployable server on a host.
+// Labels select targets (for example test, canary, cn), while ContentTags
+// select tagged files inside a version bundle.
+type PushServerBinding struct {
+	ID          int64  `json:"id"`
+	TenantID    int64  `json:"tenant_id,omitempty"`
+	HostID      int64  `json:"host_id"`
+	HostName    string `json:"host_name,omitempty"`
+	ServerID    string `json:"server_id"`
+	Labels      string `json:"labels"`
+	ContentTags string `json:"content_tags,omitempty"`
+	RemoteRoot  string `json:"remote_root"`
+	OS          string `json:"os,omitempty"`
+	Arch        string `json:"arch,omitempty"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
+type PushDeployment struct {
+	ID          int64                  `json:"id"`
+	TenantID    int64                  `json:"tenant_id,omitempty"`
+	ProjectID   int64                  `json:"project_id"`
+	Version     string                 `json:"version"`
+	RequestedBy string                 `json:"requested_by"`
+	Selector    string                 `json:"selector"`
+	Status      string                 `json:"status"`
+	CreatedAt   string                 `json:"created_at"`
+	StartedAt   string                 `json:"started_at,omitempty"`
+	CompletedAt string                 `json:"completed_at,omitempty"`
+	Targets     []PushDeploymentTarget `json:"targets,omitempty"`
+}
+
+type PushDeploymentTarget struct {
+	ID           int64  `json:"id"`
+	DeploymentID int64  `json:"deployment_id"`
+	HostID       int64  `json:"host_id"`
+	HostName     string `json:"host_name"`
+	BindingID    int64  `json:"binding_id"`
+	ServerID     string `json:"server_id"`
+	Labels       string `json:"labels"`
+	Status       string `json:"status"`
+	Output       string `json:"output,omitempty"`
+	CreatedAt    string `json:"created_at"`
+	StartedAt    string `json:"started_at,omitempty"`
+	CompletedAt  string `json:"completed_at,omitempty"`
+}
+
+func (s *Store) migratePushDeployments() error {
+	_, err := s.db.Exec(`
+CREATE TABLE IF NOT EXISTS push_hosts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  address TEXT NOT NULL,
+  port INTEGER NOT NULL DEFAULT 22,
+  username TEXT NOT NULL,
+  auth_mode TEXT NOT NULL DEFAULT 'private_key',
+  host_key TEXT NOT NULL DEFAULT '',
+  host_key_fingerprint TEXT NOT NULL DEFAULT '',
+  encrypted_private_key TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(tenant_id, name),
+  FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS push_server_bindings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id INTEGER NOT NULL,
+  host_id INTEGER NOT NULL,
+  server_id TEXT NOT NULL,
+  labels TEXT NOT NULL DEFAULT 'test',
+  content_tags TEXT NOT NULL DEFAULT '',
+  remote_root TEXT NOT NULL,
+  os TEXT NOT NULL DEFAULT 'linux',
+  arch TEXT NOT NULL DEFAULT 'amd64',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(host_id, server_id, labels),
+  FOREIGN KEY(host_id) REFERENCES push_hosts(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS push_deployments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id INTEGER NOT NULL,
+  project_id INTEGER NOT NULL,
+  version TEXT NOT NULL,
+  requested_by TEXT NOT NULL,
+  selector TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  started_at TEXT NOT NULL DEFAULT '',
+  completed_at TEXT NOT NULL DEFAULT '',
+  FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS push_deployment_targets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  deployment_id INTEGER NOT NULL,
+  host_id INTEGER NOT NULL,
+  host_name TEXT NOT NULL,
+  binding_id INTEGER NOT NULL,
+  server_id TEXT NOT NULL,
+  labels TEXT NOT NULL,
+  status TEXT NOT NULL,
+  output TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  started_at TEXT NOT NULL DEFAULT '',
+  completed_at TEXT NOT NULL DEFAULT '',
+  FOREIGN KEY(deployment_id) REFERENCES push_deployments(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_push_bindings_tenant_server ON push_server_bindings(tenant_id, server_id);
+CREATE INDEX IF NOT EXISTS idx_push_deployments_project ON push_deployments(project_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_push_targets_deployment ON push_deployment_targets(deployment_id, id);
+`)
+	if err != nil {
+		return err
+	}
+	_, _ = s.db.Exec(`ALTER TABLE push_hosts ADD COLUMN auth_mode TEXT NOT NULL DEFAULT 'private_key'`)
+	_, _ = s.db.Exec(`ALTER TABLE push_hosts ADD COLUMN host_key_fingerprint TEXT NOT NULL DEFAULT ''`)
+	return nil
+}
+
+func (s *Store) CreatePushHost(host PushHost, encryptedPrivateKey string) (*PushHost, error) {
+	if host.Port == 0 {
+		host.Port = 22
+	}
+	if host.AuthMode == "" {
+		host.AuthMode = "private_key"
+	}
+	if strings.TrimSpace(host.Name) == "" || strings.TrimSpace(host.Address) == "" || strings.TrimSpace(host.Username) == "" || !validPushAuthMode(host.AuthMode) || (host.AuthMode != "agent" && encryptedPrivateKey == "") {
+		return nil, fmt.Errorf("name, address, username, auth_mode and credential required")
+	}
+	now := time.Now().Format(timeLayout)
+	res, err := s.db.Exec(`INSERT INTO push_hosts(tenant_id,name,address,port,username,auth_mode,host_key,host_key_fingerprint,encrypted_private_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, host.TenantID, host.Name, host.Address, host.Port, host.Username, host.AuthMode, host.HostKey, host.HostKeyFingerprint, encryptedPrivateKey, now, now)
+	if err != nil {
+		return nil, err
+	}
+	host.ID, _ = res.LastInsertId()
+	host.CreatedAt, host.UpdatedAt = now, now
+	return &host, nil
+}
+
+func (s *Store) ListPushHosts(tenantID int64) ([]PushHost, error) {
+	rows, err := s.db.Query(`SELECT id,tenant_id,name,address,port,username,auth_mode,host_key,host_key_fingerprint,created_at,updated_at FROM push_hosts WHERE tenant_id=? ORDER BY name`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PushHost
+	for rows.Next() {
+		var h PushHost
+		if err := rows.Scan(&h.ID, &h.TenantID, &h.Name, &h.Address, &h.Port, &h.Username, &h.AuthMode, &h.HostKey, &h.HostKeyFingerprint, &h.CreatedAt, &h.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, h)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetPushHost(tenantID, id int64) (*PushHost, string, error) {
+	var h PushHost
+	var key string
+	err := s.db.QueryRow(`SELECT id,tenant_id,name,address,port,username,auth_mode,host_key,host_key_fingerprint,encrypted_private_key,created_at,updated_at FROM push_hosts WHERE tenant_id=? AND id=?`, tenantID, id).Scan(&h.ID, &h.TenantID, &h.Name, &h.Address, &h.Port, &h.Username, &h.AuthMode, &h.HostKey, &h.HostKeyFingerprint, &key, &h.CreatedAt, &h.UpdatedAt)
+	return &h, key, err
+}
+
+func (s *Store) UpdatePushHost(host PushHost, encryptedPrivateKey string) error {
+	if host.Port == 0 {
+		host.Port = 22
+	}
+	if host.AuthMode == "" {
+		host.AuthMode = "private_key"
+	}
+	if host.HostKey == "" {
+		current, _, err := s.GetPushHost(host.TenantID, host.ID)
+		if err != nil {
+			return err
+		}
+		host.HostKey, host.HostKeyFingerprint = current.HostKey, current.HostKeyFingerprint
+	}
+	if strings.TrimSpace(host.Name) == "" || strings.TrimSpace(host.Address) == "" || strings.TrimSpace(host.Username) == "" || !validPushAuthMode(host.AuthMode) {
+		return fmt.Errorf("name, address, username and auth_mode required")
+	}
+	now := time.Now().Format(timeLayout)
+	query := `UPDATE push_hosts SET name=?,address=?,port=?,username=?,auth_mode=?,host_key=?,host_key_fingerprint=?,updated_at=? WHERE tenant_id=? AND id=?`
+	args := []any{host.Name, host.Address, host.Port, host.Username, host.AuthMode, host.HostKey, host.HostKeyFingerprint, now, host.TenantID, host.ID}
+	if encryptedPrivateKey != "" {
+		query = `UPDATE push_hosts SET name=?,address=?,port=?,username=?,auth_mode=?,host_key=?,host_key_fingerprint=?,encrypted_private_key=?,updated_at=? WHERE tenant_id=? AND id=?`
+		args = []any{host.Name, host.Address, host.Port, host.Username, host.AuthMode, host.HostKey, host.HostKeyFingerprint, encryptedPrivateKey, now, host.TenantID, host.ID}
+	}
+	res, err := s.db.Exec(query, args...)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (s *Store) DeletePushHost(tenantID, id int64) error {
+	res, err := s.db.Exec(`DELETE FROM push_hosts WHERE tenant_id=? AND id=?`, tenantID, id)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (s *Store) CreatePushServerBinding(b PushServerBinding) (*PushServerBinding, error) {
+	if strings.TrimSpace(b.ServerID) == "" || strings.TrimSpace(b.RemoteRoot) == "" {
+		return nil, fmt.Errorf("server_id and remote_root required")
+	}
+	if b.Labels == "" {
+		b.Labels = "test"
+	}
+	if b.OS == "" {
+		b.OS = "linux"
+	}
+	if b.Arch == "" {
+		b.Arch = "amd64"
+	}
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM push_hosts WHERE tenant_id=? AND id=?`, b.TenantID, b.HostID).Scan(&n); err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		return nil, sql.ErrNoRows
+	}
+	now := time.Now().Format(timeLayout)
+	res, err := s.db.Exec(`INSERT INTO push_server_bindings(tenant_id,host_id,server_id,labels,content_tags,remote_root,os,arch,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, b.TenantID, b.HostID, b.ServerID, normaliseLabels(b.Labels), normaliseLabels(b.ContentTags), b.RemoteRoot, b.OS, b.Arch, now, now)
+	if err != nil {
+		return nil, err
+	}
+	b.ID, _ = res.LastInsertId()
+	b.CreatedAt, b.UpdatedAt = now, now
+	return &b, nil
+}
+
+func (s *Store) ListPushServerBindings(tenantID, hostID int64) ([]PushServerBinding, error) {
+	rows, err := s.db.Query(`SELECT b.id,b.tenant_id,b.host_id,h.name,b.server_id,b.labels,b.content_tags,b.remote_root,b.os,b.arch,b.created_at,b.updated_at FROM push_server_bindings b JOIN push_hosts h ON h.id=b.host_id WHERE b.tenant_id=? AND b.host_id=? ORDER BY b.server_id`, tenantID, hostID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PushServerBinding
+	for rows.Next() {
+		var b PushServerBinding
+		if err := rows.Scan(&b.ID, &b.TenantID, &b.HostID, &b.HostName, &b.ServerID, &b.Labels, &b.ContentTags, &b.RemoteRoot, &b.OS, &b.Arch, &b.CreatedAt, &b.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ListPushBindingsForSelector(tenantID int64, serverIDs, labels []string, all bool) ([]PushServerBinding, error) {
+	rows, err := s.db.Query(`SELECT b.id,b.tenant_id,b.host_id,h.name,b.server_id,b.labels,b.content_tags,b.remote_root,b.os,b.arch,b.created_at,b.updated_at FROM push_server_bindings b JOIN push_hosts h ON h.id=b.host_id WHERE b.tenant_id=? ORDER BY h.name,b.server_id`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PushServerBinding
+	serverSet := make(map[string]bool, len(serverIDs))
+	for _, id := range serverIDs {
+		serverSet[strings.TrimSpace(id)] = true
+	}
+	for rows.Next() {
+		var b PushServerBinding
+		if err := rows.Scan(&b.ID, &b.TenantID, &b.HostID, &b.HostName, &b.ServerID, &b.Labels, &b.ContentTags, &b.RemoteRoot, &b.OS, &b.Arch, &b.CreatedAt, &b.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if len(serverSet) > 0 && !serverSet[b.ServerID] {
+			continue
+		}
+		if labelsMatch(splitLabels(b.Labels), labels, all) {
+			out = append(out, b)
+		}
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) UpdatePushServerBinding(b PushServerBinding) error {
+	if strings.TrimSpace(b.ServerID) == "" || strings.TrimSpace(b.RemoteRoot) == "" {
+		return fmt.Errorf("server_id and remote_root required")
+	}
+	if b.Labels == "" {
+		b.Labels = "test"
+	}
+	if b.OS == "" {
+		b.OS = "linux"
+	}
+	if b.Arch == "" {
+		b.Arch = "amd64"
+	}
+	res, err := s.db.Exec(`UPDATE push_server_bindings SET server_id=?,labels=?,content_tags=?,remote_root=?,os=?,arch=?,updated_at=? WHERE tenant_id=? AND host_id=? AND id=?`, b.ServerID, normaliseLabels(b.Labels), normaliseLabels(b.ContentTags), b.RemoteRoot, b.OS, b.Arch, time.Now().Format(timeLayout), b.TenantID, b.HostID, b.ID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+func (s *Store) DeletePushServerBinding(tenantID, hostID, id int64) error {
+	res, err := s.db.Exec(`DELETE FROM push_server_bindings WHERE tenant_id=? AND host_id=? AND id=?`, tenantID, hostID, id)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (s *Store) CreatePushDeployment(d PushDeployment, targets []PushServerBinding) (*PushDeployment, error) {
+	if len(targets) == 0 {
+		return nil, fmt.Errorf("no targets matched selector")
+	}
+	now := time.Now().Format(timeLayout)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.Exec(`INSERT INTO push_deployments(tenant_id,project_id,version,requested_by,selector,status,created_at) VALUES(?,?,?,?,?,?,?)`, d.TenantID, d.ProjectID, d.Version, d.RequestedBy, d.Selector, "queued", now)
+	if err != nil {
+		return nil, err
+	}
+	d.ID, _ = res.LastInsertId()
+	d.Status, d.CreatedAt = "queued", now
+	for _, b := range targets {
+		if _, err := tx.Exec(`INSERT INTO push_deployment_targets(deployment_id,host_id,host_name,binding_id,server_id,labels,status,created_at) VALUES(?,?,?,?,?,?,?,?)`, d.ID, b.HostID, b.HostName, b.ID, b.ServerID, b.Labels, "queued", now); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
+func (s *Store) ListPushDeployments(tenantID, projectID int64, limit int) ([]PushDeployment, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := s.db.Query(`SELECT id,tenant_id,project_id,version,requested_by,selector,status,created_at,started_at,completed_at FROM push_deployments WHERE tenant_id=? AND project_id=? ORDER BY id DESC LIMIT ?`, tenantID, projectID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PushDeployment
+	for rows.Next() {
+		var d PushDeployment
+		if err := rows.Scan(&d.ID, &d.TenantID, &d.ProjectID, &d.Version, &d.RequestedBy, &d.Selector, &d.Status, &d.CreatedAt, &d.StartedAt, &d.CompletedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+func (s *Store) GetPushDeployment(tenantID, projectID, id int64) (*PushDeployment, error) {
+	var d PushDeployment
+	err := s.db.QueryRow(`SELECT id,tenant_id,project_id,version,requested_by,selector,status,created_at,started_at,completed_at FROM push_deployments WHERE tenant_id=? AND project_id=? AND id=?`, tenantID, projectID, id).Scan(&d.ID, &d.TenantID, &d.ProjectID, &d.Version, &d.RequestedBy, &d.Selector, &d.Status, &d.CreatedAt, &d.StartedAt, &d.CompletedAt)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Query(`SELECT id,deployment_id,host_id,host_name,binding_id,server_id,labels,status,output,created_at,started_at,completed_at FROM push_deployment_targets WHERE deployment_id=? ORDER BY id`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var t PushDeploymentTarget
+		if err := rows.Scan(&t.ID, &t.DeploymentID, &t.HostID, &t.HostName, &t.BindingID, &t.ServerID, &t.Labels, &t.Status, &t.Output, &t.CreatedAt, &t.StartedAt, &t.CompletedAt); err != nil {
+			return nil, err
+		}
+		d.Targets = append(d.Targets, t)
+	}
+	return &d, rows.Err()
+}
+func (s *Store) GetPushDeploymentByID(id int64) (*PushDeployment, error) {
+	var tenantID, projectID int64
+	if err := s.db.QueryRow(`SELECT tenant_id,project_id FROM push_deployments WHERE id=?`, id).Scan(&tenantID, &projectID); err != nil {
+		return nil, err
+	}
+	return s.GetPushDeployment(tenantID, projectID, id)
+}
+func (s *Store) GetPushBinding(tenantID, id int64) (*PushServerBinding, error) {
+	var b PushServerBinding
+	err := s.db.QueryRow(`SELECT b.id,b.tenant_id,b.host_id,h.name,b.server_id,b.labels,b.content_tags,b.remote_root,b.os,b.arch,b.created_at,b.updated_at FROM push_server_bindings b JOIN push_hosts h ON h.id=b.host_id WHERE b.tenant_id=? AND b.id=?`, tenantID, id).Scan(&b.ID, &b.TenantID, &b.HostID, &b.HostName, &b.ServerID, &b.Labels, &b.ContentTags, &b.RemoteRoot, &b.OS, &b.Arch, &b.CreatedAt, &b.UpdatedAt)
+	return &b, err
+}
+func (s *Store) MarkPushDeploymentRunning(id int64) error {
+	_, err := s.db.Exec(`UPDATE push_deployments SET status='running',started_at=? WHERE id=? AND status='queued'`, time.Now().Format(timeLayout), id)
+	return err
+}
+func (s *Store) MarkPushTarget(id int64, status, output string) error {
+	now := time.Now().Format(timeLayout)
+	if status == "running" {
+		_, err := s.db.Exec(`UPDATE push_deployment_targets SET status=?,started_at=? WHERE id=?`, status, now, id)
+		return err
+	}
+	_, err := s.db.Exec(`UPDATE push_deployment_targets SET status=?,output=?,completed_at=? WHERE id=?`, status, output, now, id)
+	return err
+}
+func (s *Store) CompletePushDeployment(id int64) error {
+	var failures int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM push_deployment_targets WHERE deployment_id=? AND status!='success'`, id).Scan(&failures)
+	if err != nil {
+		return err
+	}
+	status := "success"
+	if failures > 0 {
+		status = "failed"
+	}
+	_, err = s.db.Exec(`UPDATE push_deployments SET status=?,completed_at=? WHERE id=?`, status, time.Now().Format(timeLayout), id)
+	return err
+}
+func (s *Store) DeletePushDeployment(tenantID, projectID, id int64) error {
+	res, err := s.db.Exec(`DELETE FROM push_deployments WHERE tenant_id=? AND project_id=? AND id=?`, tenantID, projectID, id)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func splitLabels(s string) []string {
+	var out []string
+	for _, v := range strings.Split(s, ",") {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+func normaliseLabels(s string) string { return strings.Join(splitLabels(s), ",") }
+func validPushAuthMode(mode string) bool {
+	return mode == "password" || mode == "private_key" || mode == "agent"
+}
+
+// RecordPushHostKey implements trust-on-first-use. It only fills an empty
+// value and can never silently replace an operator-approved fingerprint.
+func (s *Store) RecordPushHostKey(tenantID, hostID int64, publicKey, fingerprint string) error {
+	_, err := s.db.Exec(`UPDATE push_hosts SET host_key=?,host_key_fingerprint=?,updated_at=? WHERE tenant_id=? AND id=? AND host_key=''`, publicKey, fingerprint, time.Now().Format(timeLayout), tenantID, hostID)
+	return err
+}
+func labelsMatch(have, want []string, all bool) bool {
+	if len(want) == 0 {
+		return true
+	}
+	set := map[string]bool{}
+	for _, v := range have {
+		set[v] = true
+	}
+	matched := 0
+	for _, v := range want {
+		if set[strings.TrimSpace(v)] {
+			matched++
+		} else if all {
+			return false
+		}
+	}
+	return matched > 0
+}

@@ -59,7 +59,9 @@
         </div>
         <div class="new-project-row">
           <input id="newProject" type="text" placeholder="新项目名称" class="input input-sm" data-testid="new-project-input" />
-          <button type="button" id="btnAddProject" class="btn btn-primary btn-sm" data-testid="add-project" title="创建项目">+</button>
+          <button type="button" id="btnAddProject" class="btn btn-primary btn-sm btn-icon" data-testid="add-project" title="新建项目" aria-label="新建项目">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
         </div>
       </div>
 
@@ -226,11 +228,27 @@
             <button type="button" id="btnDelProject" class="btn btn-danger btn-sm hidden">删除项目</button>
           </div>
           <nav class="project-tabs" role="tablist">
-            <button type="button" class="project-tab active" data-ptab="versions">版本</button>
-            <button type="button" class="project-tab" data-ptab="preview">拉取预览</button>
-            <button type="button" class="project-tab" data-ptab="team">团队</button>
-            <button type="button" class="project-tab" data-ptab="deploy">部署</button>
-            <button type="button" class="project-tab" data-ptab="diff">差异</button>
+            <button type="button" class="project-tab active" data-ptab="versions" title="版本">
+              <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2 4 6v12l8 4 8-4V6l-8-4Z"/><path d="m4 6 8 4 8-4M12 10v12"/></svg><span>版本</span>
+            </button>
+            <button type="button" class="project-tab" data-ptab="preview" title="拉取预览" aria-label="拉取预览">
+              <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M3 3h18v13H3z"/><path d="m8 21 4-5 4 5M8 8h8M8 12h5"/></svg><span>预览</span>
+            </button>
+            <button type="button" class="project-tab" data-ptab="team" title="团队">
+              <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24"><circle cx="9" cy="7" r="3"/><path d="M3 21v-2a6 6 0 0 1 12 0v2M16 3.3a3 3 0 0 1 0 5.4M21 21v-2a6 6 0 0 0-3.5-5.45"/></svg><span>团队</span>
+            </button>
+            <button type="button" class="project-tab" data-ptab="deploy" title="部署">
+              <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg><span>部署</span>
+            </button>
+            <button type="button" class="project-tab" data-ptab="push" title="发布到远程">
+              <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3h10v10M22 3l-9 9M5 7v12a2 2 0 0 0 2 2h12"/></svg><span>发布到远程</span>
+            </button>
+            <button type="button" class="project-tab" data-ptab="pushlogs" title="发布日志">
+              <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M4 3h16v18H4zM8 7h8M8 11h8M8 15h5"/></svg><span>发布日志</span>
+            </button>
+            <button type="button" class="project-tab" data-ptab="diff" title="差异">
+              <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M7 3H5a2 2 0 0 0-2 2v2m14-4h2a2 2 0 0 1 2 2v2M7 21H5a2 2 0 0 1-2-2v-2m18 0v2a2 2 0 0 1-2 2h-2M8 12h8M12 8v8"/></svg><span>差异</span>
+            </button>
           </nav>
         </header>
 
@@ -361,6 +379,54 @@
               <button type="button" id="btnDownloadDeploy" class="btn btn-secondary btn-sm">下载文件</button>
               <span class="hint" style="margin-left:0.5rem">脚本会自动检查并安装 express233-cli，拉取并安全部署</span>
             </div>
+          </div>
+        </div>
+
+        <div id="ptab-push" class="ptab-panel hidden">
+          <div class="card">
+            <div class="card-title-row">
+              <div><h3 class="card-title">发布到远程</h3><p class="hint">默认发布最新已发布版本；按 server_id、标签或二者组合批量筛选。每个目标会在远端安装并执行 express233-cli，完整输出进入发布日志。</p></div>
+              <span id="pushLatestHint" class="badge badge-ok">最新已发布版本：—</span>
+            </div>
+            <div class="toolbar wrap project-write">
+              <select id="pushVersion" class="input" aria-label="发布版本"></select>
+              <input id="pushServerIDs" class="input" placeholder="服务器 ID，逗号分隔（可空）" />
+              <input id="pushTags" class="input" value="test" placeholder="标签，默认 test" />
+              <select id="pushTagMatch" class="input"><option value="all">标签同时满足</option><option value="any">任一标签匹配</option></select>
+              <button type="button" id="btnPushDryRun" class="btn btn-secondary btn-sm">预演筛选</button>
+              <button type="button" id="btnPushDeploy" class="btn btn-primary btn-sm">发布到远程</button>
+            </div>
+            <div id="pushTargets" class="table-wrap"><p class="hint">管理员可在下方配置 SSH 主机和服务器绑定。</p></div>
+          </div>
+          <div id="pushHostManager" class="card admin-only hidden">
+            <h3 class="card-title">SSH 主机与服务器绑定</h3>
+            <p class="hint">认证支持 password、private_key（无密码）和 agent。host key 可留空：首次连接成功后自动记录指纹，后续严格校验。</p>
+            <div class="toolbar wrap">
+              <input id="pushHostName" class="input" placeholder="配置名，例如 logic-a-test" />
+              <input id="pushHostAddress" class="input" placeholder="主机 / IP" />
+              <input id="pushHostPort" class="input" value="22" type="number" placeholder="端口" />
+              <input id="pushHostUser" class="input" placeholder="SSH 账号" />
+              <select id="pushHostAuth" class="input"><option value="private_key">private_key（无密码）</option><option value="password">password</option><option value="agent">SSH agent</option></select>
+              <input id="pushHostCredential" class="input" type="password" placeholder="私钥或密码（agent 留空）" />
+              <input id="pushHostKey" class="input" placeholder="已知 host public key（可留空 TOFU）" />
+              <button type="button" id="btnPushAddHost" class="btn btn-secondary btn-sm">新增 SSH 配置</button>
+            </div>
+            <div id="pushHostList" class="table-wrap"></div>
+            <div id="pushBindingEditor" class="toolbar wrap hidden">
+              <input id="pushBindingServerID" class="input" placeholder="server_id" />
+              <input id="pushBindingLabels" class="input" value="test" placeholder="发布标签，如 test,canary" />
+              <input id="pushBindingContentTags" class="input" placeholder="内容标签（可空）" />
+              <input id="pushBindingRoot" class="input" value="/opt/game-servers" placeholder="远端根目录" />
+              <button type="button" id="btnPushAddBinding" class="btn btn-secondary btn-sm">绑定服务器</button>
+            </div>
+            <div id="pushBindingList" class="table-wrap"></div>
+          </div>
+        </div>
+
+        <div id="ptab-pushlogs" class="ptab-panel hidden">
+          <div class="card">
+            <div class="card-title-row"><div><h3 class="card-title">发布日志</h3><p class="hint">按每个远端服务器 ID 保存 CLI 和 post-hook 的合并控制台输出。</p></div><button type="button" id="btnReloadPushLogs" class="btn btn-secondary btn-sm">刷新</button></div>
+            <div id="pushLogList" class="table-wrap"></div>
           </div>
         </div>
 

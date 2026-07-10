@@ -4,12 +4,18 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DATA="${RUNNER_TEMP:-/tmp}/express233-smoke-$$"
 ADDR="127.0.0.1:39233"
-BASE="http://${ADDR}"
+BASE="${EXPRESS233_SMOKE_BASE_URL:-http://${ADDR}}"
+OWN_SERVER=1
+if [[ -n "${EXPRESS233_SMOKE_BASE_URL:-}" ]]; then
+  OWN_SERVER=0
+fi
 
-mkdir -p "$DATA"
-"$ROOT/bin/express233-server" -addr ":39233" -data "$DATA" &
-PID=$!
-trap 'kill $PID 2>/dev/null || true' EXIT
+if [[ "$OWN_SERVER" = 1 ]]; then
+  mkdir -p "$DATA"
+  "$ROOT/bin/express233-server" -addr ":39233" -data "$DATA" &
+  PID=$!
+  trap 'kill $PID 2>/dev/null || true' EXIT
+fi
 
 for _ in $(seq 1 50); do
   curl -fsS "$BASE/" >/dev/null 2>&1 && break
@@ -17,7 +23,11 @@ for _ in $(seq 1 50); do
 done
 
 COOKIE_JAR="$(mktemp)"
-trap 'kill $PID 2>/dev/null || true; rm -f "$COOKIE_JAR"' EXIT
+if [[ "$OWN_SERVER" = 1 ]]; then
+  trap 'kill $PID 2>/dev/null || true; rm -f "$COOKIE_JAR"' EXIT
+else
+  trap 'rm -f "$COOKIE_JAR"' EXIT
+fi
 
 curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X POST "$BASE/api/login" \
   -H 'Content-Type: application/json' \
@@ -39,9 +49,17 @@ curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X POST "$BASE/api/projects/${PID_NU
   -H 'Content-Type: application/json' \
   -d '{"name":"1.0.0"}' >/dev/null
 
-printf 'port=1\n' | curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X POST \
+BUNDLE_DIR="$(mktemp -d)"
+mkdir -p "$BUNDLE_DIR/conf/app" "$BUNDLE_DIR/scripts" "$BUNDLE_DIR/bin"
+printf 'port=1\n' > "$BUNDLE_DIR/game.properties"
+printf 'service:\n  database:\n    host: db.internal\n' > "$BUNDLE_DIR/conf/app/application.yaml"
+printf '#!/bin/sh\necho restarted\n' > "$BUNDLE_DIR/scripts/restart.sh"
+printf 'Write-Output restarted\n' > "$BUNDLE_DIR/scripts/restart.ps1"
+printf '\177ELFexpress233-smoke\n' > "$BUNDLE_DIR/bin/game-server"
+tar -C "$BUNDLE_DIR" -czf "$BUNDLE_DIR/bundle.tar.gz" game.properties conf scripts bin
+curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X POST \
   "$BASE/api/projects/${PID_NUM}/versions/1.0.0/files" \
-  -F "file=@-;filename=game.properties" >/dev/null
+  -F "file=@$BUNDLE_DIR/bundle.tar.gz;filename=bundle.tar.gz" >/dev/null
 
 python3 - <<'PY' | curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X PUT "$BASE/api/server-yaml" \
   -H 'Content-Type: application/json' \
@@ -70,5 +88,10 @@ print(json.load(sys.stdin)[0]['token'])
 
 curl -fsS -o /tmp/smoke.tgz "$BASE/api/pull?token=${TOKEN}&project=smoke&server_id=s1"
 [ -s /tmp/smoke.tgz ]
+tar -tzf /tmp/smoke.tgz | grep -qx 'conf/app/application.yaml'
+tar -tzf /tmp/smoke.tgz | grep -qx 'scripts/restart.sh'
+tar -tzf /tmp/smoke.tgz | grep -qx 'scripts/restart.ps1'
+tar -tzf /tmp/smoke.tgz | grep -qx 'bin/game-server'
+rm -rf "$BUNDLE_DIR"
 
 echo "ci-smoke OK"

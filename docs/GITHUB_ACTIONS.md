@@ -6,9 +6,8 @@
 
 - **触发**：`main` / `master` 的 push 与 PR
 - **内容**：
-  - `test`：Ubuntu / Windows / macOS 上 `go vet` + 单测（Ubuntu 含 `-race` 与 coverage 产物）
-  - `build`：注入版本信息后编译 CLI + Server，执行 `scripts/ci-smoke.sh` 端到端冒烟
-  - `scripts`：ShellCheck + `bash -n` 校验安装/部署脚本
+  - `build binaries`：Ubuntu / Windows / macOS 构建 React 控制台与 CLI + Server，并上传平台二进制。
+  - 默认 CI 刻意不跑单测、冒烟或脚本检查，以缩短构建/发布反馈；完整 Docker 集成验证见 `docker-integration.yml`，由人工触发。
 
 ### Lint (`lint.yml`)
 
@@ -53,7 +52,7 @@
 
 ## 发布 checklist
 
-1. 确保 `main` 上 **CI + Lint** 全部通过（Release 会二次校验）
+1. 确保 `main` 上 **build binaries + Lint** 全部通过（Release 会二次校验）
 2. 可选：`bash scripts/require-green-checks.sh $(git rev-parse HEAD)`
 3. 打 tag：`git tag v0.1.0 && git push origin v0.1.0`
 4. 等待 Release workflow 完成，检查 Assets

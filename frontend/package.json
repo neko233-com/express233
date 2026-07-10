@@ -1,0 +1,9 @@
+{
+  "name": "express233-console",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": { "dev": "vite", "build": "tsc -b && vite build", "typecheck": "tsc -b --pretty false" },
+  "dependencies": { "@vitejs/plugin-react": "^6.0.0", "react": "^19.2.0", "react-dom": "^19.2.0" },
+  "devDependencies": { "@types/react": "^19.2.0", "@types/react-dom": "^19.2.0", "typescript": "^7.0.2", "vite": "^8.1.0" }
+}

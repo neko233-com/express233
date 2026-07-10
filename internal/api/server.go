@@ -22,11 +22,19 @@ type Server struct {
 	updateMu       sync.RWMutex
 	updateStatus   systemUpdateStatus
 	updateRunner   func(target, dataDir string) (string, error)
+	pushExecutor   pushExecutor
 }
 
 // New 创建 API 服务。
 func New(st *store.Store) *Server {
 	s := &Server{Store: st, sessions: newSessionStore(), jwt: newJWTAuth(), serverByTenant: make(map[int64]*config.ServerFile)}
+	// Deliberately initialise lazily: servers without push deployment configured
+	// can keep serving pull mode without a credential encryption key.
+	if cipher, err := newPushCredentialCipher(); err == nil {
+		s.pushExecutor = sshPushExecutor{credentials: cipher}
+	} else {
+		s.pushExecutor = sshPushExecutor{}
+	}
 	if t, err := st.TenantByID(1); err == nil {
 		_ = t
 	}
@@ -70,6 +78,15 @@ func (s *Server) Router() http.Handler {
 				r.Get("/servers/{serverID}", s.handleGetServerEntry)
 				r.Put("/servers/{serverID}", s.handlePutServerEntry)
 				r.Delete("/servers/{serverID}", s.handleDeleteServerEntry)
+				r.Get("/push/hosts", s.handleListPushHosts)
+				r.Post("/push/hosts", s.handleCreatePushHost)
+				r.Get("/push/hosts/{hostID}", s.handleGetPushHost)
+				r.Put("/push/hosts/{hostID}", s.handleUpdatePushHost)
+				r.Delete("/push/hosts/{hostID}", s.handleDeletePushHost)
+				r.Get("/push/hosts/{hostID}/servers", s.handleListPushBindings)
+				r.Post("/push/hosts/{hostID}/servers", s.handleCreatePushBinding)
+				r.Put("/push/hosts/{hostID}/servers/{bindingID}", s.handleUpdatePushBinding)
+				r.Delete("/push/hosts/{hostID}/servers/{bindingID}", s.handleDeletePushBinding)
 			})
 			r.Get("/server-yaml", s.handleGetServerYAML)
 			r.Group(func(r chi.Router) {
@@ -112,6 +129,8 @@ func (s *Server) Router() http.Handler {
 				r.Put("/versions/{ver}/file-tags", s.handlePutVersionFileTags)
 				r.Delete("/versions/{ver}/file-tags", s.handleDeleteVersionFileTags)
 				r.Post("/versions/{ver}/file-tags/batch", s.handleBatchVersionFileTags)
+				r.Post("/push-deployments", s.handleCreatePushDeployment)
+				r.Delete("/push-deployments/{deploymentID}", s.handleDeletePushDeployment)
 			})
 
 			r.Get("/projects/{id}/versions", s.handleListVersions)
@@ -122,6 +141,8 @@ func (s *Server) Router() http.Handler {
 			r.Get("/projects/{id}/versions/{ver}/file-tags", s.handleListVersionFileTags)
 			r.Get("/projects/{id}/versions/{ver}/config-files", s.handleListConfigFiles)
 			r.Get("/projects/{id}/logs", s.handleListProjectLogs)
+			r.Get("/projects/{id}/push-deployments", s.handleListPushDeployments)
+			r.Get("/projects/{id}/push-deployments/{deploymentID}", s.handleGetPushDeployment)
 
 			r.Get("/storage/overview", s.handleStorageOverview)
 			r.Get("/storage/tree", s.handleStorageTree)
