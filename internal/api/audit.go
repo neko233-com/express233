@@ -2,16 +2,6 @@ package api
 
 import "net/http"
 
-func clientIP(r *http.Request) string {
-	if x := r.Header.Get("X-Forwarded-For"); x != "" {
-		return x
-	}
-	if x := r.Header.Get("X-Real-Ip"); x != "" {
-		return x
-	}
-	return r.RemoteAddr
-}
-
 func (s *Server) audit(r *http.Request, username, action, detail string) {
 	_ = s.Store.RecordAudit(username, action, detail, clientIP(r))
 }

@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -16,11 +17,21 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, http.StatusBadRequest, "invalid body")
 		return
 	}
+	if s.rejectBlockedLogin(w, r, req.Username) {
+		return
+	}
 	uid, admin, err := s.Store.Authenticate(req.Username, req.Password)
 	if err != nil {
+		banned, retry := s.recordLoginFailure(r, req.Username)
+		if banned {
+			w.Header().Set("Retry-After", strconv.Itoa(max(1, int(retry.Seconds()))))
+			errJSON(w, http.StatusTooManyRequests, "too many login attempts; try again later")
+			return
+		}
 		errJSON(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
+	s.clearLoginFailures(r)
 	metrics.loginTotal.Add(1)
 	s.audit(r, req.Username, "login", "success")
 	tid, err := s.Store.UserTenantID(uid)
@@ -68,6 +79,9 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) requireLogin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, _, hasBasic := r.BasicAuth(); hasBasic && s.rejectBlockedLogin(w, r, "") {
+			return
+		}
 		if _, ok := s.currentSession(r); !ok {
 			errJSON(w, http.StatusUnauthorized, "login required")
 			return

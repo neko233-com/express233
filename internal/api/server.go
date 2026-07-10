@@ -45,7 +45,7 @@ func New(st *store.Store) *Server {
 // Router 返回 chi 路由。
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID, middleware.RealIP, requestLogMiddleware, middleware.Recoverer)
+	r.Use(middleware.RequestID, requestLogMiddleware, middleware.Recoverer)
 
 	r.Get("/healthz", s.handleHealthz)
 	r.Get("/readyz", s.handleHealthz)
@@ -70,6 +70,8 @@ func (s *Server) Router() http.Handler {
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireAdmin)
 				r.Get("/audit-logs", s.handleListAuditLogs)
+				r.Get("/security/login-ip-bans", s.handleListLoginIPBans)
+				r.Delete("/security/login-ip-bans/{ip}", s.handleDeleteLoginIPBan)
 				r.Get("/tenants", s.handleListTenants)
 				r.Post("/tenants", s.handleCreateTenant)
 				r.Get("/system/update", s.handleSystemUpdateStatus)

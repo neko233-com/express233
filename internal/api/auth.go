@@ -73,10 +73,15 @@ func (s *Server) basicAuthSession(r *http.Request) (session, bool) {
 	if !ok || user == "" {
 		return session{}, false
 	}
-	uid, admin, err := s.Store.Authenticate(user, pass)
-	if err != nil {
+	if _, blocked, _ := s.Store.LoginIPBlocked(clientIP(r), time.Now()); blocked {
 		return session{}, false
 	}
+	uid, admin, err := s.Store.Authenticate(user, pass)
+	if err != nil {
+		s.recordLoginFailure(r, user)
+		return session{}, false
+	}
+	s.clearLoginFailures(r)
 	tid, err := s.Store.UserTenantID(uid)
 	if err != nil {
 		return session{}, false

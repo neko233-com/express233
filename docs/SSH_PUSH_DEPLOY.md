@@ -8,6 +8,7 @@
 - 登录密码使用 bcrypt；SSH 密码和私钥使用 `EXPRESS233_PUSH_CREDENTIAL_KEY`（base64 编码的 32 字节随机值）进行 AES-256-GCM 加密。MD5 不适合密码或凭据储存，不能使用。
 - 新建 SSH 目标必须提供 OpenSSH `host_key`。仅在受控首次登记时可设置 `EXPRESS233_PUSH_ALLOW_TOFU=1`；已登记的指纹永不自动替换。
 - HTTP 管理接口必须在 HTTPS 反向代理后使用。SSH 密码至少 8 字符，私钥会在保存前解析校验；`agent` 模式只适用于运行服务进程可访问 `SSH_AUTH_SOCK` 的环境。
+- 登录保护默认同一 IP 在 15 分钟内失败 5 次后封禁 15 分钟；重复触发时按倍数延长，最长 24 小时。管理员可通过 `GET /api/security/login-ip-bans` 查看、`DELETE /api/security/login-ip-bans/{ip}` 解除。通过反向代理时必须设置 `EXPRESS233_TRUST_PROXY=1`，否则伪造的转发头不会被信任。
 - 推送只接受 Linux SSH 目标；Windows 节点使用原有拉模式和 `.ps1` hook。上传包、拉取包均保留嵌套目录、二进制、`.sh` 与 `.ps1` 文件；标签会传给安全部署脚本。
 
 ## API
