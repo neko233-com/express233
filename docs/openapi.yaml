@@ -17,6 +17,7 @@ tags:
   - name: admin
   - name: projects
   - name: pull
+  - name: analytics
 
 paths:
   /healthz:
@@ -601,6 +602,28 @@ paths:
         "200":
           description: OK
 
+  /api/dashboard:
+    get:
+      tags: [analytics]
+      summary: 按天汇总上传、发布、拉取与 SSH 发布记录
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      parameters:
+        - name: days
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 365, default: 30 }
+        - name: project_id
+          in: query
+          description: 可选；只能选择当前用户可访问的项目
+          schema: { type: integer }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSnapshot"
+        "400":
+          $ref: "#/components/responses/Error"
+
   /api/audit-logs:
     get:
       tags: [admin]
@@ -688,6 +711,67 @@ components:
             properties:
               error: { type: string }
   schemas:
+    DashboardSnapshot:
+      type: object
+      properties:
+        generated_at: { type: string, format: date-time }
+        days: { type: integer }
+        summary:
+          $ref: "#/components/schemas/DashboardSummary"
+        series:
+          type: array
+          items: { $ref: "#/components/schemas/DashboardDay" }
+        recent:
+          type: array
+          items: { $ref: "#/components/schemas/DashboardRecord" }
+    DashboardSummary:
+      type: object
+      properties:
+        uploads: { type: integer }
+        upload_failures: { type: integer }
+        upload_bytes: { type: integer, format: int64 }
+        uploaded_files: { type: integer }
+        publishes: { type: integer }
+        pulls: { type: integer }
+        pull_failures: { type: integer }
+        pull_success_rate: { type: number, format: double }
+        deployments: { type: integer }
+        deployment_successes: { type: integer }
+        deployment_failures: { type: integer }
+        deployment_success_rate: { type: number, format: double }
+        targets: { type: integer }
+        target_failures: { type: integer }
+        average_deployment_millis: { type: integer, format: int64 }
+    DashboardDay:
+      type: object
+      properties:
+        date: { type: string, format: date }
+        uploads: { type: integer }
+        upload_failures: { type: integer }
+        upload_bytes: { type: integer, format: int64 }
+        uploaded_files: { type: integer }
+        publishes: { type: integer }
+        pulls: { type: integer }
+        pull_failures: { type: integer }
+        deployments: { type: integer }
+        deployment_successes: { type: integer }
+        deployment_failures: { type: integer }
+        targets: { type: integer }
+        target_failures: { type: integer }
+    DashboardRecord:
+      type: object
+      properties:
+        at: { type: string }
+        kind: { type: string, enum: [upload, publish, pull, deploy] }
+        project_id: { type: integer }
+        project: { type: string }
+        version: { type: string }
+        status: { type: string }
+        actor: { type: string }
+        server_id: { type: string }
+        bytes: { type: integer, format: int64 }
+        files: { type: integer }
+        detail: { type: string }
     Project:
       type: object
       properties:

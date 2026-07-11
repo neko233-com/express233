@@ -5,7 +5,9 @@ import (
 	"time"
 )
 
-const projectLogRetention = 30 * 24 * time.Hour
+// Keep pull history aligned with the longest dashboard range plus a small
+// safety window. Cleanup remains incremental on startup and writes.
+const projectLogRetention = dashboardRetention
 
 type ProjectLog struct {
 	ID        int64  `json:"id"`

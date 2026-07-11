@@ -100,6 +100,9 @@ CREATE TABLE IF NOT EXISTS versions (
 	if err := s.migratePushDeployments(); err != nil {
 		return err
 	}
+	if err := s.migrateDashboard(); err != nil {
+		return err
+	}
 	return s.migrateLoginProtection()
 }
 

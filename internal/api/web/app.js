@@ -124,12 +124,14 @@ function showModal({ title, message, value = "", confirmText, cancelText, danger
 }
 
 function showLogin() {
+  document.title = "express233 · 登录";
   document.getElementById("login").classList.remove("hidden");
   document.getElementById("app").classList.add("hidden");
 }
 
 function showApp(username) {
   try {
+  document.title = "express233 · 发布控制台";
   state.username = username;
   document.getElementById("login").classList.add("hidden");
   document.getElementById("app").classList.remove("hidden");
@@ -153,7 +155,7 @@ function showApp(username) {
   parseInviteHash();
   scheduleOnboarding();
   } catch (showAppErr) {
-    document.title = "showApp_ERR:" + String(showAppErr);
+    console.error("show app failed:", showAppErr);
     throw showAppErr;
   }
 }
@@ -166,6 +168,7 @@ function setGlobalView(view) {
   document.getElementById("globalServer").classList.toggle("hidden", view !== "server");
   document.getElementById("globalStorage").classList.toggle("hidden", view !== "storage");
   document.getElementById("globalSettings").classList.toggle("hidden", view !== "settings");
+  document.getElementById("globalDashboard").classList.toggle("hidden", view !== "dashboard");
   const inProject = view === "workspace" && state.projectId;
   document.getElementById("projectWorkspace").classList.toggle("hidden", !inProject);
   document.getElementById("emptyProject").classList.toggle("hidden", inProject || view !== "workspace");
@@ -175,6 +178,7 @@ function setGlobalView(view) {
     if (state.isRoot) loadSystemUpdateStatus();
   }
   if (view === "storage") loadStorageOverview();
+  if (view === "dashboard") loadDashboard();
 }
 
 function setProjectTab(tab) {
@@ -212,8 +216,7 @@ async function init() {
     state.tenantSlug = me.tenant_slug || null;
     showApp(me.username);
   } catch (initErr) {
-    console.error("init failed:", initErr);
-    document.title = "ERR:" + String(initErr);
+    if (saved) console.warn("saved session expired:", initErr);
     if (saved) setToken(null);
     showLogin();
   }
@@ -451,10 +454,7 @@ document.getElementById("btnLogout").onclick = async () => {
 
 document.querySelectorAll(".sidebar-nav-item[data-global]").forEach((btn) => {
   btn.onclick = () => {
-    if (btn.dataset.global === "workspace") setGlobalView("workspace");
-    else if (btn.dataset.global === "server") setGlobalView("server");
-    else if (btn.dataset.global === "storage") setGlobalView("storage");
-    else if (btn.dataset.global === "settings") setGlobalView("settings");
+    setGlobalView(btn.dataset.global);
   };
 });
 
@@ -555,6 +555,7 @@ function renderProjectList() {
 async function loadProjects() {
   state.projects = (await api("/api/projects")) || [];
   renderProjectList();
+  populateDashboardProjects();
   return state.projects;
 }
 
@@ -990,8 +991,155 @@ function formatBytes(size) {
   const n = Number(size) || 0;
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  if (n < 1024 ** 4) return `${(n / 1024 ** 3).toFixed(1)} GB`;
+  return `${(n / 1024 ** 4).toFixed(1)} TB`;
 }
+
+let dashboardRequestID = 0;
+
+function populateDashboardProjects() {
+  const select = document.getElementById("dashboardProject");
+  if (!select) return;
+  const current = select.value;
+  select.innerHTML = `<option value="">全部可访问项目</option>${state.projects
+    .map((project) => `<option value="${project.id}">${escapeHtml(project.name)}</option>`)
+    .join("")}`;
+  if (state.projects.some((project) => String(project.id) === current)) select.value = current;
+}
+
+function formatDashboardRate(value, total) {
+  if (!total) return "—";
+  return `${Number(value || 0).toFixed(1)}%`;
+}
+
+function formatDashboardDuration(millis) {
+  const value = Number(millis) || 0;
+  if (!value) return "—";
+  if (value < 1000) return `${value} ms`;
+  if (value < 60000) return `${(value / 1000).toFixed(1)} s`;
+  return `${(value / 60000).toFixed(1)} min`;
+}
+
+function renderDashboardKpis(summary = {}) {
+  const host = document.getElementById("dashboardKpis");
+  if (!host) return;
+  const items = [
+    { label: "上传请求", value: summary.uploads || 0, meta: `${summary.upload_failures || 0} 次失败`, tone: summary.upload_failures ? "warn" : "ok" },
+    { label: "上传数据", value: formatBytes(summary.upload_bytes || 0), meta: `${summary.uploaded_files || 0} 个文件`, tone: "info" },
+    { label: "发布版本", value: summary.publishes || 0, meta: "已发布版本事件", tone: "primary" },
+    { label: "节点拉取", value: summary.pulls || 0, meta: `成功率 ${formatDashboardRate(summary.pull_success_rate, summary.pulls)}`, tone: summary.pull_failures ? "warn" : "ok" },
+    { label: "SSH 发布", value: summary.deployments || 0, meta: `成功率 ${formatDashboardRate(summary.deployment_success_rate, (summary.deployment_successes || 0) + (summary.deployment_failures || 0))}`, tone: summary.deployment_failures ? "warn" : "ok" },
+    { label: "发布目标", value: summary.targets || 0, meta: `平均耗时 ${formatDashboardDuration(summary.average_deployment_millis)}`, tone: summary.target_failures ? "warn" : "info" },
+  ];
+  host.innerHTML = items.map((item) => `<article class="dashboard-kpi ${item.tone}">
+    <span class="dashboard-kpi-label">${escapeHtml(item.label)}</span>
+    <strong class="dashboard-kpi-value">${escapeHtml(item.value)}</strong>
+    <span class="dashboard-kpi-meta">${escapeHtml(item.meta)}</span>
+  </article>`).join("");
+}
+
+function renderDashboardChart(series = []) {
+  const host = document.getElementById("dashboardChart");
+  if (!host) return;
+  const width = 960, height = 260, left = 46, right = 18, top = 16, bottom = 34;
+  const plotWidth = width - left - right, plotHeight = height - top - bottom;
+  const max = Math.max(1, ...series.flatMap((day) => [day.uploads || 0, day.pulls || 0, day.deployments || 0]));
+  const x = (index) => left + (series.length > 1 ? (index / (series.length - 1)) * plotWidth : plotWidth / 2);
+  const y = (value) => top + plotHeight - (Number(value || 0) / max) * plotHeight;
+  const configs = [
+    ["uploads", "upload", "上传"],
+    ["pulls", "pull", "拉取"],
+    ["deployments", "deploy", "SSH 发布"],
+  ];
+  const grid = Array.from({ length: 5 }, (_, index) => {
+    const value = Math.round((max * (4 - index)) / 4);
+    const gy = top + (plotHeight * index) / 4;
+    return `<line class="chart-grid-line" x1="${left}" y1="${gy}" x2="${width - right}" y2="${gy}"/><text class="chart-axis-text" x="${left - 8}" y="${gy + 4}" text-anchor="end">${value}</text>`;
+  }).join("");
+  const labelStep = Math.max(1, Math.ceil(series.length / 6));
+  const labels = series.map((day, index) => (index % labelStep === 0 || index === series.length - 1)
+    ? `<text class="chart-axis-text" x="${x(index)}" y="${height - 9}" text-anchor="middle">${escapeHtml(day.date.slice(5))}</text>` : "").join("");
+  const lines = configs.map(([key, cls, label]) => {
+    const points = series.map((day, index) => `${x(index).toFixed(1)},${y(day[key]).toFixed(1)}`).join(" ");
+    const dots = series.length <= 30 ? series.map((day, index) => `<circle class="chart-dot ${cls}" cx="${x(index).toFixed(1)}" cy="${y(day[key]).toFixed(1)}" r="2.8"><title>${escapeHtml(day.date)} · ${label} ${day[key] || 0}</title></circle>`).join("") : "";
+    return `<polyline class="chart-series ${cls}" points="${points}"/>${dots}`;
+  }).join("");
+  const total = series.reduce((sum, day) => sum + (day.uploads || 0) + (day.pulls || 0) + (day.deployments || 0), 0);
+  host.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="presentation">${grid}${labels}${lines}</svg>${total ? "" : '<div class="dashboard-chart-empty">当前筛选范围暂无发布活动</div>'}`;
+}
+
+function dashboardStatusBadge(status) {
+  const normalized = String(status || "").toLowerCase();
+  const cls = ["success", "ok"].includes(normalized) ? "ok" : ["failed", "error"].includes(normalized) ? "warn" : "draft";
+  const label = { success: "成功", ok: "成功", failed: "失败", error: "失败", running: "执行中", queued: "排队中" }[normalized] || normalized || "—";
+  return `<span class="badge badge-${cls}">${escapeHtml(label)}</span>`;
+}
+
+function renderDashboardDaily(series = []) {
+  const tbody = document.querySelector("#dashboardDailyTable tbody");
+  if (!tbody) return;
+  tbody.innerHTML = [...series].reverse().map((day) => `<tr>
+    <td><code>${escapeHtml(day.date)}</code></td>
+    <td>${day.uploads || 0}${day.upload_failures ? ` <span class="metric-failure">-${day.upload_failures}</span>` : ""}</td>
+    <td>${formatBytes(day.upload_bytes || 0)}</td>
+    <td>${day.publishes || 0}</td>
+    <td>${day.pulls || 0}</td>
+    <td class="${day.pull_failures ? "metric-failure" : ""}">${day.pull_failures || 0}</td>
+    <td>${day.deployments || 0}</td>
+    <td>${day.targets || 0}</td>
+    <td class="${day.deployment_failures || day.target_failures ? "metric-failure" : ""}">${(day.deployment_failures || 0) + (day.target_failures || 0)}</td>
+  </tr>`).join("");
+}
+
+function renderDashboardRecords(records = []) {
+  const tbody = document.querySelector("#dashboardRecordsTable tbody");
+  if (!tbody) return;
+  const labels = { upload: "上传", publish: "发布", pull: "拉取", deploy: "SSH 发布" };
+  tbody.innerHTML = records.length ? records.map((record) => {
+    const amount = record.kind === "upload" ? `${formatBytes(record.bytes || 0)} · ${record.files || 0} 文件` : record.kind === "deploy" ? `${record.files || 0} 目标` : "—";
+    const actor = [record.actor, record.server_id].filter(Boolean).join(" / ") || "—";
+    return `<tr>
+      <td class="dashboard-record-time">${escapeHtml(record.at)}</td>
+      <td><span class="record-kind ${escapeAttr(record.kind)}">${escapeHtml(labels[record.kind] || record.kind)}</span></td>
+      <td><strong>${escapeHtml(record.project)}</strong><span class="dashboard-record-sub">${escapeHtml(record.version || "—")}</span></td>
+      <td>${escapeHtml(actor)}</td>
+      <td>${escapeHtml(amount)}</td>
+      <td>${dashboardStatusBadge(record.status)}</td>
+      <td class="dashboard-record-detail" title="${escapeAttr(record.detail || "")}">${escapeHtml(record.detail || "—")}</td>
+    </tr>`;
+  }).join("") : `<tr><td colspan="7" class="table-empty">当前筛选范围暂无记录</td></tr>`;
+}
+
+async function loadDashboard() {
+  const requestID = ++dashboardRequestID;
+  const days = document.getElementById("dashboardDays")?.value || "30";
+  const projectID = document.getElementById("dashboardProject")?.value || "";
+  const query = new URLSearchParams({ days });
+  if (projectID) query.set("project_id", projectID);
+  document.getElementById("dashboardKpis")?.classList.add("loading");
+  try {
+    const dashboard = await api("/api/dashboard?" + query.toString());
+    if (requestID !== dashboardRequestID) return;
+    renderDashboardKpis(dashboard.summary);
+    renderDashboardChart(dashboard.series || []);
+    renderDashboardDaily(dashboard.series || []);
+    renderDashboardRecords(dashboard.recent || []);
+    const updated = document.getElementById("dashboardUpdatedAt");
+    if (updated) updated.textContent = `统计周期 ${dashboard.days} 天 · 更新于 ${new Date(dashboard.generated_at).toLocaleString("zh-CN", { hour12: false })}`;
+  } catch (error) {
+    if (requestID === dashboardRequestID) showToast("加载数据大盘失败: " + error.message, "error");
+  } finally {
+    if (requestID === dashboardRequestID) document.getElementById("dashboardKpis")?.classList.remove("loading");
+  }
+}
+
+document.getElementById("btnDashboardReload")?.addEventListener("click", loadDashboard);
+document.getElementById("dashboardDays")?.addEventListener("change", loadDashboard);
+document.getElementById("dashboardProject")?.addEventListener("change", loadDashboard);
+window.setInterval(() => {
+  if (state.globalView === "dashboard" && !document.hidden) loadDashboard();
+}, 60000);
 
 let previewDebounceTimer = null;
 let renderedPreviewIndex = 0;

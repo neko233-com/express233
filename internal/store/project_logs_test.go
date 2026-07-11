@@ -16,7 +16,7 @@ func TestProjectLogsRetentionAndFilter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	oldAt := time.Now().Add(-31 * 24 * time.Hour).Format(timeLayout)
+	oldAt := time.Now().Add(-401 * 24 * time.Hour).Format(timeLayout)
 	if err := st.RecordProjectLog(ProjectLog{At: oldAt, TenantID: 1, ProjectID: p.ID, Action: "pull", ServerID: "old", Version: "1.0.0"}); err != nil {
 		t.Fatal(err)
 	}

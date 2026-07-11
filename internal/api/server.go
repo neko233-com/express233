@@ -66,6 +66,7 @@ func (s *Server) Router() http.Handler {
 			r.Use(s.requireMutator)
 			r.Get("/server-ids", s.handleServerIDs)
 			r.Get("/status", s.handleStatus)
+			r.Get("/dashboard", s.handleDashboard)
 			r.Post("/me/password", s.handleChangeMyPassword)
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireAdmin)

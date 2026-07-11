@@ -284,19 +284,23 @@ func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 	if strings.HasSuffix(filename, ".zip") {
 		buf, err := io.ReadAll(file)
 		if err != nil {
+			s.recordUploadEvent(r, pc, ver, "zip", hdr.Size, 0, rel, err)
 			errJSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		ra := bytes.NewReader(buf)
 		if err := s.Store.ExtractZipToVersion(tid, pname, ver, ra, int64(len(buf))); err != nil {
+			s.recordUploadEvent(r, pc, ver, "zip", int64(len(buf)), 0, rel, err)
 			errJSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		paths := zipFilePaths(ra)
 		if len(tags) > 0 {
-			for _, path := range zipFilePaths(ra) {
+			for _, path := range paths {
 				_ = s.Store.SetVersionFileTags(tid, pname, ver, path, tags)
 			}
 		}
+		s.recordUploadEvent(r, pc, ver, "zip", int64(len(buf)), int64(len(paths)), rel, nil)
 		s.auditSession(r, "version.upload.zip", uploadDetail)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "zip extracted"})
 		return
@@ -304,30 +308,37 @@ func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 	if strings.HasSuffix(filename, ".tar.gz") || strings.HasSuffix(filename, ".tgz") || strings.HasSuffix(filename, ".tar") {
 		buf, err := io.ReadAll(file)
 		if err != nil {
+			s.recordUploadEvent(r, pc, ver, "tar", hdr.Size, 0, rel, err)
 			errJSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		if err := s.Store.ExtractTarToVersion(tid, pname, ver, bytes.NewReader(buf), strings.HasSuffix(filename, ".tar.gz") || strings.HasSuffix(filename, ".tgz")); err != nil {
+		compressed := strings.HasSuffix(filename, ".tar.gz") || strings.HasSuffix(filename, ".tgz")
+		if err := s.Store.ExtractTarToVersion(tid, pname, ver, bytes.NewReader(buf), compressed); err != nil {
+			s.recordUploadEvent(r, pc, ver, "tar", int64(len(buf)), 0, rel, err)
 			errJSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		paths := tarFilePaths(bytes.NewReader(buf), compressed)
 		if len(tags) > 0 {
-			for _, path := range tarFilePaths(bytes.NewReader(buf), strings.HasSuffix(filename, ".tar.gz") || strings.HasSuffix(filename, ".tgz")) {
+			for _, path := range paths {
 				_ = s.Store.SetVersionFileTags(tid, pname, ver, path, tags)
 			}
 		}
+		s.recordUploadEvent(r, pc, ver, "tar", int64(len(buf)), int64(len(paths)), rel, nil)
 		s.auditSession(r, "version.upload.tar", uploadDetail)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "archive extracted"})
 		return
 	}
 
 	if err := s.Store.WriteVersionFile(tid, pname, ver, rel, file); err != nil {
+		s.recordUploadEvent(r, pc, ver, "file", hdr.Size, 0, rel, err)
 		errJSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if len(tags) > 0 {
 		_ = s.Store.SetVersionFileTags(tid, pname, ver, rel, tags)
 	}
+	s.recordUploadEvent(r, pc, ver, "file", hdr.Size, 1, rel, nil)
 	s.auditSession(r, "version.upload", uploadDetail)
 	writeJSON(w, http.StatusOK, map[string]string{"path": rel})
 }
