@@ -20,9 +20,36 @@ import (
 type pushExecutor interface {
 	Deploy(context.Context, store.PushHost, store.PushServerBinding, string, io.Reader) (string, error)
 }
+type pushHealthChecker interface {
+	Check(context.Context, store.PushHost) error
+}
 type sshPushExecutor struct{ credentials *pushCredentialCipher }
 type pushCommand struct{ CentralURL, Project, Version, ServerID, PullToken string }
 type pushCommandContextKey struct{}
+
+// Check performs exactly one TCP connection and SSH handshake. It intentionally
+// has no retry loop: the scheduler records the result and waits for the next
+// configured interval after either success or failure.
+func (e sshPushExecutor) Check(ctx context.Context, host store.PushHost) error {
+	config, cleanup, err := e.clientConfig(ctx, host)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	addr := net.JoinHostPort(host.Address, strconv.Itoa(host.Port))
+	dialer := net.Dialer{Timeout: config.Timeout}
+	connection, err := dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return fmt.Errorf("connect %s: %w", host.Name, err)
+	}
+	defer func() { _ = connection.Close() }()
+	sshConnection, channels, requests, err := ssh.NewClientConn(connection, addr, config)
+	if err != nil {
+		return fmt.Errorf("SSH handshake %s: %w", host.Name, err)
+	}
+	client := ssh.NewClient(sshConnection, channels, requests)
+	return client.Close()
+}
 
 func withPushCommand(ctx context.Context, command pushCommand) context.Context {
 	return context.WithValue(ctx, pushCommandContextKey{}, command)
@@ -37,10 +64,11 @@ func (e sshPushExecutor) Deploy(ctx context.Context, host store.PushHost, bindin
 	if !ok {
 		return "", fmt.Errorf("push command unavailable")
 	}
-	config, err := e.clientConfig(ctx, host)
+	config, cleanup, err := e.clientConfig(ctx, host)
 	if err != nil {
 		return "", err
 	}
+	defer cleanup()
 	addr := net.JoinHostPort(host.Address, strconv.Itoa(host.Port))
 	conn, err := ssh.Dial("tcp", addr, config)
 	if err != nil {
@@ -68,42 +96,44 @@ func (e sshPushExecutor) Deploy(ctx context.Context, host store.PushHost, bindin
 	return output.String(), nil
 }
 
-func (e sshPushExecutor) clientConfig(ctx context.Context, host store.PushHost) (*ssh.ClientConfig, error) {
+func (e sshPushExecutor) clientConfig(ctx context.Context, host store.PushHost) (*ssh.ClientConfig, func(), error) {
+	cleanup := func() {}
 	if e.credentials == nil && host.AuthMode != "agent" {
-		return nil, fmt.Errorf("push SSH credentials are not configured")
+		return nil, cleanup, fmt.Errorf("push SSH credentials are not configured")
 	}
 	st := apiStoreFromContext(ctx)
 	if st == nil {
-		return nil, fmt.Errorf("push deployment store unavailable")
+		return nil, cleanup, fmt.Errorf("push deployment store unavailable")
 	}
 	_, encoded, err := st.GetPushHost(host.TenantID, host.ID)
 	if err != nil {
-		return nil, err
+		return nil, cleanup, err
 	}
 	methods := []ssh.AuthMethod{}
 	if host.AuthMode != "agent" {
 		secret, err := e.credentials.decrypt(encoded)
 		if err != nil {
-			return nil, fmt.Errorf("decrypt SSH credential: %w", err)
+			return nil, cleanup, fmt.Errorf("decrypt SSH credential: %w", err)
 		}
 		if host.AuthMode == "password" {
 			methods = append(methods, ssh.Password(secret))
 		} else {
 			signer, err := ssh.ParsePrivateKey([]byte(secret))
 			if err != nil {
-				return nil, fmt.Errorf("parse SSH private key: %w", err)
+				return nil, cleanup, fmt.Errorf("parse SSH private key: %w", err)
 			}
 			methods = append(methods, ssh.PublicKeys(signer))
 		}
 	} else {
 		sock := os.Getenv("SSH_AUTH_SOCK")
 		if sock == "" {
-			return nil, fmt.Errorf("SSH_AUTH_SOCK is required for agent authentication")
+			return nil, cleanup, fmt.Errorf("SSH_AUTH_SOCK is required for agent authentication")
 		}
 		conn, err := net.Dial("unix", sock)
 		if err != nil {
-			return nil, fmt.Errorf("connect SSH agent: %w", err)
+			return nil, cleanup, fmt.Errorf("connect SSH agent: %w", err)
 		}
+		cleanup = func() { _ = conn.Close() }
 		methods = append(methods, ssh.PublicKeysCallback(agent.NewClient(conn).Signers))
 	}
 	callback := func(_ string, _ net.Addr, key ssh.PublicKey) error {
@@ -122,7 +152,7 @@ func (e sshPushExecutor) clientConfig(ctx context.Context, host store.PushHost) 
 		}
 		return st.RecordPushHostKey(host.TenantID, host.ID, strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key))), ssh.FingerprintSHA256(key))
 	}
-	return &ssh.ClientConfig{User: host.Username, Auth: methods, HostKeyCallback: callback, Timeout: 20 * time.Second}, nil
+	return &ssh.ClientConfig{User: host.Username, Auth: methods, HostKeyCallback: callback, Timeout: 20 * time.Second}, cleanup, nil
 }
 
 func shellQuote(value string) string {

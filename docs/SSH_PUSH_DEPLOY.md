@@ -16,3 +16,13 @@
 管理员使用 `/api/push/hosts` 创建/维护 SSH 目标，使用 `/api/push/hosts/{hostID}/servers` 绑定一个或多个 `server_id`，然后调用 `/api/projects/{id}/push-deployments`。请求可传 `server_ids`、`tags` 与 `tag_match` (`all` 或 `any`)；先使用 `dry_run: true` 检查选择结果。
 
 凭据字段只接受一次，所有读取接口都不会返回 SSH 密码或私钥。部署日志会记录目标和命令输出，但不会记录凭据。
+
+### SSH 存活检测
+
+- 新建主机默认启用，每 `3600` 秒检查一次；`health_check_interval_seconds` 可在 `60` 到 `604800` 秒之间调整，也可用 `health_check_enabled: false` 关闭。
+- 定时检查串行执行。每次只发起一次 TCP 连接和 SSH 握手，失败不重试；无论成功还是失败，都等待完整配置周期再执行下一次。
+- `POST /api/push/hosts/{hostID}/check` 立即执行一次手动检查，`GET /api/push/hosts/{hostID}/checks?limit=50` 返回不可变历史。
+- 主机列表只暴露 `last_check_status`、延迟、错误摘要和下次时间，不暴露密码、私钥或加密密文。
+- Prometheus 指标为 `express233_ssh_check_total` 与 `express233_ssh_check_errors_total`。
+
+已登录 Agent 可通过 `GET /api/agent/capabilities` 自发现发布、配置替换、拉取、SSH 与数据大盘操作；完整请求结构见 `/api/openapi.yaml`。

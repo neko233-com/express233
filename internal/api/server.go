@@ -14,15 +14,18 @@ import (
 
 // Server HTTP API 与静态管理页。
 type Server struct {
-	Store          *store.Store
-	sessions       *sessionStore
-	jwt            *jwtAuth
-	serverMu       sync.RWMutex
-	serverByTenant map[int64]*config.ServerFile
-	updateMu       sync.RWMutex
-	updateStatus   systemUpdateStatus
-	updateRunner   func(target, dataDir string) (string, error)
-	pushExecutor   pushExecutor
+	Store             *store.Store
+	sessions          *sessionStore
+	jwt               *jwtAuth
+	serverMu          sync.RWMutex
+	serverByTenant    map[int64]*config.ServerFile
+	updateMu          sync.RWMutex
+	updateStatus      systemUpdateStatus
+	updateRunner      func(target, dataDir string) (string, error)
+	pushExecutor      pushExecutor
+	pushHealthChecker pushHealthChecker
+	pushHealthMu      sync.Mutex
+	pushHealthOnce    sync.Once
 }
 
 // New 创建 API 服务。
@@ -31,9 +34,13 @@ func New(st *store.Store) *Server {
 	// Deliberately initialise lazily: servers without push deployment configured
 	// can keep serving pull mode without a credential encryption key.
 	if cipher, err := newPushCredentialCipher(); err == nil {
-		s.pushExecutor = sshPushExecutor{credentials: cipher}
+		executor := sshPushExecutor{credentials: cipher}
+		s.pushExecutor = executor
+		s.pushHealthChecker = executor
 	} else {
-		s.pushExecutor = sshPushExecutor{}
+		executor := sshPushExecutor{}
+		s.pushExecutor = executor
+		s.pushHealthChecker = executor
 	}
 	if t, err := st.TenantByID(1); err == nil {
 		_ = t
@@ -64,6 +71,7 @@ func (s *Server) Router() http.Handler {
 		})
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireMutator)
+			r.Get("/agent/capabilities", s.handleAgentCapabilities)
 			r.Get("/server-ids", s.handleServerIDs)
 			r.Get("/status", s.handleStatus)
 			r.Get("/dashboard", s.handleDashboard)
@@ -86,6 +94,8 @@ func (s *Server) Router() http.Handler {
 				r.Get("/push/hosts/{hostID}", s.handleGetPushHost)
 				r.Put("/push/hosts/{hostID}", s.handleUpdatePushHost)
 				r.Delete("/push/hosts/{hostID}", s.handleDeletePushHost)
+				r.Post("/push/hosts/{hostID}/check", s.handleCheckPushHost)
+				r.Get("/push/hosts/{hostID}/checks", s.handleListPushHostChecks)
 				r.Get("/push/hosts/{hostID}/servers", s.handleListPushBindings)
 				r.Post("/push/hosts/{hostID}/servers", s.handleCreatePushBinding)
 				r.Put("/push/hosts/{hostID}/servers/{bindingID}", s.handleUpdatePushBinding)

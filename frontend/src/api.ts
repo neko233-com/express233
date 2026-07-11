@@ -1,6 +1,14 @@
 export type Project = { id: number; name: string; my_role?: string };
 export type Version = { id: number; version: string; status: string; created_at: string; published_at?: string };
 export type PushDeployment = { id: number; version: string; status: string; created_at: string; targets?: { id: number; host_name: string; server_id: string; status: string; output: string }[] };
+export type PushHost = {
+  id: number; name: string; address: string; port: number; username: string; auth_mode: "private_key" | "password" | "agent";
+  host_key: string; host_key_fingerprint?: string; health_check_enabled: boolean; health_check_interval_seconds: number;
+  last_check_at?: string; last_check_status: "unknown" | "ok" | "failed"; last_check_error?: string; last_check_latency_ms: number; next_check_at?: string;
+};
+export type PushHostCheck = { id: number; host_id: number; status: "ok" | "failed"; error?: string; latency_ms: number; trigger: "manual" | "scheduled"; checked_at: string };
+export type AgentCapability = { group: string; method: string; path: string; role: string; description: string };
+export type AgentCapabilityPayload = { authentication: string[]; credential_policy: string; openapi: string; capabilities: AgentCapability[] };
 export type DashboardSummary = {
   uploads: number; upload_failures: number; upload_bytes: number; uploaded_files: number; publishes: number;
   pulls: number; pull_failures: number; pull_success_rate: number;

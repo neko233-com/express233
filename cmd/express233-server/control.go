@@ -89,6 +89,9 @@ func serve(listen, dataDir string) error {
 	defer cleanupRuntimeState(dataDir, state.PID)
 
 	srvAPI := api.New(st)
+	monitorContext, stopMonitor := context.WithCancel(context.Background())
+	defer stopMonitor()
+	srvAPI.StartSSHHealthMonitor(monitorContext)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/__admin/reload-config", func(w http.ResponseWriter, r *http.Request) {
 		if !authorizeControlRequest(r, controlToken) {

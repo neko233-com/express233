@@ -13,14 +13,16 @@ import (
 )
 
 type pushHostRequest struct {
-	Name       string `json:"name"`
-	Address    string `json:"address"`
-	Username   string `json:"username"`
-	HostKey    string `json:"host_key"`
-	PrivateKey string `json:"private_key"`
-	Credential string `json:"credential"`
-	AuthMode   string `json:"auth_mode"`
-	Port       int    `json:"port"`
+	Name                       string `json:"name"`
+	Address                    string `json:"address"`
+	Username                   string `json:"username"`
+	HostKey                    string `json:"host_key"`
+	PrivateKey                 string `json:"private_key"`
+	Credential                 string `json:"credential"`
+	AuthMode                   string `json:"auth_mode"`
+	Port                       int    `json:"port"`
+	HealthCheckEnabled         *bool  `json:"health_check_enabled"`
+	HealthCheckIntervalSeconds int    `json:"health_check_interval_seconds"`
 }
 type pushBindingRequest struct {
 	ServerID    string `json:"server_id"`
@@ -77,7 +79,11 @@ func (s *Server) handleCreatePushHost(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	tid, _ := s.tenantFromSession(r)
-	host, err := s.Store.CreatePushHost(store.PushHost{TenantID: tid, Name: req.Name, Address: req.Address, Port: req.Port, Username: req.Username, AuthMode: req.AuthMode, HostKey: req.HostKey}, secret)
+	healthCheckEnabled := true
+	if req.HealthCheckEnabled != nil {
+		healthCheckEnabled = *req.HealthCheckEnabled
+	}
+	host, err := s.Store.CreatePushHost(store.PushHost{TenantID: tid, Name: req.Name, Address: req.Address, Port: req.Port, Username: req.Username, AuthMode: req.AuthMode, HostKey: req.HostKey, HealthCheckEnabled: healthCheckEnabled, HealthCheckIntervalSeconds: req.HealthCheckIntervalSeconds}, secret)
 	if err != nil {
 		errJSON(w, 400, err.Error())
 		return
@@ -112,6 +118,13 @@ func (s *Server) handleUpdatePushHost(w http.ResponseWriter, r *http.Request) {
 	if req.AuthMode == "" {
 		req.AuthMode = current.AuthMode
 	}
+	healthCheckEnabled := current.HealthCheckEnabled
+	if req.HealthCheckEnabled != nil {
+		healthCheckEnabled = *req.HealthCheckEnabled
+	}
+	if req.HealthCheckIntervalSeconds == 0 {
+		req.HealthCheckIntervalSeconds = current.HealthCheckIntervalSeconds
+	}
 	if err := validatePushHostRequest(req, false); err != nil {
 		errJSON(w, http.StatusBadRequest, err.Error())
 		return
@@ -133,7 +146,7 @@ func (s *Server) handleUpdatePushHost(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	err = s.Store.UpdatePushHost(store.PushHost{ID: pushHostID(r), TenantID: tid, Name: req.Name, Address: req.Address, Port: req.Port, Username: req.Username, AuthMode: req.AuthMode, HostKey: req.HostKey}, key)
+	err = s.Store.UpdatePushHost(store.PushHost{ID: pushHostID(r), TenantID: tid, Name: req.Name, Address: req.Address, Port: req.Port, Username: req.Username, AuthMode: req.AuthMode, HostKey: req.HostKey, HealthCheckEnabled: healthCheckEnabled, HealthCheckIntervalSeconds: req.HealthCheckIntervalSeconds}, key)
 	if err != nil {
 		errJSON(w, 400, err.Error())
 		return

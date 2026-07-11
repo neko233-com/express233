@@ -43,6 +43,15 @@ test.describe("README 功能截图", () => {
     await page.getByTestId("version-list").getByText("2.0.0").click();
     await page.getByTestId("file-input").setInputFiles(fixture);
     await expect(page.getByTestId("file-list")).toContainText("game.properties", { timeout: 15_000 });
+    await page.evaluate(async (name) => {
+      const projects = await fetch("/api/projects").then((response) => response.json());
+      const project = projects.find((item) => item.name === name);
+      const body = new FormData();
+      body.append("file", new Blob(["mysql.url=jdbc:mysql://db.v2:3306/game\n"], { type: "text/plain" }), "game.properties");
+      const response = await fetch(`/api/projects/${project.id}/versions/2.0.0/files`, { method: "POST", body });
+      if (!response.ok) throw new Error(await response.text());
+    }, projectName);
+    await page.getByTestId("version-list").getByText("2.0.0").click();
     await page.getByTestId("publish-version").click();
     await page.locator(".modal-card").getByRole("button", { name: "发布" }).click();
     await expect(page.getByTestId("version-list")).toContainText("published", { timeout: 15_000 });

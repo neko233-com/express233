@@ -169,6 +169,7 @@ function setGlobalView(view) {
   document.getElementById("globalStorage").classList.toggle("hidden", view !== "storage");
   document.getElementById("globalSettings").classList.toggle("hidden", view !== "settings");
   document.getElementById("globalDashboard").classList.toggle("hidden", view !== "dashboard");
+  document.getElementById("globalAgent").classList.toggle("hidden", view !== "agent");
   const inProject = view === "workspace" && state.projectId;
   document.getElementById("projectWorkspace").classList.toggle("hidden", !inProject);
   document.getElementById("emptyProject").classList.toggle("hidden", inProject || view !== "workspace");
@@ -179,6 +180,7 @@ function setGlobalView(view) {
   }
   if (view === "storage") loadStorageOverview();
   if (view === "dashboard") loadDashboard();
+  if (view === "agent" && state.isAdmin) loadAgentWorkspace();
 }
 
 function setProjectTab(tab) {
@@ -469,6 +471,8 @@ document.getElementById("btnPushAddHost")?.addEventListener("click", async () =>
       name: document.getElementById("pushHostName").value.trim(), address: document.getElementById("pushHostAddress").value.trim(),
       port: Number(document.getElementById("pushHostPort").value || 22), username: document.getElementById("pushHostUser").value.trim(), auth_mode: authMode,
       credential: document.getElementById("pushHostCredential").value, host_key: document.getElementById("pushHostKey").value.trim(),
+      health_check_enabled: document.getElementById("pushHostHealthEnabled").checked,
+      health_check_interval_seconds: Number(document.getElementById("pushHostHealthInterval").value || 3600),
     }) });
     ["pushHostName", "pushHostAddress", "pushHostUser", "pushHostCredential", "pushHostKey"].forEach((id) => { document.getElementById(id).value = ""; });
     await loadPushWorkspace(); showToast("SSH 配置已保存");
@@ -763,10 +767,131 @@ function renderPushHosts() {
   const hostList = document.getElementById("pushHostList");
   const editor = document.getElementById("pushBindingEditor");
   if (!hostList) return;
-  hostList.innerHTML = `<table class="data-table"><thead><tr><th>配置</th><th>地址</th><th>认证</th><th>Host key</th><th></th></tr></thead><tbody>${pushHosts.map((h) => `<tr class="${h.id === selectedPushHostID ? "selected-row" : ""}"><td>${escapeHtml(h.name)}</td><td>${escapeHtml(h.username)}@${escapeHtml(h.address)}:${h.port}</td><td>${escapeHtml(h.auth_mode || "private_key")}</td><td><code>${escapeHtml(h.host_key_fingerprint || (h.host_key ? "已固定" : "首次连接自动记录"))}</code></td><td><button type="button" class="btn btn-ghost btn-sm" data-push-host="${h.id}">绑定</button><button type="button" class="btn btn-danger btn-sm" data-del-push-host="${h.id}">删除</button></td></tr>`).join("")}</tbody></table>`;
+  hostList.innerHTML = `<table class="data-table"><thead><tr><th>配置</th><th>地址</th><th>认证</th><th>存活状态</th><th>Host key</th><th></th></tr></thead><tbody>${pushHosts.map((h) => `<tr class="${h.id === selectedPushHostID ? "selected-row" : ""}"><td>${escapeHtml(h.name)}</td><td>${escapeHtml(h.username)}@${escapeHtml(h.address)}:${h.port}</td><td>${escapeHtml(h.auth_mode || "private_key")}</td><td>${agentHealthBadge(h)} <span class="table-meta">${h.health_check_enabled ? formatAgentInterval(h.health_check_interval_seconds) : "已关闭"}</span></td><td><code>${escapeHtml(h.host_key_fingerprint || (h.host_key ? "已固定" : "首次连接自动记录"))}</code></td><td><button type="button" class="btn btn-ghost btn-sm" data-check-push-host="${h.id}">${agentIcon("activity")}检查</button><button type="button" class="btn btn-ghost btn-sm" data-push-host="${h.id}">绑定</button><button type="button" class="btn btn-danger btn-sm" data-del-push-host="${h.id}">删除</button></td></tr>`).join("")}</tbody></table>`;
   hostList.querySelectorAll("[data-push-host]").forEach((btn) => btn.onclick = async () => { selectedPushHostID = Number(btn.dataset.pushHost); editor?.classList.remove("hidden"); pushBindings = await api(`/api/push/hosts/${selectedPushHostID}/servers`); renderPushBindings(); });
+  hostList.querySelectorAll("[data-check-push-host]").forEach((btn) => btn.onclick = () => runAgentHostCheck(Number(btn.dataset.checkPushHost), btn));
   hostList.querySelectorAll("[data-del-push-host]").forEach((btn) => btn.onclick = async () => { if (!await showConfirm({ title: "删除 SSH 配置", message: "会一并删除该配置下的服务器绑定。", danger: true })) return; await api(`/api/push/hosts/${btn.dataset.delPushHost}`, { method: "DELETE" }); selectedPushHostID = null; pushBindings = []; renderPushBindings(); await loadPushWorkspace(); });
 }
+
+function agentIcon(name) {
+  const paths = {
+    activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+    server: '<rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/>',
+    route: '<circle cx="6" cy="19" r="3"/><circle cx="18" cy="5" r="3"/><path d="M6 16V8a3 3 0 0 1 3-3h6M18 8v8a3 3 0 0 1-3 3H9"/>',
+    shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l4 2"/>',
+  };
+  return `<svg class="btn-svg" aria-hidden="true" viewBox="0 0 24 24">${paths[name] || paths.activity}</svg>`;
+}
+
+function agentHealthBadge(host) {
+  const status = host.last_check_status || "unknown";
+  const label = status === "ok" ? "可连接" : status === "failed" ? "连接失败" : "待检查";
+  return `<span class="health-status is-${escapeAttr(status)}"><i></i>${label}</span>`;
+}
+
+function formatAgentInterval(seconds) {
+  const value = Number(seconds || 3600);
+  if (value % 86400 === 0) return `${value / 86400} 天/次`;
+  if (value % 3600 === 0) return `${value / 3600} 小时/次`;
+  return `${Math.round(value / 60)} 分钟/次`;
+}
+
+function agentIntervalOptions(selected) {
+  const choices = [300, 900, 1800, 3600, 21600, 86400];
+  if (!choices.includes(Number(selected))) choices.push(Number(selected));
+  return choices.sort((a, b) => a - b).map((value) => `<option value="${value}" ${value === Number(selected) ? "selected" : ""}>${formatAgentInterval(value)}</option>`).join("");
+}
+
+async function loadAgentWorkspace() {
+  const summary = document.getElementById("agentSummary");
+  if (summary) summary.innerHTML = '<div class="agent-loading">正在读取节点与 API 能力…</div>';
+  try {
+    const [capabilityPayload, hosts] = await Promise.all([api("/api/agent/capabilities"), api("/api/push/hosts")]);
+    pushHosts = hosts || [];
+    renderAgentSummary(capabilityPayload, pushHosts);
+    renderAgentCapabilities(capabilityPayload.capabilities || []);
+    renderAgentHosts(pushHosts);
+  } catch (error) {
+    if (summary) summary.innerHTML = `<div class="agent-error">${escapeHtml(error.message)}</div>`;
+    showToast(error.message, "err");
+  }
+}
+
+function renderAgentSummary(payload, hosts) {
+  const healthy = hosts.filter((host) => host.last_check_status === "ok").length;
+  const failed = hosts.filter((host) => host.last_check_status === "failed").length;
+  const enabled = hosts.filter((host) => host.health_check_enabled).length;
+  document.getElementById("agentSummary").innerHTML = `
+    <div class="agent-stat">${agentIcon("server")}<div><strong>${hosts.length}</strong><span>SSH 节点</span></div></div>
+    <div class="agent-stat is-good">${agentIcon("activity")}<div><strong>${healthy}</strong><span>当前可连接</span></div></div>
+    <div class="agent-stat ${failed ? "is-bad" : ""}">${agentIcon("shield")}<div><strong>${failed}</strong><span>连接失败</span></div></div>
+    <div class="agent-stat">${agentIcon("clock")}<div><strong>${enabled}</strong><span>已启用定检</span></div></div>
+    <div class="agent-stat">${agentIcon("route")}<div><strong>${(payload.capabilities || []).length}</strong><span>Agent API 操作</span></div></div>`;
+}
+
+function renderAgentCapabilities(capabilities) {
+  const box = document.getElementById("agentCapabilities");
+  const groups = capabilities.reduce((result, item) => {
+    (result[item.group] ||= []).push(item);
+    return result;
+  }, {});
+  box.innerHTML = Object.entries(groups).map(([group, items]) => `<section class="api-group"><h4>${escapeHtml(group)}</h4>${items.map((item) => `<div class="api-row"><span class="http-method method-${item.method.toLowerCase()}">${escapeHtml(item.method)}</span><code>${escapeHtml(item.path)}</code><span class="api-description">${escapeHtml(item.description)}</span><span class="api-role">${escapeHtml(item.role)}</span></div>`).join("")}</section>`).join("");
+}
+
+function renderAgentHosts(hosts) {
+  const box = document.getElementById("agentHostList");
+  if (!hosts.length) {
+    box.innerHTML = '<div class="agent-empty">还没有 SSH 节点。进入任一项目的“发布到远程”创建第一台节点。</div>';
+    return;
+  }
+  box.innerHTML = `<table class="data-table agent-host-table"><thead><tr><th>节点</th><th>连接</th><th>状态</th><th>定时检查</th><th>最近 / 下次</th><th>操作</th></tr></thead><tbody>${hosts.map((host) => `<tr><td><strong>${escapeHtml(host.name)}</strong><small>${escapeHtml(host.host_key_fingerprint || (host.host_key ? "Host key 已固定" : "Host key 待登记"))}</small></td><td><code>${escapeHtml(host.username)}@${escapeHtml(host.address)}:${host.port}</code><small>${escapeHtml(host.auth_mode)}</small></td><td>${agentHealthBadge(host)}<small>${host.last_check_latency_ms ? `${host.last_check_latency_ms} ms` : "—"}</small></td><td><label class="switch"><input type="checkbox" data-agent-enabled="${host.id}" ${host.health_check_enabled ? "checked" : ""}/><span></span></label><select class="input input-sm agent-interval" data-agent-interval="${host.id}" ${host.health_check_enabled ? "" : "disabled"}>${agentIntervalOptions(host.health_check_interval_seconds || 3600)}</select></td><td><small>${escapeHtml(host.last_check_at || "尚未检查")}</small><small class="next-check">${escapeHtml(host.next_check_at || "未安排")}</small></td><td><button type="button" class="btn btn-primary btn-sm" data-agent-check="${host.id}">${agentIcon("activity")}立即检查</button><button type="button" class="btn btn-ghost btn-sm" data-agent-history="${host.id}">${agentIcon("history")}历史</button></td></tr>`).join("")}</tbody></table>`;
+  box.querySelectorAll("[data-agent-check]").forEach((button) => button.onclick = () => runAgentHostCheck(Number(button.dataset.agentCheck), button));
+  box.querySelectorAll("[data-agent-history]").forEach((button) => button.onclick = () => loadAgentHostHistory(Number(button.dataset.agentHistory)));
+  box.querySelectorAll("[data-agent-enabled]").forEach((input) => input.onchange = () => saveAgentHostHealth(Number(input.dataset.agentEnabled)));
+  box.querySelectorAll("[data-agent-interval]").forEach((select) => select.onchange = () => saveAgentHostHealth(Number(select.dataset.agentInterval)));
+}
+
+async function saveAgentHostHealth(hostID) {
+  const host = pushHosts.find((item) => item.id === hostID);
+  if (!host) return;
+  const enabled = document.querySelector(`[data-agent-enabled="${hostID}"]`).checked;
+  const interval = Number(document.querySelector(`[data-agent-interval="${hostID}"]`).value);
+  try {
+    await api(`/api/push/hosts/${hostID}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+      name: host.name, address: host.address, port: host.port, username: host.username, auth_mode: host.auth_mode, host_key: host.host_key,
+      health_check_enabled: enabled, health_check_interval_seconds: interval,
+    }) });
+    showToast(enabled ? `已设为${formatAgentInterval(interval)}` : "已关闭定时检查");
+    await loadAgentWorkspace();
+  } catch (error) { showToast(error.message, "err"); await loadAgentWorkspace(); }
+}
+
+async function runAgentHostCheck(hostID, button) {
+  if (button) { button.disabled = true; button.classList.add("is-checking"); button.innerHTML = `${agentIcon("activity")}检查中…`; }
+  try {
+    const result = await api(`/api/push/hosts/${hostID}/check`, { method: "POST" });
+    showToast(result.status === "ok" ? `SSH 可连接，${result.latency_ms} ms` : `SSH 连接失败：${result.error}`, result.status === "ok" ? "ok" : "err");
+    if (state.globalView === "agent") { await loadAgentWorkspace(); await loadAgentHostHistory(hostID); }
+    else await loadPushWorkspace();
+  } catch (error) { showToast(error.message, "err"); }
+  finally { if (button) { button.disabled = false; button.classList.remove("is-checking"); } }
+}
+
+async function loadAgentHostHistory(hostID) {
+  const box = document.getElementById("agentCheckHistory");
+  const host = pushHosts.find((item) => item.id === hostID);
+  box.classList.remove("hidden");
+  box.innerHTML = '<div class="agent-loading">正在读取检查历史…</div>';
+  try {
+    const checks = await api(`/api/push/hosts/${hostID}/checks?limit=50`);
+    box.innerHTML = `<div class="history-header"><div><h4>${escapeHtml(host?.name || "SSH 节点")} · 检查历史</h4><p>每条记录对应一次真实连接尝试，没有隐藏重试。</p></div><button type="button" class="btn btn-ghost btn-sm" data-close-history>关闭</button></div><div class="history-list">${checks.length ? checks.map((check) => `<div class="history-row"><span class="health-status is-${escapeAttr(check.status)}"><i></i>${check.status === "ok" ? "成功" : "失败"}</span><time>${escapeHtml(check.checked_at)}</time><span>${check.latency_ms} ms</span><span>${check.trigger === "manual" ? "手动" : "定时"}</span><code title="${escapeAttr(check.error || "")}">${escapeHtml(check.error || "连接与认证正常")}</code></div>`).join("") : '<div class="agent-empty">暂无检查记录</div>'}</div>`;
+    box.querySelector("[data-close-history]").onclick = () => box.classList.add("hidden");
+  } catch (error) { box.innerHTML = `<div class="agent-error">${escapeHtml(error.message)}</div>`; }
+}
+
+document.getElementById("btnAgentReload")?.addEventListener("click", loadAgentWorkspace);
 
 function renderPushBindings() {
   const box = document.getElementById("pushBindingList");
@@ -1634,6 +1759,10 @@ document.getElementById("fileInput").onchange = async (e) => {
     await uploadFiles(e.target.files);
   } catch (err) {
     showToast(err.message, "error");
+  } finally {
+    // Selecting the same local file for another version must fire change again.
+    // File inputs cannot be assigned programmatically except to clear them.
+    e.target.value = "";
   }
 };
 

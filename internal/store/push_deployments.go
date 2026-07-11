@@ -10,18 +10,41 @@ import (
 // PushHost is an SSH endpoint used by the push deployment controller. The
 // private key is deliberately never included in API responses.
 type PushHost struct {
-	ID                 int64  `json:"id"`
-	TenantID           int64  `json:"tenant_id,omitempty"`
-	Name               string `json:"name"`
-	Address            string `json:"address"`
-	Port               int    `json:"port"`
-	Username           string `json:"username"`
-	AuthMode           string `json:"auth_mode"`
-	HostKey            string `json:"host_key"`
-	HostKeyFingerprint string `json:"host_key_fingerprint,omitempty"`
-	CreatedAt          string `json:"created_at"`
-	UpdatedAt          string `json:"updated_at"`
+	ID                         int64  `json:"id"`
+	TenantID                   int64  `json:"tenant_id,omitempty"`
+	Name                       string `json:"name"`
+	Address                    string `json:"address"`
+	Port                       int    `json:"port"`
+	Username                   string `json:"username"`
+	AuthMode                   string `json:"auth_mode"`
+	HostKey                    string `json:"host_key"`
+	HostKeyFingerprint         string `json:"host_key_fingerprint,omitempty"`
+	HealthCheckEnabled         bool   `json:"health_check_enabled"`
+	HealthCheckIntervalSeconds int    `json:"health_check_interval_seconds"`
+	LastCheckAt                string `json:"last_check_at,omitempty"`
+	LastCheckStatus            string `json:"last_check_status"`
+	LastCheckError             string `json:"last_check_error,omitempty"`
+	LastCheckLatencyMS         int64  `json:"last_check_latency_ms"`
+	NextCheckAt                string `json:"next_check_at,omitempty"`
+	CreatedAt                  string `json:"created_at"`
+	UpdatedAt                  string `json:"updated_at"`
 }
+
+// PushHostCheck is an immutable audit record for one SSH connection attempt.
+// A failed check is recorded once and is never retried by the checker.
+type PushHostCheck struct {
+	ID        int64  `json:"id"`
+	TenantID  int64  `json:"tenant_id,omitempty"`
+	HostID    int64  `json:"host_id"`
+	Status    string `json:"status"`
+	Error     string `json:"error,omitempty"`
+	LatencyMS int64  `json:"latency_ms"`
+	Trigger   string `json:"trigger"`
+	CheckedAt string `json:"checked_at"`
+}
+
+const defaultPushHealthCheckIntervalSeconds = 3600
+const pushHostCheckRetention = 400 * 24 * time.Hour
 
 // PushServerBinding describes one independently deployable server on a host.
 // Labels select targets (for example test, canary, cn), while ContentTags
@@ -131,15 +154,36 @@ CREATE TABLE IF NOT EXISTS push_deployment_targets (
   completed_at TEXT NOT NULL DEFAULT '',
   FOREIGN KEY(deployment_id) REFERENCES push_deployments(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS push_host_checks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id INTEGER NOT NULL,
+  host_id INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  error TEXT NOT NULL DEFAULT '',
+  latency_ms INTEGER NOT NULL DEFAULT 0,
+  trigger TEXT NOT NULL,
+  checked_at TEXT NOT NULL,
+  FOREIGN KEY(host_id) REFERENCES push_hosts(id) ON DELETE CASCADE
+);
 CREATE INDEX IF NOT EXISTS idx_push_bindings_tenant_server ON push_server_bindings(tenant_id, server_id);
 CREATE INDEX IF NOT EXISTS idx_push_deployments_project ON push_deployments(project_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_push_targets_deployment ON push_deployment_targets(deployment_id, id);
+CREATE INDEX IF NOT EXISTS idx_push_host_checks_host ON push_host_checks(host_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_push_host_checks_checked_at ON push_host_checks(checked_at);
 `)
 	if err != nil {
 		return err
 	}
 	_, _ = s.db.Exec(`ALTER TABLE push_hosts ADD COLUMN auth_mode TEXT NOT NULL DEFAULT 'private_key'`)
 	_, _ = s.db.Exec(`ALTER TABLE push_hosts ADD COLUMN host_key_fingerprint TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE push_hosts ADD COLUMN health_check_enabled INTEGER NOT NULL DEFAULT 1`)
+	_, _ = s.db.Exec(`ALTER TABLE push_hosts ADD COLUMN health_check_interval_seconds INTEGER NOT NULL DEFAULT 3600`)
+	_, _ = s.db.Exec(`ALTER TABLE push_hosts ADD COLUMN last_check_at TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE push_hosts ADD COLUMN last_check_status TEXT NOT NULL DEFAULT 'unknown'`)
+	_, _ = s.db.Exec(`ALTER TABLE push_hosts ADD COLUMN last_check_error TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE push_hosts ADD COLUMN last_check_latency_ms INTEGER NOT NULL DEFAULT 0`)
+	_, _ = s.db.Exec(`ALTER TABLE push_hosts ADD COLUMN next_check_at TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`UPDATE push_hosts SET next_check_at=? WHERE health_check_enabled=1 AND next_check_at=''`, time.Now().Format(timeLayout))
 	return nil
 }
 
@@ -150,21 +194,33 @@ func (s *Store) CreatePushHost(host PushHost, encryptedPrivateKey string) (*Push
 	if host.AuthMode == "" {
 		host.AuthMode = "private_key"
 	}
+	if host.HealthCheckIntervalSeconds == 0 {
+		host.HealthCheckIntervalSeconds = defaultPushHealthCheckIntervalSeconds
+	}
+	if !validPushHealthCheckInterval(host.HealthCheckIntervalSeconds) {
+		return nil, fmt.Errorf("health_check_interval_seconds must be between 60 and 604800")
+	}
 	if strings.TrimSpace(host.Name) == "" || strings.TrimSpace(host.Address) == "" || strings.TrimSpace(host.Username) == "" || !validPushAuthMode(host.AuthMode) || (host.AuthMode != "agent" && encryptedPrivateKey == "") {
 		return nil, fmt.Errorf("name, address, username, auth_mode and credential required")
 	}
 	now := time.Now().Format(timeLayout)
-	res, err := s.db.Exec(`INSERT INTO push_hosts(tenant_id,name,address,port,username,auth_mode,host_key,host_key_fingerprint,encrypted_private_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, host.TenantID, host.Name, host.Address, host.Port, host.Username, host.AuthMode, host.HostKey, host.HostKeyFingerprint, encryptedPrivateKey, now, now)
+	nextCheckAt := ""
+	if host.HealthCheckEnabled {
+		nextCheckAt = now
+	}
+	res, err := s.db.Exec(`INSERT INTO push_hosts(tenant_id,name,address,port,username,auth_mode,host_key,host_key_fingerprint,encrypted_private_key,health_check_enabled,health_check_interval_seconds,last_check_status,next_check_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, host.TenantID, host.Name, host.Address, host.Port, host.Username, host.AuthMode, host.HostKey, host.HostKeyFingerprint, encryptedPrivateKey, host.HealthCheckEnabled, host.HealthCheckIntervalSeconds, "unknown", nextCheckAt, now, now)
 	if err != nil {
 		return nil, err
 	}
 	host.ID, _ = res.LastInsertId()
+	host.LastCheckStatus = "unknown"
+	host.NextCheckAt = nextCheckAt
 	host.CreatedAt, host.UpdatedAt = now, now
 	return &host, nil
 }
 
 func (s *Store) ListPushHosts(tenantID int64) ([]PushHost, error) {
-	rows, err := s.db.Query(`SELECT id,tenant_id,name,address,port,username,auth_mode,host_key,host_key_fingerprint,created_at,updated_at FROM push_hosts WHERE tenant_id=? ORDER BY name`, tenantID)
+	rows, err := s.db.Query(`SELECT id,tenant_id,name,address,port,username,auth_mode,host_key,host_key_fingerprint,health_check_enabled,health_check_interval_seconds,last_check_at,last_check_status,last_check_error,last_check_latency_ms,next_check_at,created_at,updated_at FROM push_hosts WHERE tenant_id=? ORDER BY name`, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +228,7 @@ func (s *Store) ListPushHosts(tenantID int64) ([]PushHost, error) {
 	var out []PushHost
 	for rows.Next() {
 		var h PushHost
-		if err := rows.Scan(&h.ID, &h.TenantID, &h.Name, &h.Address, &h.Port, &h.Username, &h.AuthMode, &h.HostKey, &h.HostKeyFingerprint, &h.CreatedAt, &h.UpdatedAt); err != nil {
+		if err := scanPushHost(rows, &h); err != nil {
 			return nil, err
 		}
 		out = append(out, h)
@@ -183,7 +239,7 @@ func (s *Store) ListPushHosts(tenantID int64) ([]PushHost, error) {
 func (s *Store) GetPushHost(tenantID, id int64) (*PushHost, string, error) {
 	var h PushHost
 	var key string
-	err := s.db.QueryRow(`SELECT id,tenant_id,name,address,port,username,auth_mode,host_key,host_key_fingerprint,encrypted_private_key,created_at,updated_at FROM push_hosts WHERE tenant_id=? AND id=?`, tenantID, id).Scan(&h.ID, &h.TenantID, &h.Name, &h.Address, &h.Port, &h.Username, &h.AuthMode, &h.HostKey, &h.HostKeyFingerprint, &key, &h.CreatedAt, &h.UpdatedAt)
+	err := s.db.QueryRow(`SELECT id,tenant_id,name,address,port,username,auth_mode,host_key,host_key_fingerprint,health_check_enabled,health_check_interval_seconds,last_check_at,last_check_status,last_check_error,last_check_latency_ms,next_check_at,encrypted_private_key,created_at,updated_at FROM push_hosts WHERE tenant_id=? AND id=?`, tenantID, id).Scan(&h.ID, &h.TenantID, &h.Name, &h.Address, &h.Port, &h.Username, &h.AuthMode, &h.HostKey, &h.HostKeyFingerprint, &h.HealthCheckEnabled, &h.HealthCheckIntervalSeconds, &h.LastCheckAt, &h.LastCheckStatus, &h.LastCheckError, &h.LastCheckLatencyMS, &h.NextCheckAt, &key, &h.CreatedAt, &h.UpdatedAt)
 	return &h, key, err
 }
 
@@ -193,6 +249,12 @@ func (s *Store) UpdatePushHost(host PushHost, encryptedPrivateKey string) error 
 	}
 	if host.AuthMode == "" {
 		host.AuthMode = "private_key"
+	}
+	if host.HealthCheckIntervalSeconds == 0 {
+		host.HealthCheckIntervalSeconds = defaultPushHealthCheckIntervalSeconds
+	}
+	if !validPushHealthCheckInterval(host.HealthCheckIntervalSeconds) {
+		return fmt.Errorf("health_check_interval_seconds must be between 60 and 604800")
 	}
 	if host.HostKey == "" {
 		current, _, err := s.GetPushHost(host.TenantID, host.ID)
@@ -205,11 +267,18 @@ func (s *Store) UpdatePushHost(host PushHost, encryptedPrivateKey string) error 
 		return fmt.Errorf("name, address, username and auth_mode required")
 	}
 	now := time.Now().Format(timeLayout)
-	query := `UPDATE push_hosts SET name=?,address=?,port=?,username=?,auth_mode=?,host_key=?,host_key_fingerprint=?,updated_at=? WHERE tenant_id=? AND id=?`
-	args := []any{host.Name, host.Address, host.Port, host.Username, host.AuthMode, host.HostKey, host.HostKeyFingerprint, now, host.TenantID, host.ID}
+	nextCheckAt := ""
+	if host.HealthCheckEnabled {
+		nextCheckAt = now
+		if current, _, err := s.GetPushHost(host.TenantID, host.ID); err == nil && current.HealthCheckEnabled && current.HealthCheckIntervalSeconds == host.HealthCheckIntervalSeconds && current.NextCheckAt != "" {
+			nextCheckAt = current.NextCheckAt
+		}
+	}
+	query := `UPDATE push_hosts SET name=?,address=?,port=?,username=?,auth_mode=?,host_key=?,host_key_fingerprint=?,health_check_enabled=?,health_check_interval_seconds=?,next_check_at=?,updated_at=? WHERE tenant_id=? AND id=?`
+	args := []any{host.Name, host.Address, host.Port, host.Username, host.AuthMode, host.HostKey, host.HostKeyFingerprint, host.HealthCheckEnabled, host.HealthCheckIntervalSeconds, nextCheckAt, now, host.TenantID, host.ID}
 	if encryptedPrivateKey != "" {
-		query = `UPDATE push_hosts SET name=?,address=?,port=?,username=?,auth_mode=?,host_key=?,host_key_fingerprint=?,encrypted_private_key=?,updated_at=? WHERE tenant_id=? AND id=?`
-		args = []any{host.Name, host.Address, host.Port, host.Username, host.AuthMode, host.HostKey, host.HostKeyFingerprint, encryptedPrivateKey, now, host.TenantID, host.ID}
+		query = `UPDATE push_hosts SET name=?,address=?,port=?,username=?,auth_mode=?,host_key=?,host_key_fingerprint=?,encrypted_private_key=?,health_check_enabled=?,health_check_interval_seconds=?,next_check_at=?,updated_at=? WHERE tenant_id=? AND id=?`
+		args = []any{host.Name, host.Address, host.Port, host.Username, host.AuthMode, host.HostKey, host.HostKeyFingerprint, encryptedPrivateKey, host.HealthCheckEnabled, host.HealthCheckIntervalSeconds, nextCheckAt, now, host.TenantID, host.ID}
 	}
 	res, err := s.db.Exec(query, args...)
 	if err != nil {
@@ -232,6 +301,115 @@ func (s *Store) DeletePushHost(tenantID, id int64) error {
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+type pushHostScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanPushHost(row pushHostScanner, h *PushHost) error {
+	return row.Scan(&h.ID, &h.TenantID, &h.Name, &h.Address, &h.Port, &h.Username, &h.AuthMode, &h.HostKey, &h.HostKeyFingerprint, &h.HealthCheckEnabled, &h.HealthCheckIntervalSeconds, &h.LastCheckAt, &h.LastCheckStatus, &h.LastCheckError, &h.LastCheckLatencyMS, &h.NextCheckAt, &h.CreatedAt, &h.UpdatedAt)
+}
+
+func validPushHealthCheckInterval(seconds int) bool {
+	return seconds >= 60 && seconds <= 7*24*60*60
+}
+
+// ListDuePushHosts returns enabled hosts whose next single-attempt check is due.
+// The global scheduler deliberately processes this list serially.
+func (s *Store) ListDuePushHosts(now time.Time, limit int) ([]PushHost, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := s.db.Query(`SELECT id,tenant_id,name,address,port,username,auth_mode,host_key,host_key_fingerprint,health_check_enabled,health_check_interval_seconds,last_check_at,last_check_status,last_check_error,last_check_latency_ms,next_check_at,created_at,updated_at FROM push_hosts WHERE health_check_enabled=1 AND (next_check_at='' OR next_check_at<=?) ORDER BY next_check_at,id LIMIT ?`, now.Format(timeLayout), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	items := make([]PushHost, 0)
+	for rows.Next() {
+		var host PushHost
+		if err := scanPushHost(rows, &host); err != nil {
+			return nil, err
+		}
+		items = append(items, host)
+	}
+	return items, rows.Err()
+}
+
+// RecordPushHostCheck persists one attempt and schedules only the next interval;
+// it never creates an immediate retry after failure.
+func (s *Store) RecordPushHostCheck(check PushHostCheck) (*PushHostCheck, error) {
+	if check.Status != "ok" && check.Status != "failed" {
+		return nil, fmt.Errorf("invalid SSH check status")
+	}
+	if check.Trigger != "manual" && check.Trigger != "scheduled" {
+		return nil, fmt.Errorf("invalid SSH check trigger")
+	}
+	if len(check.Error) > 1000 {
+		check.Error = check.Error[:1000]
+	}
+	checkedAt := time.Now()
+	check.CheckedAt = checkedAt.Format(timeLayout)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var interval int
+	var enabled bool
+	if err := tx.QueryRow(`SELECT health_check_interval_seconds,health_check_enabled FROM push_hosts WHERE tenant_id=? AND id=?`, check.TenantID, check.HostID).Scan(&interval, &enabled); err != nil {
+		return nil, err
+	}
+	res, err := tx.Exec(`INSERT INTO push_host_checks(tenant_id,host_id,status,error,latency_ms,trigger,checked_at) VALUES(?,?,?,?,?,?,?)`, check.TenantID, check.HostID, check.Status, check.Error, check.LatencyMS, check.Trigger, check.CheckedAt)
+	if err != nil {
+		return nil, err
+	}
+	check.ID, _ = res.LastInsertId()
+	if _, err := tx.Exec(`DELETE FROM push_host_checks WHERE checked_at<?`, checkedAt.Add(-pushHostCheckRetention).Format(timeLayout)); err != nil {
+		return nil, err
+	}
+	nextCheckAt := ""
+	if enabled {
+		if !validPushHealthCheckInterval(interval) {
+			interval = defaultPushHealthCheckIntervalSeconds
+		}
+		nextCheckAt = checkedAt.Add(time.Duration(interval) * time.Second).Format(timeLayout)
+	}
+	if _, err := tx.Exec(`UPDATE push_hosts SET last_check_at=?,last_check_status=?,last_check_error=?,last_check_latency_ms=?,next_check_at=? WHERE tenant_id=? AND id=?`, check.CheckedAt, check.Status, check.Error, check.LatencyMS, nextCheckAt, check.TenantID, check.HostID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &check, nil
+}
+
+func (s *Store) ListPushHostChecks(tenantID, hostID int64, limit int) ([]PushHostCheck, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	var exists int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM push_hosts WHERE tenant_id=? AND id=?`, tenantID, hostID).Scan(&exists); err != nil {
+		return nil, err
+	}
+	if exists == 0 {
+		return nil, sql.ErrNoRows
+	}
+	rows, err := s.db.Query(`SELECT id,tenant_id,host_id,status,error,latency_ms,trigger,checked_at FROM push_host_checks WHERE tenant_id=? AND host_id=? ORDER BY id DESC LIMIT ?`, tenantID, hostID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	items := make([]PushHostCheck, 0)
+	for rows.Next() {
+		var item PushHostCheck
+		if err := rows.Scan(&item.ID, &item.TenantID, &item.HostID, &item.Status, &item.Error, &item.LatencyMS, &item.Trigger, &item.CheckedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }
 
 func (s *Store) CreatePushServerBinding(b PushServerBinding) (*PushServerBinding, error) {

@@ -1,0 +1,17 @@
+.git
+.github
+.cursor
+.playwright-cli
+.visual-e2e-data
+output
+test
+frontend/node_modules
+frontend/dist
+internal/api/web/dist
+**/*.test
+**/*.exe
+**/*.zip
+**/*.tar.gz
+coverage*
+test-results
+playwright-report

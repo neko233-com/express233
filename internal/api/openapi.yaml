@@ -18,6 +18,9 @@ tags:
   - name: projects
   - name: pull
   - name: analytics
+  - name: agent
+  - name: ssh
+  - name: deployment
 
 paths:
   /healthz:
@@ -585,6 +588,162 @@ paths:
                     items:
                       $ref: "#/components/schemas/Version"
 
+  /api/agent/capabilities:
+    get:
+      tags: [agent]
+      summary: 发现 Agent 可操作的 HTTP API
+      description: 返回认证方式、凭据策略和部署 Agent 的完整能力清单。
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      responses:
+        "200":
+          description: Agent 能力清单
+
+  /api/push/hosts:
+    get:
+      tags: [ssh]
+      summary: SSH 主机列表（永不返回凭据）
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/PushHost" }
+    post:
+      tags: [ssh]
+      summary: 创建 SSH 主机并加密保存凭据
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PushHostRequest" }
+      responses:
+        "201":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PushHost" }
+        "400": { $ref: "#/components/responses/Error" }
+
+  /api/push/hosts/{hostID}:
+    parameters:
+      - { name: hostID, in: path, required: true, schema: { type: integer } }
+    get:
+      tags: [ssh]
+      summary: 获取 SSH 主机（永不返回凭据）
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PushHost" }
+    put:
+      tags: [ssh]
+      summary: 更新 SSH 主机；凭据留空表示保持原值
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PushHostRequest" }
+      responses:
+        "204": { description: 已更新 }
+    delete:
+      tags: [ssh]
+      summary: 删除 SSH 主机和关联绑定/检查历史
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      responses:
+        "204": { description: 已删除 }
+
+  /api/push/hosts/{hostID}/check:
+    post:
+      tags: [ssh]
+      summary: 执行一次 SSH 存活检查
+      description: 仅发起一次 TCP 连接和 SSH 握手；失败不会重试，等待下一配置周期。
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      parameters:
+        - { name: hostID, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PushHostCheck" }
+
+  /api/push/hosts/{hostID}/checks:
+    get:
+      tags: [ssh]
+      summary: 查询 SSH 存活检查历史
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      parameters:
+        - { name: hostID, in: path, required: true, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/PushHostCheck" }
+
+  /api/push/hosts/{hostID}/servers:
+    get:
+      tags: [ssh]
+      summary: 查询主机的 server_id 绑定
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      parameters:
+        - { name: hostID, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/PushServerBinding" }
+    post:
+      tags: [ssh]
+      summary: 创建 server_id 与远程部署根目录绑定
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      parameters:
+        - { name: hostID, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PushServerBindingRequest" }
+      responses:
+        "201":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PushServerBinding" }
+
+  /api/projects/{id}/push-deployments:
+    get:
+      tags: [deployment]
+      summary: 查询项目 SSH 发布记录
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: 发布记录列表 }
+    post:
+      tags: [deployment]
+      summary: 串行部署选中的 SSH 节点
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: { type: string }
+                server_ids: { type: array, items: { type: string } }
+                tags: { type: array, items: { type: string } }
+                tag_match: { type: string, enum: [all, any], default: all }
+                dry_run: { type: boolean, default: false }
+      responses:
+        "201": { description: 已创建发布任务 }
+
   /metrics:
     get:
       tags: [health]
@@ -711,6 +870,66 @@ components:
             properties:
               error: { type: string }
   schemas:
+    PushHost:
+      type: object
+      description: SSH 凭据字段刻意不属于响应模型。
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        address: { type: string }
+        port: { type: integer }
+        username: { type: string }
+        auth_mode: { type: string, enum: [private_key, password, agent] }
+        host_key: { type: string }
+        host_key_fingerprint: { type: string }
+        health_check_enabled: { type: boolean }
+        health_check_interval_seconds: { type: integer, minimum: 60, maximum: 604800, default: 3600 }
+        last_check_at: { type: string }
+        last_check_status: { type: string, enum: [unknown, ok, failed] }
+        last_check_error: { type: string }
+        last_check_latency_ms: { type: integer, format: int64 }
+        next_check_at: { type: string }
+    PushHostRequest:
+      type: object
+      required: [name, address, username, auth_mode]
+      properties:
+        name: { type: string }
+        address: { type: string }
+        port: { type: integer, default: 22 }
+        username: { type: string }
+        auth_mode: { type: string, enum: [private_key, password, agent] }
+        credential: { type: string, format: password, writeOnly: true }
+        host_key: { type: string }
+        health_check_enabled: { type: boolean, default: true }
+        health_check_interval_seconds: { type: integer, minimum: 60, maximum: 604800, default: 3600 }
+    PushHostCheck:
+      type: object
+      properties:
+        id: { type: integer }
+        host_id: { type: integer }
+        status: { type: string, enum: [ok, failed] }
+        error: { type: string }
+        latency_ms: { type: integer, format: int64 }
+        trigger: { type: string, enum: [manual, scheduled] }
+        checked_at: { type: string }
+    PushServerBinding:
+      allOf:
+        - $ref: "#/components/schemas/PushServerBindingRequest"
+        - type: object
+          properties:
+            id: { type: integer }
+            host_id: { type: integer }
+            host_name: { type: string }
+    PushServerBindingRequest:
+      type: object
+      required: [server_id, remote_root]
+      properties:
+        server_id: { type: string }
+        labels: { type: string, default: test }
+        content_tags: { type: string }
+        remote_root: { type: string }
+        os: { type: string, default: linux }
+        arch: { type: string, default: amd64 }
     DashboardSnapshot:
       type: object
       properties:

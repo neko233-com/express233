@@ -19,8 +19,9 @@ RUN CGO_ENABLED=0 go build -ldflags "-s -w -X github.com/neko233-com/express233/
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates tzdata wget
 COPY --from=build /out/express233-server /usr/local/bin/
-ENV EXPRESS233_DATA=/data
+ENV EXPRESS233_DATA=/data \
+    EXPRESS233_ADDR=0.0.0.0:23380
 VOLUME /data
 EXPOSE 23380
 ENTRYPOINT ["express233-server"]
-CMD ["-addr", ":23380", "-data", "/data"]
+CMD ["-addr", "0.0.0.0:23380", "-data", "/data"]

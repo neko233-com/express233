@@ -77,6 +77,10 @@
           <svg class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V9M10 19V5M16 19v-7M22 19V2"/><path d="M2 19h22"/></svg>
           <span>数据大盘</span>
         </button>
+        <button type="button" class="sidebar-nav-item admin-only hidden" data-global="agent" data-testid="nav-agent">
+          <svg class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4M8 15h.01M16 15h.01M8 18h8"/></svg>
+          <span>Agent 与节点</span>
+        </button>
         <button type="button" class="sidebar-nav-item" data-global="server">
           <svg class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
           <span>server.yaml</span>
@@ -183,6 +187,40 @@
               <tbody></tbody>
             </table>
           </div>
+        </section>
+      </div>
+
+      <div id="globalAgent" class="global-panel agent-panel hidden admin-only" data-testid="agent-panel">
+        <header class="page-header agent-header">
+          <div>
+            <div class="eyebrow"><span class="status-orb"></span>CONTROL PLANE</div>
+            <h1>Agent 与 SSH 节点</h1>
+            <p class="subtitle">统一验证 Agent HTTP API、加密凭据、节点存活和定时检查记录</p>
+          </div>
+          <div class="toolbar compact">
+            <a class="btn btn-secondary btn-sm" href="/docs/" target="_blank" rel="noopener">
+              <svg class="btn-svg" aria-hidden="true" viewBox="0 0 24 24"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>OpenAPI
+            </a>
+            <button type="button" id="btnAgentReload" class="btn btn-primary btn-sm">
+              <svg class="btn-svg" aria-hidden="true" viewBox="0 0 24 24"><path d="M20 6v5h-5M4 18v-5h5"/><path d="M18.5 9a7 7 0 0 0-12-2M5.5 15a7 7 0 0 0 12 2"/></svg>刷新状态
+            </button>
+          </div>
+        </header>
+        <div id="agentSummary" class="agent-summary" data-testid="agent-summary"></div>
+        <section class="card agent-host-card">
+          <div class="card-title-row">
+            <div><h3 class="card-title">SSH 节点存活</h3><p class="hint">定时任务串行执行；一次连接失败后不重试，等待下一周期。</p></div>
+            <span class="security-pill"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg>凭据加密且不可回读</span>
+          </div>
+          <div id="agentHostList" class="table-wrap" data-testid="agent-host-list"></div>
+          <div id="agentCheckHistory" class="agent-history hidden" data-testid="agent-check-history"></div>
+        </section>
+        <section class="card agent-api-card">
+          <div class="card-title-row">
+            <div><h3 class="card-title">Agent HTTP API</h3><p class="hint">以下清单来自运行中服务，可供自动化 Agent 自发现；请求模型以 OpenAPI 为准。</p></div>
+            <code class="api-origin">/api/agent/capabilities</code>
+          </div>
+          <div id="agentCapabilities" class="agent-capabilities" data-testid="agent-capabilities"></div>
         </section>
       </div>
 
@@ -477,7 +515,9 @@
               <select id="pushHostAuth" class="input"><option value="private_key">private_key（无密码）</option><option value="password">password</option><option value="agent">SSH agent</option></select>
               <input id="pushHostCredential" class="input" type="password" placeholder="私钥或密码（agent 留空）" />
               <input id="pushHostKey" class="input" placeholder="已知 host public key（可留空 TOFU）" />
-              <button type="button" id="btnPushAddHost" class="btn btn-secondary btn-sm">新增 SSH 配置</button>
+              <label class="check-label health-toggle"><input id="pushHostHealthEnabled" type="checkbox" checked />定时存活检查</label>
+              <select id="pushHostHealthInterval" class="input" aria-label="存活检查间隔"><option value="300">每 5 分钟</option><option value="900">每 15 分钟</option><option value="1800">每 30 分钟</option><option value="3600" selected>每 1 小时</option><option value="21600">每 6 小时</option><option value="86400">每 24 小时</option></select>
+              <button type="button" id="btnPushAddHost" class="btn btn-secondary btn-sm"><svg class="btn-svg" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>新增 SSH 配置</button>
             </div>
             <div id="pushHostList" class="table-wrap"></div>
             <div id="pushBindingEditor" class="toolbar wrap hidden">

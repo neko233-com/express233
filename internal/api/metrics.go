@@ -7,11 +7,13 @@ import (
 )
 
 type serverMetrics struct {
-	pullTotal       atomic.Uint64
-	pullErrors      atomic.Uint64
-	previewTotal    atomic.Uint64
-	loginTotal      atomic.Uint64
-	publishTotal    atomic.Uint64
+	pullTotal      atomic.Uint64
+	pullErrors     atomic.Uint64
+	previewTotal   atomic.Uint64
+	loginTotal     atomic.Uint64
+	publishTotal   atomic.Uint64
+	sshCheckTotal  atomic.Uint64
+	sshCheckErrors atomic.Uint64
 }
 
 var metrics serverMetrics
@@ -23,6 +25,8 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	metricCounter(w, "express233_preview_total", "Pull preview requests", metrics.previewTotal.Load())
 	metricCounter(w, "express233_login_total", "Login attempts", metrics.loginTotal.Load())
 	metricCounter(w, "express233_publish_total", "Version publish actions", metrics.publishTotal.Load())
+	metricCounter(w, "express233_ssh_check_total", "Single-attempt SSH health checks", metrics.sshCheckTotal.Load())
+	metricCounter(w, "express233_ssh_check_errors_total", "Failed single-attempt SSH health checks", metrics.sshCheckErrors.Load())
 }
 
 func metricCounter(w http.ResponseWriter, name, help string, value uint64) {
