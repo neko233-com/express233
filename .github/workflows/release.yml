@@ -74,8 +74,8 @@ jobs:
             [ "$GOOS" = windows ] && ext=.exe
             cli="express233-cli-${GOOS}-${GOARCH}${ext}"
             srv="express233-server-${GOOS}-${GOARCH}${ext}"
-            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -ldflags "${LDFLAGS}" -o "dist/${cli}" ./cmd/express233-cli
-            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -ldflags "${LDFLAGS}" -o "dist/${srv}" ./cmd/express233-server
+            env CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -ldflags "${LDFLAGS}" -o "dist/${cli}" ./cmd/express233-cli
+            env CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -ldflags "${LDFLAGS}" -o "dist/${srv}" ./cmd/express233-server
           done
           sha256sum dist/* > dist/SHA256SUMS
 

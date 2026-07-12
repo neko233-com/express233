@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"regexp"
 	"sync"
 
 	"github.com/go-chi/chi/v5"
@@ -11,6 +12,8 @@ import (
 	"github.com/neko233-com/express233/internal/config"
 	"github.com/neko233-com/express233/internal/store"
 )
+
+var safeAPIIdentifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 
 // Server HTTP API 与静态管理页。
 type Server struct {
@@ -23,9 +26,13 @@ type Server struct {
 	updateStatus      systemUpdateStatus
 	updateRunner      func(target, dataDir string) (string, error)
 	pushExecutor      pushExecutor
+	pushDeploymentMu  sync.Mutex
 	pushHealthChecker pushHealthChecker
 	pushHealthMu      sync.Mutex
 	pushHealthOnce    sync.Once
+	logRetentionOnce  sync.Once
+	releaseHookOnce   sync.Once
+	releaseHookMu     sync.Mutex
 }
 
 // New 创建 API 服务。
@@ -63,6 +70,8 @@ func (s *Server) Router() http.Handler {
 	r.Post("/api/logout", s.handleLogout)
 	r.Get("/api/me", s.handleMe)
 	r.Get("/api/project-invites/{token}", s.handlePreviewProjectInvite)
+	r.Get("/api/agent/guide", s.handleAgentGuide)
+	r.Get("/api/agent/guide/{topic}", s.handleAgentGuide)
 
 	r.Route("/api", func(r chi.Router) {
 		r.Use(s.requireLogin)
@@ -144,6 +153,16 @@ func (s *Server) Router() http.Handler {
 				r.Post("/versions/{ver}/file-tags/batch", s.handleBatchVersionFileTags)
 				r.Post("/push-deployments", s.handleCreatePushDeployment)
 				r.Delete("/push-deployments/{deploymentID}", s.handleDeletePushDeployment)
+				r.Post("/push-tasks", s.handleCreatePushTask)
+				r.Put("/push-tasks/{taskID}", s.handleUpdatePushTask)
+				r.Delete("/push-tasks/{taskID}", s.handleDeletePushTask)
+				r.Post("/push-tasks/{taskID}/run", s.handleRunPushTask)
+				r.Post("/release-hooks", s.handleCreateReleaseHook)
+				r.Put("/release-hooks/{hookID}", s.handleUpdateReleaseHook)
+				r.Delete("/release-hooks/{hookID}", s.handleDeleteReleaseHook)
+				r.Post("/release-hooks/{hookID}/trigger", s.handleTriggerReleaseHook)
+				r.Put("/delivery-nodes/{serverID}/desired", s.handleSetDeliveryNodeDesired)
+				r.Delete("/delivery-nodes/{serverID}", s.handleDeleteDeliveryNode)
 			})
 
 			r.Get("/projects/{id}/versions", s.handleListVersions)
@@ -156,6 +175,11 @@ func (s *Server) Router() http.Handler {
 			r.Get("/projects/{id}/logs", s.handleListProjectLogs)
 			r.Get("/projects/{id}/push-deployments", s.handleListPushDeployments)
 			r.Get("/projects/{id}/push-deployments/{deploymentID}", s.handleGetPushDeployment)
+			r.Get("/projects/{id}/push-tasks", s.handleListPushTasks)
+			r.Get("/projects/{id}/push-tasks/{taskID}", s.handleGetPushTask)
+			r.Get("/projects/{id}/release-hooks", s.handleListReleaseHooks)
+			r.Get("/projects/{id}/release-hook-events", s.handleListReleaseHookEvents)
+			r.Get("/projects/{id}/delivery-nodes", s.handleListDeliveryNodes)
 
 			r.Get("/storage/overview", s.handleStorageOverview)
 			r.Get("/storage/tree", s.handleStorageTree)
@@ -171,6 +195,7 @@ func (s *Server) Router() http.Handler {
 	r.Get("/api/pull/server-ids", s.handlePullServerIDs)
 	r.Get("/api/pull/versions", s.handlePullVersions)
 	r.Get("/api/pull/diff", s.handlePullDiff)
+	r.Post("/api/agent/nodes/heartbeat", s.handleDeliveryNodeHeartbeat)
 
 	r.Handle("/docs/*", http.StripPrefix("/docs/", s.docsHandler()))
 	r.Get("/docs", func(w http.ResponseWriter, r *http.Request) {

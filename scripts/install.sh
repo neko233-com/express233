@@ -71,6 +71,19 @@ install_binary() {
     rm -rf "$TMPDIR"
 
     echo "Installed to ${install_dir}/${target}"
+
+    if [ "$os" != "windows" ]; then
+        local runner
+        runner=$(mktemp)
+        curl -fsSL "https://raw.githubusercontent.com/${REPO}/v${ver}/scripts/safe-deploy.sh" -o "$runner"
+        if [ -w "$install_dir" ]; then
+            mv -f "$runner" "${install_dir}/safe-deploy.sh"
+        else
+            sudo mv -f "$runner" "${install_dir}/safe-deploy.sh"
+        fi
+        chmod +x "${install_dir}/safe-deploy.sh" 2>/dev/null || sudo chmod +x "${install_dir}/safe-deploy.sh"
+        echo "Installed safe deployment runner to ${install_dir}/safe-deploy.sh"
+    fi
     echo "Run: express233-cli --help"
 }
 

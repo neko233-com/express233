@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/neko233-com/express233/internal/store"
 )
@@ -131,6 +132,47 @@ func TestRotatingFileWriterRotates(t *testing.T) {
 	}
 	if !strings.Contains(string(current), "abcdefghij") {
 		t.Fatalf("unexpected current log contents: %q", string(current))
+	}
+}
+
+func TestRotatingFileWriterPrunesBackupsOlderThanThirtyDays(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "server.log")
+	oldBackup := path + ".1"
+	if err := os.WriteFile(oldBackup, []byte("expired"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-31 * 24 * time.Hour)
+	if err := os.Chtimes(oldBackup, old, old); err != nil {
+		t.Fatal(err)
+	}
+	writer, err := newRotatingFileWriter(path, 16, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = writer.Close()
+	if _, err := os.Stat(oldBackup); !os.IsNotExist(err) {
+		t.Fatalf("expired runtime log still exists: %v", err)
+	}
+}
+
+func TestRotatingFileWriterRotatesAtDayBoundary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.log")
+	writer, err := newRotatingFileWriter(path, 1024, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = writer.Close() }()
+	if _, err := writer.Write([]byte("day-one\n")); err != nil {
+		t.Fatal(err)
+	}
+	writer.openedDay = time.Now().Add(-24 * time.Hour).Format(time.DateOnly)
+	if _, err := writer.Write([]byte("day-two\n")); err != nil {
+		t.Fatal(err)
+	}
+	backup, err := os.ReadFile(path + ".1")
+	if err != nil || !strings.Contains(string(backup), "day-one") {
+		t.Fatalf("daily backup=%q err=%v", backup, err)
 	}
 }
 

@@ -233,12 +233,22 @@ func (s *Server) handleCreatePushDeployment(w http.ResponseWriter, r *http.Reque
 		errJSON(w, 400, "invalid body")
 		return
 	}
+	deployment, err := s.createPushDeployment(r, pc, req, 0, "")
+	if err != nil {
+		errJSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, deployment)
+}
+
+func (s *Server) createPushDeployment(r *http.Request, pc projectCtx, req createPushDeploymentRequest, taskID int64, taskName string) (*store.PushDeployment, error) {
+	pid := pc.ProjectID
+	var err error
 	if req.TagMatch == "" {
 		req.TagMatch = "all"
 	}
 	if req.TagMatch != "all" && req.TagMatch != "any" {
-		errJSON(w, 400, "tag_match must be all or any")
-		return
+		return nil, fmt.Errorf("tag_match must be all or any")
 	}
 	if len(req.Tags) == 0 {
 		req.Tags = []string{"test"}
@@ -246,35 +256,31 @@ func (s *Server) handleCreatePushDeployment(w http.ResponseWriter, r *http.Reque
 	if req.Version == "" {
 		req.Version, err = s.Store.LatestPublishedVersion(pid)
 		if err != nil {
-			errJSON(w, 400, "version required when no published version exists")
-			return
+			return nil, fmt.Errorf("version required when no published version exists")
 		}
 	}
 	v, err := s.Store.GetVersion(pid, req.Version)
 	if err != nil || v.Status != "published" {
-		errJSON(w, 400, "version must be published")
-		return
+		return nil, fmt.Errorf("version must be published")
 	}
 	targets, err := s.Store.ListPushBindingsForSelector(pc.TenantID, req.ServerIDs, req.Tags, req.TagMatch == "all")
 	if err != nil {
-		errJSON(w, 500, err.Error())
-		return
+		return nil, err
 	}
 	selector, _ := json.Marshal(req)
 	sess, _ := s.currentSession(r)
-	d, err := s.Store.CreatePushDeployment(store.PushDeployment{TenantID: pc.TenantID, ProjectID: pid, Version: req.Version, RequestedBy: sess.Username, Selector: string(selector)}, targets)
+	d, err := s.Store.CreatePushDeployment(store.PushDeployment{TenantID: pc.TenantID, ProjectID: pid, TaskID: taskID, TaskName: taskName, Version: req.Version, RequestedBy: sess.Username, Selector: string(selector)}, targets)
 	if err != nil {
-		errJSON(w, 400, err.Error())
-		return
+		return nil, err
 	}
-	s.auditSession(r, "push.deploy.create", fmt.Sprintf("project_id=%d version=%s targets=%d", pid, req.Version, len(targets)))
+	s.auditSession(r, "push.deploy.create", fmt.Sprintf("project_id=%d task_id=%d task=%s version=%s targets=%d dry_run=%t", pid, taskID, taskName, req.Version, len(targets), req.DryRun))
 	if req.DryRun {
 		s.completePushDryRun(d.ID)
 		d.Status = "success"
 	} else {
 		go s.runPushDeployment(d.ID, pc.TenantID, pc.ProjectName)
 	}
-	writeJSON(w, 201, d)
+	return d, nil
 }
 func (s *Server) completePushDryRun(id int64) {
 	_ = s.Store.MarkPushDeploymentRunning(id)
@@ -318,21 +324,15 @@ func (s *Server) handleGetPushDeployment(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, 200, d)
 }
 func (s *Server) handleDeletePushDeployment(w http.ResponseWriter, r *http.Request) {
-	pid, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	pc, err := s.projectByID(r, pid)
-	if err != nil {
-		errJSON(w, 404, "project not found")
-		return
-	}
-	id, _ := strconv.ParseInt(chi.URLParam(r, "deploymentID"), 10, 64)
-	if err := s.Store.DeletePushDeployment(pc.TenantID, pid, id); err != nil {
-		errJSON(w, 404, "deployment not found")
-		return
-	}
-	w.WriteHeader(204)
+	errJSON(w, http.StatusConflict, "release logs are immutable and retained for 30 days")
 }
 
 func (s *Server) runPushDeployment(id, tenantID int64, projectName string) {
+	// One central process serializes every SSH deployment, including manual
+	// runs and automatic hooks. This prevents overlapping tasks from stopping
+	// the same gateway or game-server node concurrently.
+	s.pushDeploymentMu.Lock()
+	defer s.pushDeploymentMu.Unlock()
 	_ = s.Store.MarkPushDeploymentRunning(id)
 	d, err := s.Store.GetPushDeploymentByID(id)
 	if err != nil {

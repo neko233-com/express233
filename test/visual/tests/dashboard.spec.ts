@@ -32,6 +32,8 @@ test.describe("发布数据大盘", () => {
     await expect(page.getByTestId("dashboard-kpis")).toContainText("上传请求");
     await expect(page.getByTestId("dashboard-kpis")).toContainText("17 B");
     await expect(page.getByTestId("dashboard-chart").locator("svg")).toBeVisible();
+    await expect(page.getByTestId("dashboard-quality-chart").locator("svg")).toBeVisible();
+    await expect(page.getByTestId("dashboard-health")).toContainText("当前交付态势");
     await expect(page.getByTestId("dashboard-daily-table")).toContainText(new Date().toISOString().slice(0, 10));
     await expect(page.getByTestId("dashboard-records-table")).toContainText(projectName);
     await expect(page.getByTestId("dashboard-records-table")).toContainText("game.bin");
@@ -43,6 +45,7 @@ test.describe("发布数据大盘", () => {
     await expect(page.getByTestId("dashboard-panel")).toBeVisible();
     await expect(page.getByTestId("dashboard-days-filter")).toBeVisible();
     await expect(page.getByTestId("dashboard-kpis")).toBeVisible();
+    await expect(page.getByTestId("dashboard-health")).toBeVisible();
     await expect(page.getByTestId("dashboard-daily-table")).toBeVisible();
   });
 });

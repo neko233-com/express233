@@ -100,10 +100,20 @@ CREATE TABLE IF NOT EXISTS versions (
 	if err := s.migratePushDeployments(); err != nil {
 		return err
 	}
+	if err := s.migrateReleaseHooks(); err != nil {
+		return err
+	}
+	if err := s.migrateDeliveryNodes(); err != nil {
+		return err
+	}
 	if err := s.migrateDashboard(); err != nil {
 		return err
 	}
-	return s.migrateLoginProtection()
+	if err := s.migrateLoginProtection(); err != nil {
+		return err
+	}
+	_, err = s.PruneLogs(time.Now())
+	return err
 }
 
 func (s *Store) ensureDefaultAdmin() error {

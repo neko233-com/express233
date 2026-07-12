@@ -13,9 +13,17 @@
 
 ## API
 
-管理员使用 `/api/push/hosts` 创建/维护 SSH 目标，使用 `/api/push/hosts/{hostID}/servers` 绑定一个或多个 `server_id`，然后调用 `/api/projects/{id}/push-deployments`。请求可传 `server_ids`、`tags` 与 `tag_match` (`all` 或 `any`)；先使用 `dry_run: true` 检查选择结果。
+管理员在全局 Agent / SSH 资源页使用 `/api/push/hosts` 创建、维护 SSH 目标，并通过 `/api/push/hosts/{hostID}/servers` 绑定一个或多个 `server_id`。项目发布页不再管理机器，而是通过 `/api/projects/{id}/push-tasks` 保存版本策略、`server_ids`、`tags` 与 `tag_match` (`all` 或 `any`)。调用 `/api/projects/{id}/push-tasks/{taskID}/run` 可重复预演或正式执行；每次执行都会将任务名称、实际版本和筛选条件快照到发布日志。
 
-凭据字段只接受一次，所有读取接口都不会返回 SSH 密码或私钥。部署日志会记录目标和命令输出，但不会记录凭据。
+凭据字段只接受一次，所有读取接口都不会返回 SSH 密码或私钥。部署日志会记录目标和命令输出，但不会记录凭据。发布日志、逐目标输出、SSH 检查、上传、拉取、审计与安全记录均按 30 天滑动窗口清理；发布日志不可手工删除，删除任务定义不会影响历史执行快照。
+
+### 版本发布自动 Hook
+
+- 在项目“自动 Hook”页将一个 Hook 关联到可重复发布任务。Hook 可随时启停；停用会取消仍在等待窗口内的触发，不需要反复删除和重建。
+- `POST /api/projects/{id}/versions/{ver}/publish` 成功后会自动触发所有已启用 Hook。发布接口是幂等的：CI 对已发布版本重试会作为新的 Hook 触发进入同一合并窗口。
+- 默认使用 30 秒尾随防抖。窗口内的新触发会刷新 `due_at` 并覆盖为最新触发版本；最终只创建一次 SSH 发布任务，批量目标仍按发布任务定义串行安全重启。
+- 等待队列存储在 SQLite，中央服务重启不会丢失。每次派发使用 `hook_event_id` 作为唯一幂等键；超过租约时间的 `running` 事件会恢复，并复用已经创建的发布记录。多个到期 Hook 全局串行执行，避免两个任务同时重启重叠节点。也可调用 `POST /api/projects/{id}/release-hooks/{hookID}/trigger` 手动或由 Gitea/GitHub CI 显式触发。
+- Hook 触发、合并、派发和失败均保存 30 天，但不会保存 HTTP 密码、Token、SSH 凭据或上传包内容。Prometheus 提供 `express233_release_hook_triggers_total`、`express233_release_hook_merges_total`、`express233_release_hook_dispatches_total` 和 `express233_release_hook_failures_total`。
 
 ### SSH 存活检测
 

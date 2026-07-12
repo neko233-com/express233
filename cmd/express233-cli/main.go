@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/neko233-com/express233/internal/cli"
 )
@@ -18,6 +22,8 @@ func main() {
 		runPull(os.Args[1], os.Args[2:])
 	case "pull-batch":
 		runPullBatch(os.Args[2:])
+	case "agent":
+		runAgent(os.Args[2:])
 	case "preview":
 		runPreview(os.Args[2:])
 	case "servers":
@@ -58,6 +64,30 @@ func main() {
 		usage()
 		os.Exit(1)
 	}
+}
+
+func runAgent(args []string) {
+	fs := flag.NewFlagSet("agent", flag.ExitOnError)
+	opts := cli.AgentOptions{}
+	fs.StringVar(&opts.ServerURL, "server", os.Getenv("EXPRESS233_SERVER"), "express233-server base URL")
+	fs.StringVar(&opts.Project, "project", os.Getenv("EXPRESS233_PROJECT"), "project name")
+	fs.StringVar(&opts.ServerID, "server-id", os.Getenv("EXPRESS233_SERVER_ID"), "server id")
+	fs.StringVar(&opts.Token, "token", os.Getenv("EXPRESS233_TOKEN"), "pull token")
+	fs.StringVar(&opts.Username, "username", os.Getenv("EXPRESS233_USERNAME"), "account username")
+	fs.StringVar(&opts.Password, "password", os.Getenv("EXPRESS233_PASSWORD"), "account password")
+	fs.StringVar(&opts.RootDir, "root", os.Getenv("GAME_ROOT"), "isolated game-server root")
+	fs.StringVar(&opts.Runner, "runner", os.Getenv("EXPRESS233_AGENT_RUNNER"), "safe deployment runner (.sh or .ps1)")
+	fs.StringVar(&opts.Role, "role", os.Getenv("EXPRESS233_NODE_ROLE"), "node role, such as gateway or logic")
+	fs.StringVar(&opts.Environment, "environment", os.Getenv("EXPRESS233_NODE_ENV"), "node environment")
+	fs.Var((*stringSliceFlag)(&opts.Labels), "label", "node/content label; repeatable")
+	fs.StringVar(&opts.OS, "os", "", "node OS (default current GOOS)")
+	fs.StringVar(&opts.Arch, "arch", "", "node architecture (default current GOARCH)")
+	fs.DurationVar(&opts.Interval, "interval", time.Minute, "heartbeat/reconciliation interval (10s to 1h)")
+	fs.BoolVar(&opts.Once, "once", false, "run exactly one reconciliation cycle")
+	_ = fs.Parse(args)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	fatal(cli.RunAgent(ctx, opts))
 }
 
 func pullFlags(args []string) (cli.PullOptions, *flag.FlagSet) {
@@ -248,7 +278,7 @@ func runPreview(args []string) {
 }
 
 func usage() {
-	fmt.Print(`express233-cli - 游戏逻辑服拉模式部署 CLI
+	fmt.Print(`express233-cli - 游戏服务器统一推/拉交付 CLI
 
 一行部署（SSH 上执行）:
   EXPRESS233_SERVER=http://central:23380 EXPRESS233_TOKEN=xxx \
@@ -263,7 +293,8 @@ func usage() {
   doctor        检查中央服务 / token / server_id 是否就绪
   rollback      回滚到上一已发布版本（或 --to 指定版本）
   diff          对比两版本在 server_id 下的配置键差异（token）
-  pull-batch    按文件批量拉取（每行 server_id 或 server_id,dest）
+	pull-batch    按文件批量拉取（每行 server_id 或 server_id,dest）
+	agent         常驻 Pull Agent：心跳、期望状态收敛、安全替换与确认
   upgrade|downgrade|install  CLI 自更新
   version
 
@@ -272,6 +303,10 @@ pull/deploy 参数:
 
 pull-batch:
   --file servers.csv --server URL --project NAME (--token TOKEN 或 --username USER --password PASS)
+
+agent:
+  --server URL --project NAME --server-id ID (--token TOKEN 或 --username USER --password PASS)
+  [--root PATH] [--runner safe-deploy.sh|safe-deploy.ps1] [--interval 1m] [--role ROLE] [--environment ENV] [--label LABEL]
 
 环境变量:
   EXPRESS233_SERVER / EXPRESS233_TOKEN / EXPRESS233_USERNAME / EXPRESS233_PASSWORD / EXPRESS233_PROJECT / EXPRESS233_SERVER_ID

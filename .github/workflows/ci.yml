@@ -52,8 +52,8 @@ jobs:
           for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
             GOOS=${target%/*}; GOARCH=${target#*/}; ext=""
             [ "$GOOS" = windows ] && ext=.exe
-            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -ldflags "${LDFLAGS}" -o "bin/express233-cli-${GOOS}-${GOARCH}${ext}" ./cmd/express233-cli
-            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -ldflags "${LDFLAGS}" -o "bin/express233-server-${GOOS}-${GOARCH}${ext}" ./cmd/express233-server
+            env CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -ldflags "${LDFLAGS}" -o "bin/express233-cli-${GOOS}-${GOARCH}${ext}" ./cmd/express233-cli
+            env CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -ldflags "${LDFLAGS}" -o "bin/express233-server-${GOOS}-${GOARCH}${ext}" ./cmd/express233-server
           done
           sha256sum bin/* > bin/SHA256SUMS
 

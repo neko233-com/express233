@@ -33,7 +33,11 @@ function Install-Express233Cli {
 
     Write-Host "Downloading $url ..."
     Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+    $runnerUrl = "https://raw.githubusercontent.com/$Repo/v$Ver/scripts/safe-deploy.ps1"
+    $runnerDest = Join-Path $installDir "safe-deploy.ps1"
+    Invoke-WebRequest -Uri $runnerUrl -OutFile $runnerDest -UseBasicParsing
     Write-Host "Installed to $dest"
+    Write-Host "Installed safe deployment runner to $runnerDest"
     Write-Host "Add to PATH: $installDir"
     Write-Host "Run: express233-cli version"
 }

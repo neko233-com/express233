@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/neko233-com/express233/internal/pull"
 	"github.com/neko233-com/express233/internal/store"
@@ -72,6 +73,13 @@ func (s *Server) handlePull(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	metrics.pullTotal.Add(1)
+	// Legacy one-shot pulls are visible in the unified node inventory. A
+	// registration failure must not corrupt an already streamed bundle.
+	_, _ = s.Store.HeartbeatDeliveryNode(store.DeliveryNodeHeartbeat{
+		TenantID: tid, ProjectID: p.ID, ServerID: serverID, Labels: extraTags,
+		OS: osName, Arch: arch, CurrentVersion: version, Status: "ok",
+		HeartbeatIntervalSeconds: 3600,
+	}, time.Now())
 	s.recordPullProjectLog(r, tid, p.ID, username, project, version, serverID, osName, arch, extraTags, "ok", "")
 	s.audit(r, username, "pull", "project="+project+" version="+version+" server_id="+serverID+" os="+osName+" arch="+arch)
 }

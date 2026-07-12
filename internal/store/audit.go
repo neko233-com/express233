@@ -45,8 +45,8 @@ func (s *Store) ListAuditLogs(limit int) ([]AuditEntry, error) {
 		limit = 100
 	}
 	rows, err := s.db.Query(
-		`SELECT id, at, username, action, detail, ip FROM audit_logs ORDER BY id DESC LIMIT ?`,
-		limit,
+		`SELECT id, at, username, action, detail, ip FROM audit_logs WHERE at>=? ORDER BY id DESC LIMIT ?`,
+		time.Now().Add(-LogRetention).Format(timeLayout), limit,
 	)
 	if err != nil {
 		return nil, err

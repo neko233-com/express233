@@ -52,8 +52,17 @@ func TestDashboardAggregatesAndScopesProjects(t *testing.T) {
 	if _, err := st.db.Exec(`INSERT INTO push_deployments(tenant_id,project_id,version,requested_by,selector,status,created_at,started_at,completed_at) VALUES(1,?,?,?,?,?,?,?,?)`, p1.ID, "1.0.0", "ci", "111", "success", now, now, now); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := st.HeartbeatDeliveryNode(DeliveryNodeHeartbeat{TenantID: 1, ProjectID: p1.ID, ServerID: "logic-dashboard-01", CurrentVersion: "1.0.0", Status: "ok", HeartbeatIntervalSeconds: 30}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SetDeliveryNodeDesired(1, p1.ID, "logic-dashboard-01", "1.1.0", boolPtr(true), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreatePushHost(PushHost{TenantID: 1, Name: "dashboard-ssh", Address: "127.0.0.1", Port: 1, Username: "fixture", AuthMode: "agent"}, ""); err != nil {
+		t.Fatal(err)
+	}
 
-	dashboard, err := st.Dashboard([]int64{p1.ID}, 7)
+	dashboard, err := st.Dashboard(1, []int64{p1.ID}, 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,4 +81,9 @@ func TestDashboardAggregatesAndScopesProjects(t *testing.T) {
 			t.Fatalf("inaccessible project leaked into dashboard: %+v", record)
 		}
 	}
+	if dashboard.Health.PullNodes != 1 || dashboard.Health.PullOnline != 1 || dashboard.Health.PullDrift != 1 || dashboard.Health.SSHHosts != 1 || dashboard.Health.SSHUnknown != 1 || dashboard.Health.LatestEventAt == "" {
+		t.Fatalf("health summary: %+v", dashboard.Health)
+	}
 }
+
+func boolPtr(value bool) *bool { return &value }

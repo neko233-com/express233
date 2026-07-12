@@ -43,6 +43,9 @@ func (s *Server) handlePutVersionFileTags(w http.ResponseWriter, r *http.Request
 		errJSON(w, http.StatusNotFound, "project not found")
 		return
 	}
+	if !s.requireMutableVersion(w, pc, ver) {
+		return
+	}
 	var req fileTagsReq
 	if err := readJSON(r, &req); err != nil || req.Path == "" {
 		errJSON(w, http.StatusBadRequest, "path required")
@@ -70,6 +73,9 @@ func (s *Server) handleDeleteVersionFileTags(w http.ResponseWriter, r *http.Requ
 		errJSON(w, http.StatusNotFound, "project not found")
 		return
 	}
+	if !s.requireMutableVersion(w, pc, ver) {
+		return
+	}
 	if err := s.Store.ClearVersionFileTags(pc.TenantID, pc.ProjectName, ver, path); err != nil {
 		errJSON(w, http.StatusBadRequest, err.Error())
 		return
@@ -84,6 +90,9 @@ func (s *Server) handleBatchVersionFileTags(w http.ResponseWriter, r *http.Reque
 	pc, err := s.projectByID(r, pid)
 	if err != nil {
 		errJSON(w, http.StatusNotFound, "project not found")
+		return
+	}
+	if !s.requireMutableVersion(w, pc, ver) {
 		return
 	}
 	var req fileTagsBatchReq

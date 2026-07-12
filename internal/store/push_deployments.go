@@ -44,7 +44,7 @@ type PushHostCheck struct {
 }
 
 const defaultPushHealthCheckIntervalSeconds = 3600
-const pushHostCheckRetention = 400 * 24 * time.Hour
+const pushHostCheckRetention = LogRetention
 
 // PushServerBinding describes one independently deployable server on a host.
 // Labels select targets (for example test, canary, cn), while ContentTags
@@ -68,6 +68,9 @@ type PushDeployment struct {
 	ID          int64                  `json:"id"`
 	TenantID    int64                  `json:"tenant_id,omitempty"`
 	ProjectID   int64                  `json:"project_id"`
+	TaskID      int64                  `json:"task_id,omitempty"`
+	TaskName    string                 `json:"task_name,omitempty"`
+	HookEventID int64                  `json:"hook_event_id,omitempty"`
 	Version     string                 `json:"version"`
 	RequestedBy string                 `json:"requested_by"`
 	Selector    string                 `json:"selector"`
@@ -130,6 +133,9 @@ CREATE TABLE IF NOT EXISTS push_deployments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tenant_id INTEGER NOT NULL,
   project_id INTEGER NOT NULL,
+  task_id INTEGER NOT NULL DEFAULT 0,
+  task_name TEXT NOT NULL DEFAULT '',
+  hook_event_id INTEGER NOT NULL DEFAULT 0,
   version TEXT NOT NULL,
   requested_by TEXT NOT NULL,
   selector TEXT NOT NULL,
@@ -137,6 +143,23 @@ CREATE TABLE IF NOT EXISTS push_deployments (
   created_at TEXT NOT NULL,
   started_at TEXT NOT NULL DEFAULT '',
   completed_at TEXT NOT NULL DEFAULT '',
+  FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS push_deployment_tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id INTEGER NOT NULL,
+  project_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  version TEXT NOT NULL DEFAULT '',
+  server_ids TEXT NOT NULL DEFAULT '[]',
+  tags TEXT NOT NULL DEFAULT '["test"]',
+  tag_match TEXT NOT NULL DEFAULT 'all',
+  created_by TEXT NOT NULL DEFAULT '',
+  run_count INTEGER NOT NULL DEFAULT 0,
+  last_run_at TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(project_id, name),
   FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS push_deployment_targets (
@@ -167,6 +190,7 @@ CREATE TABLE IF NOT EXISTS push_host_checks (
 );
 CREATE INDEX IF NOT EXISTS idx_push_bindings_tenant_server ON push_server_bindings(tenant_id, server_id);
 CREATE INDEX IF NOT EXISTS idx_push_deployments_project ON push_deployments(project_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_push_tasks_project ON push_deployment_tasks(project_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_push_targets_deployment ON push_deployment_targets(deployment_id, id);
 CREATE INDEX IF NOT EXISTS idx_push_host_checks_host ON push_host_checks(host_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_push_host_checks_checked_at ON push_host_checks(checked_at);
@@ -183,6 +207,10 @@ CREATE INDEX IF NOT EXISTS idx_push_host_checks_checked_at ON push_host_checks(c
 	_, _ = s.db.Exec(`ALTER TABLE push_hosts ADD COLUMN last_check_error TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE push_hosts ADD COLUMN last_check_latency_ms INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE push_hosts ADD COLUMN next_check_at TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE push_deployments ADD COLUMN task_id INTEGER NOT NULL DEFAULT 0`)
+	_, _ = s.db.Exec(`ALTER TABLE push_deployments ADD COLUMN task_name TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE push_deployments ADD COLUMN hook_event_id INTEGER NOT NULL DEFAULT 0`)
+	_, _ = s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_push_deployments_hook_event ON push_deployments(hook_event_id) WHERE hook_event_id>0`)
 	_, _ = s.db.Exec(`UPDATE push_hosts SET next_check_at=? WHERE health_check_enabled=1 AND next_check_at=''`, time.Now().Format(timeLayout))
 	return nil
 }
@@ -530,7 +558,7 @@ func (s *Store) CreatePushDeployment(d PushDeployment, targets []PushServerBindi
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	res, err := tx.Exec(`INSERT INTO push_deployments(tenant_id,project_id,version,requested_by,selector,status,created_at) VALUES(?,?,?,?,?,?,?)`, d.TenantID, d.ProjectID, d.Version, d.RequestedBy, d.Selector, "queued", now)
+	res, err := tx.Exec(`INSERT INTO push_deployments(tenant_id,project_id,task_id,task_name,hook_event_id,version,requested_by,selector,status,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, d.TenantID, d.ProjectID, d.TaskID, d.TaskName, d.HookEventID, d.Version, d.RequestedBy, d.Selector, "queued", now)
 	if err != nil {
 		return nil, err
 	}
@@ -538,6 +566,11 @@ func (s *Store) CreatePushDeployment(d PushDeployment, targets []PushServerBindi
 	d.Status, d.CreatedAt = "queued", now
 	for _, b := range targets {
 		if _, err := tx.Exec(`INSERT INTO push_deployment_targets(deployment_id,host_id,host_name,binding_id,server_id,labels,status,created_at) VALUES(?,?,?,?,?,?,?,?)`, d.ID, b.HostID, b.HostName, b.ID, b.ServerID, b.Labels, "queued", now); err != nil {
+			return nil, err
+		}
+	}
+	if d.TaskID > 0 {
+		if _, err := tx.Exec(`UPDATE push_deployment_tasks SET run_count=run_count+1,last_run_at=?,updated_at=? WHERE tenant_id=? AND project_id=? AND id=?`, now, now, d.TenantID, d.ProjectID, d.TaskID); err != nil {
 			return nil, err
 		}
 	}
@@ -551,15 +584,15 @@ func (s *Store) ListPushDeployments(tenantID, projectID int64, limit int) ([]Pus
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	rows, err := s.db.Query(`SELECT id,tenant_id,project_id,version,requested_by,selector,status,created_at,started_at,completed_at FROM push_deployments WHERE tenant_id=? AND project_id=? ORDER BY id DESC LIMIT ?`, tenantID, projectID, limit)
+	rows, err := s.db.Query(`SELECT id,tenant_id,project_id,task_id,task_name,hook_event_id,version,requested_by,selector,status,created_at,started_at,completed_at FROM push_deployments WHERE tenant_id=? AND project_id=? AND created_at>=? ORDER BY id DESC LIMIT ?`, tenantID, projectID, time.Now().Add(-LogRetention).Format(timeLayout), limit)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	var out []PushDeployment
+	out := make([]PushDeployment, 0)
 	for rows.Next() {
 		var d PushDeployment
-		if err := rows.Scan(&d.ID, &d.TenantID, &d.ProjectID, &d.Version, &d.RequestedBy, &d.Selector, &d.Status, &d.CreatedAt, &d.StartedAt, &d.CompletedAt); err != nil {
+		if err := rows.Scan(&d.ID, &d.TenantID, &d.ProjectID, &d.TaskID, &d.TaskName, &d.HookEventID, &d.Version, &d.RequestedBy, &d.Selector, &d.Status, &d.CreatedAt, &d.StartedAt, &d.CompletedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, d)
@@ -568,7 +601,7 @@ func (s *Store) ListPushDeployments(tenantID, projectID int64, limit int) ([]Pus
 }
 func (s *Store) GetPushDeployment(tenantID, projectID, id int64) (*PushDeployment, error) {
 	var d PushDeployment
-	err := s.db.QueryRow(`SELECT id,tenant_id,project_id,version,requested_by,selector,status,created_at,started_at,completed_at FROM push_deployments WHERE tenant_id=? AND project_id=? AND id=?`, tenantID, projectID, id).Scan(&d.ID, &d.TenantID, &d.ProjectID, &d.Version, &d.RequestedBy, &d.Selector, &d.Status, &d.CreatedAt, &d.StartedAt, &d.CompletedAt)
+	err := s.db.QueryRow(`SELECT id,tenant_id,project_id,task_id,task_name,hook_event_id,version,requested_by,selector,status,created_at,started_at,completed_at FROM push_deployments WHERE tenant_id=? AND project_id=? AND id=? AND created_at>=?`, tenantID, projectID, id, time.Now().Add(-LogRetention).Format(timeLayout)).Scan(&d.ID, &d.TenantID, &d.ProjectID, &d.TaskID, &d.TaskName, &d.HookEventID, &d.Version, &d.RequestedBy, &d.Selector, &d.Status, &d.CreatedAt, &d.StartedAt, &d.CompletedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -585,6 +618,13 @@ func (s *Store) GetPushDeployment(tenantID, projectID, id int64) (*PushDeploymen
 		d.Targets = append(d.Targets, t)
 	}
 	return &d, rows.Err()
+}
+func (s *Store) GetPushDeploymentByHookEvent(eventID int64) (*PushDeployment, error) {
+	var tenantID, projectID, id int64
+	if err := s.db.QueryRow(`SELECT id,tenant_id,project_id FROM push_deployments WHERE hook_event_id=?`, eventID).Scan(&id, &tenantID, &projectID); err != nil {
+		return nil, err
+	}
+	return s.GetPushDeployment(tenantID, projectID, id)
 }
 func (s *Store) GetPushDeploymentByID(id int64) (*PushDeployment, error) {
 	var tenantID, projectID int64

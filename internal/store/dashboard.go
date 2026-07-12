@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-const dashboardRetention = 400 * 24 * time.Hour
+const dashboardRetention = LogRetention
 
 // UploadEvent is a normalized, tenant-scoped record of one upload request.
 // Archive bytes are the transferred archive size; file_count is the number of
@@ -66,6 +66,23 @@ type DashboardSummary struct {
 	AverageDeploymentMillis int64   `json:"average_deployment_millis"`
 }
 
+// DashboardHealth is a point-in-time topology and automation snapshot. Unlike
+// the daily series, these values describe what needs attention right now.
+// SSH host health is tenant-scoped because hosts may be reused by projects.
+type DashboardHealth struct {
+	PullNodes     int64  `json:"pull_nodes"`
+	PullOnline    int64  `json:"pull_online"`
+	PullDrift     int64  `json:"pull_drift"`
+	SSHHosts      int64  `json:"ssh_hosts"`
+	SSHHealthy    int64  `json:"ssh_healthy"`
+	SSHFailing    int64  `json:"ssh_failing"`
+	SSHUnknown    int64  `json:"ssh_unknown"`
+	HooksEnabled  int64  `json:"hooks_enabled"`
+	HooksPending  int64  `json:"hooks_pending"`
+	HookFailures  int64  `json:"hook_failures"`
+	LatestEventAt string `json:"latest_event_at,omitempty"`
+}
+
 type DashboardRecord struct {
 	At        string `json:"at"`
 	Kind      string `json:"kind"`
@@ -84,6 +101,7 @@ type DashboardSnapshot struct {
 	GeneratedAt string            `json:"generated_at"`
 	Days        int               `json:"days"`
 	Summary     DashboardSummary  `json:"summary"`
+	Health      DashboardHealth   `json:"health"`
 	Series      []DashboardDay    `json:"series"`
 	Recent      []DashboardRecord `json:"recent"`
 }
@@ -215,12 +233,12 @@ func dashboardPlaceholders(ids []int64) (string, []any) {
 	return strings.Join(parts, ","), args
 }
 
-func (s *Store) Dashboard(projectIDs []int64, days int) (*DashboardSnapshot, error) {
+func (s *Store) Dashboard(tenantID int64, projectIDs []int64, days int) (*DashboardSnapshot, error) {
 	if days < 1 {
 		days = 30
 	}
-	if days > 365 {
-		days = 365
+	if days > 30 {
+		days = 30
 	}
 	now := time.Now()
 	startDay := now.AddDate(0, 0, -(days - 1))
@@ -236,6 +254,9 @@ func (s *Store) Dashboard(projectIDs []int64, days int) (*DashboardSnapshot, err
 		return snapshot, nil
 	}
 	in, idArgs := dashboardPlaceholders(projectIDs)
+	if err := s.populateDashboardHealth(&snapshot.Health, tenantID, in, idArgs); err != nil {
+		return nil, err
+	}
 	queryDaily := func(query string, scan func(*sql.Rows) error, args ...any) error {
 		rows, err := s.db.Query(query, args...)
 		if err != nil {
@@ -373,4 +394,45 @@ UNION ALL SELECT d.created_at,'deploy',d.project_id,p.name,d.version,d.status,d.
 	}
 	sort.SliceStable(snapshot.Recent, func(i, j int) bool { return snapshot.Recent[i].At > snapshot.Recent[j].At })
 	return snapshot, nil
+}
+
+func (s *Store) populateDashboardHealth(health *DashboardHealth, tenantID int64, projectPlaceholders string, projectArgs []any) error {
+	rows, err := s.db.Query(`SELECT current_version,desired_version,desired_generation,applied_generation,heartbeat_interval_seconds,last_seen_at FROM delivery_nodes WHERE tenant_id=? AND project_id IN (`+projectPlaceholders+`) AND delivery_mode='pull'`, append([]any{tenantID}, projectArgs...)...)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	now := time.Now()
+	for rows.Next() {
+		var current, desired, lastSeen string
+		var desiredGeneration, appliedGeneration int64
+		var interval int
+		if err := rows.Scan(&current, &desired, &desiredGeneration, &appliedGeneration, &interval, &lastSeen); err != nil {
+			return err
+		}
+		health.PullNodes++
+		if desired != "" && (current != desired || appliedGeneration < desiredGeneration) {
+			health.PullDrift++
+		}
+		seenAt, _ := time.ParseInLocation(timeLayout, lastSeen, time.Local)
+		grace := time.Duration(max(30, interval*2)) * time.Second
+		if !seenAt.IsZero() && now.Sub(seenAt) <= grace {
+			health.PullOnline++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*),COALESCE(SUM(CASE WHEN last_check_status='ok' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN last_check_status='failed' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN last_check_status='' OR last_check_status='unknown' THEN 1 ELSE 0 END),0) FROM push_hosts WHERE tenant_id=?`, tenantID).Scan(&health.SSHHosts, &health.SSHHealthy, &health.SSHFailing, &health.SSHUnknown); err != nil {
+		return err
+	}
+	if err := s.db.QueryRow(`SELECT COALESCE(SUM(CASE WHEN enabled=1 THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN pending_events>0 THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN last_status='failed' THEN 1 ELSE 0 END),0) FROM release_hooks WHERE tenant_id=? AND project_id IN (`+projectPlaceholders+`)`, append([]any{tenantID}, projectArgs...)...).Scan(&health.HooksEnabled, &health.HooksPending, &health.HookFailures); err != nil {
+		return err
+	}
+	_ = s.db.QueryRow(`SELECT COALESCE(MAX(at),'') FROM (
+SELECT at FROM upload_events WHERE tenant_id=? AND project_id IN (`+projectPlaceholders+`)
+UNION ALL SELECT at FROM project_logs WHERE tenant_id=? AND project_id IN (`+projectPlaceholders+`)
+UNION ALL SELECT created_at FROM push_deployments WHERE tenant_id=? AND project_id IN (`+projectPlaceholders+`)
+)`, append(append(append([]any{tenantID}, projectArgs...), append([]any{tenantID}, projectArgs...)...), append([]any{tenantID}, projectArgs...)...)...).Scan(&health.LatestEventAt)
+	return nil
 }

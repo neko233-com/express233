@@ -6,10 +6,12 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/neko233-com/express233/internal/store"
@@ -149,13 +151,41 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, http.StatusForbidden, "project admin required")
 		return
 	}
-	if err := s.Store.PublishVersion(tid, pid, ver); err != nil {
-		errJSON(w, http.StatusBadRequest, err.Error())
+	v, err := s.Store.GetVersion(pid, ver)
+	if err != nil {
+		errJSON(w, http.StatusNotFound, "version not found")
 		return
 	}
-	metrics.publishTotal.Add(1)
-	s.auditSession(r, "version.publish", "project_id="+chi.URLParam(r, "id")+" version="+ver)
-	v, _ := s.Store.GetVersion(pid, ver)
+	alreadyPublished := v.Status == "published"
+	if !alreadyPublished {
+		if err := s.Store.PublishVersion(tid, pid, ver); err != nil {
+			errJSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		metrics.publishTotal.Add(1)
+	}
+	session, _ := s.currentSession(r)
+	hooks, err := s.Store.QueueProjectReleaseHooks(tid, pid, ver, session.Username, "version_publish", time.Now())
+	if err != nil {
+		s.auditSession(r, "release.hook.queue_failed", "project_id="+chi.URLParam(r, "id")+" version="+ver+" error="+err.Error())
+		errJSON(w, http.StatusInternalServerError, "version is published but release hooks could not be queued; retry this publish request")
+		return
+	}
+	pullNodes, err := s.Store.AdvanceAutoFollowDeliveryNodes(tid, pid, ver, time.Now())
+	if err != nil {
+		s.auditSession(r, "delivery.desired.advance_failed", "project_id="+chi.URLParam(r, "id")+" version="+ver+" error="+err.Error())
+		errJSON(w, http.StatusInternalServerError, "version is published but pull-agent desired state could not be advanced; retry this publish request")
+		return
+	}
+	metrics.desiredStateChanges.Add(uint64(pullNodes))
+	metrics.hookTriggers.Add(uint64(len(hooks)))
+	for _, hook := range hooks {
+		if hook.PendingEvents > 1 {
+			metrics.hookMerges.Add(1)
+		}
+	}
+	s.auditSession(r, "version.publish", fmt.Sprintf("project_id=%d version=%s replay=%t queued_hooks=%d advanced_pull_nodes=%d", pid, ver, alreadyPublished, len(hooks), pullNodes))
+	v, _ = s.Store.GetVersion(pid, ver)
 	_ = pname
 	writeJSON(w, http.StatusOK, v)
 }
@@ -259,6 +289,9 @@ func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 	pc, err := s.projectByID(r, pid)
 	if err != nil {
 		errJSON(w, http.StatusNotFound, "project not found")
+		return
+	}
+	if !s.requireMutableVersion(w, pc, ver) {
 		return
 	}
 	tid, pname := pc.TenantID, pc.ProjectName
@@ -393,6 +426,9 @@ func (s *Server) handleDeleteVersionFile(w http.ResponseWriter, r *http.Request)
 	pc, err := s.projectByID(r, pid)
 	if err != nil {
 		errJSON(w, http.StatusNotFound, "project not found")
+		return
+	}
+	if !s.requireMutableVersion(w, pc, ver) {
 		return
 	}
 	tid, pname := pc.TenantID, pc.ProjectName

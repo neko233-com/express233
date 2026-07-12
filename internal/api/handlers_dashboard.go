@@ -60,11 +60,11 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	if days == 0 {
 		days = 30
 	}
-	if days < 1 || days > 365 {
-		errJSON(w, http.StatusBadRequest, "days must be between 1 and 365")
+	if days < 1 || days > 30 {
+		errJSON(w, http.StatusBadRequest, "days must be between 1 and 30 because logs use a 30-day rolling retention window")
 		return
 	}
-	dashboard, err := s.Store.Dashboard(ids, days)
+	dashboard, err := s.Store.Dashboard(tid, ids, days)
 	if err != nil {
 		errJSON(w, http.StatusInternalServerError, err.Error())
 		return

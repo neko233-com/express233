@@ -92,6 +92,7 @@ else
     --server-id "$SERVER_ID" \
     --dest "$TMP_DIR" \
     --skip-hook \
+    --retries 1 \
     "${TAG_ARGS[@]}" \
     "${VERSION_ARGS[@]}"
   log "pull complete: $(find "$TMP_DIR" -type f | wc -l) files"

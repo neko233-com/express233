@@ -2,10 +2,10 @@ openapi: 3.0.3
 info:
   title: express233-server API
   description: |
-    游戏逻辑服拉模式部署中央服务 API。
+    游戏服务器集群推/拉一体交付控制平面 API。
 
     - **管理端**：Cookie 会话（`POST /api/login`）或 HTTP Basic Auth（初始化可用 `root/root`）
-    - **节点端**：拉取 Token（`token` 查询参数）
+    - **节点端**：拉取 Token（下载使用 `token` 查询参数；Agent 心跳使用 `X-Express233-Token` 请求头）或 HTTP Basic Auth
   version: 1.0.0
 servers:
   - url: http://localhost:23380
@@ -21,6 +21,7 @@ tags:
   - name: agent
   - name: ssh
   - name: deployment
+  - name: delivery
 
 paths:
   /healthz:
@@ -744,6 +745,174 @@ paths:
       responses:
         "201": { description: 已创建发布任务 }
 
+  /api/projects/{id}/push-tasks:
+    get:
+      tags: [deployment]
+      summary: 查询项目的可重复发布任务
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/PushDeploymentTask" } }
+    post:
+      tags: [deployment]
+      summary: 创建可重复发布任务
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PushDeploymentTaskRequest" }
+      responses:
+        "201":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PushDeploymentTask" }
+
+  /api/projects/{id}/push-tasks/{taskID}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer } }
+      - { name: taskID, in: path, required: true, schema: { type: integer } }
+    get:
+      tags: [deployment]
+      summary: 获取可重复发布任务
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PushDeploymentTask" }
+    put:
+      tags: [deployment]
+      summary: 更新可重复发布任务
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PushDeploymentTaskRequest" }
+      responses:
+        "204": { description: 已更新 }
+    delete:
+      tags: [deployment]
+      summary: 删除任务定义（历史执行日志不受影响）
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      responses:
+        "204": { description: 已删除任务定义 }
+
+  /api/projects/{id}/push-tasks/{taskID}/run:
+    post:
+      tags: [deployment]
+      summary: 重复执行发布任务并生成不可变日志快照
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: taskID, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: { type: string, description: 可选的单次版本覆盖 }
+                dry_run: { type: boolean, default: false }
+      responses:
+        "201":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PushDeployment" }
+
+  /api/projects/{id}/release-hooks:
+    get:
+      tags: [hooks]
+      summary: 查询项目的版本发布 Hook
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ReleaseHook" } }
+    post:
+      tags: [hooks]
+      summary: 创建可启停的版本发布 Hook
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReleaseHookRequest" }
+      responses:
+        "201":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReleaseHook" }
+
+  /api/projects/{id}/release-hooks/{hookID}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer } }
+      - { name: hookID, in: path, required: true, schema: { type: integer } }
+    put:
+      tags: [hooks]
+      summary: 更新或启停 Hook；停用时取消尚未派发的等待任务
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReleaseHookRequest" }
+      responses:
+        "204": { description: 已更新 }
+    delete:
+      tags: [hooks]
+      summary: 删除 Hook 定义，30 天事件历史不删除
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      responses:
+        "204": { description: 已删除 }
+
+  /api/projects/{id}/release-hooks/{hookID}/trigger:
+    post:
+      tags: [hooks]
+      summary: 手动或由 CI 触发 Hook
+      description: 使用持久化尾随防抖；窗口内再次调用会将执行时间顺延，并只派发一次最新版本。
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: hookID, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: { type: string, description: 为空时使用最新已发布版本 }
+                source: { type: string, default: manual }
+      responses:
+        "202":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReleaseHook" }
+
+  /api/projects/{id}/release-hook-events:
+    get:
+      tags: [hooks]
+      summary: 查询 Hook 触发、合并及派发记录（保留 30 天）
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer, maximum: 200, default: 100 } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ReleaseHookEvent" } }
+
   /metrics:
     get:
       tags: [health]
@@ -769,7 +938,7 @@ paths:
       parameters:
         - name: days
           in: query
-          schema: { type: integer, minimum: 1, maximum: 365, default: 30 }
+          schema: { type: integer, minimum: 1, maximum: 30, default: 30 }
         - name: project_id
           in: query
           description: 可选；只能选择当前用户可访问的项目
@@ -816,6 +985,105 @@ paths:
         "200":
           description: application/gzip
 
+  /api/agent/nodes/heartbeat:
+    post:
+      tags: [delivery]
+      summary: Pull Agent 注册、心跳、应用确认与期望状态获取
+      security: [{ pullTokenHeader: [] }, { basicAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliveryHeartbeat"
+      responses:
+        "200":
+          description: 当前节点和期望状态
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  server_time: { type: string, format: date-time }
+                  node: { $ref: "#/components/schemas/DeliveryNode" }
+                  desired: { $ref: "#/components/schemas/DeliveryDesired" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /api/agent/guide:
+    get:
+      tags: [agent]
+      summary: 列出公开、脱敏的官方接入指南目录
+      description: 不需要认证；绝不返回账号、Token、SSH、服务器、项目、日志或运行态数据。
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentGuideIndex"
+
+  /api/agent/guide/{topic}:
+    get:
+      tags: [agent]
+      summary: 读取公开、脱敏的官方接入指南主题
+      parameters:
+        - { name: topic, in: path, required: true, schema: { type: string, enum: [overview, agent, gitea, github, security] } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentGuideTopic"
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/projects/{id}/delivery-nodes:
+    get:
+      tags: [delivery]
+      summary: 统一列出 Push SSH 绑定和 Pull Agent 节点
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/DeliveryNodeView" }
+
+  /api/projects/{id}/delivery-nodes/{serverID}/desired:
+    put:
+      tags: [delivery]
+      summary: 设置 Pull 节点期望版本和自动跟随策略
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - $ref: "#/components/parameters/server_id_path"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: { type: string, description: 必须是已发布版本 }
+                auto_follow: { type: boolean }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeliveryNode" }
+
+  /api/projects/{id}/delivery-nodes/{serverID}:
+    delete:
+      tags: [delivery]
+      summary: 删除 Pull 节点控制面状态（下次心跳可重新注册）
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - $ref: "#/components/parameters/server_id_path"
+      responses:
+        "204": { description: 已删除 }
+
   /api/me/password:
     post:
       tags: [auth]
@@ -834,6 +1102,10 @@ components:
     basicAuth:
       type: http
       scheme: basic
+    pullTokenHeader:
+      type: apiKey
+      in: header
+      name: X-Express233-Token
   parameters:
     token:
       name: token
@@ -930,6 +1202,83 @@ components:
         remote_root: { type: string }
         os: { type: string, default: linux }
         arch: { type: string, default: amd64 }
+    PushDeploymentTaskRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, maxLength: 100 }
+        version: { type: string, description: 为空表示每次执行时取最新已发布版本 }
+        server_ids: { type: array, items: { type: string } }
+        tags: { type: array, items: { type: string }, default: [test] }
+        tag_match: { type: string, enum: [all, any], default: all }
+    PushDeploymentTask:
+      allOf:
+        - $ref: "#/components/schemas/PushDeploymentTaskRequest"
+        - type: object
+          properties:
+            id: { type: integer }
+            project_id: { type: integer }
+            run_count: { type: integer, format: int64 }
+            last_run_at: { type: string }
+            created_at: { type: string }
+            updated_at: { type: string }
+    PushDeployment:
+      type: object
+      description: 不可变的任务执行快照，保留 30 天且不支持手动删除。
+      properties:
+        id: { type: integer }
+        project_id: { type: integer }
+        task_id: { type: integer }
+        task_name: { type: string }
+        hook_event_id: { type: integer, description: Hook 派发幂等键；非 Hook 发布为 0 }
+        version: { type: string }
+        selector: { type: string, description: 执行时 server_ids、tags、tag_match 的 JSON 快照 }
+        status: { type: string, enum: [queued, running, success, failed] }
+        created_at: { type: string }
+    ReleaseHookRequest:
+      type: object
+      required: [name, task_id]
+      properties:
+        name: { type: string, maxLength: 100 }
+        task_id: { type: integer }
+        enabled: { type: boolean, default: true }
+        debounce_seconds: { type: integer, minimum: 1, maximum: 3600, default: 30 }
+    ReleaseHook:
+      allOf:
+        - $ref: "#/components/schemas/ReleaseHookRequest"
+        - type: object
+          properties:
+            id: { type: integer }
+            project_id: { type: integer }
+            task_name: { type: string }
+            pending_version: { type: string }
+            pending_source: { type: string }
+            pending_since: { type: string }
+            due_at: { type: string }
+            pending_events: { type: integer, format: int64 }
+            trigger_count: { type: integer, format: int64 }
+            merge_count: { type: integer, format: int64 }
+            run_count: { type: integer, format: int64 }
+            last_deployment_id: { type: integer, format: int64 }
+            last_status: { type: string }
+            last_error: { type: string }
+    ReleaseHookEvent:
+      type: object
+      description: 不含账号密码、Token、SSH 凭据或版本包内容。
+      properties:
+        id: { type: integer }
+        hook_id: { type: integer }
+        hook_name: { type: string }
+        kind: { type: string, enum: [trigger, dispatch] }
+        source: { type: string }
+        version: { type: string }
+        status: { type: string, enum: [scheduled, merged, running, success, failed, cancelled] }
+        merged_events: { type: integer, format: int64 }
+        deployment_id: { type: integer, format: int64 }
+        deployment_status: { type: string }
+        detail: { type: string }
+        created_at: { type: string }
+        completed_at: { type: string }
     DashboardSnapshot:
       type: object
       properties:
@@ -937,6 +1286,8 @@ components:
         days: { type: integer }
         summary:
           $ref: "#/components/schemas/DashboardSummary"
+        health:
+          $ref: "#/components/schemas/DashboardHealth"
         series:
           type: array
           items: { $ref: "#/components/schemas/DashboardDay" }
@@ -961,6 +1312,21 @@ components:
         targets: { type: integer }
         target_failures: { type: integer }
         average_deployment_millis: { type: integer, format: int64 }
+    DashboardHealth:
+      type: object
+      description: 当前拓扑和自动化状态快照；非按日历史指标。
+      properties:
+        pull_nodes: { type: integer }
+        pull_online: { type: integer }
+        pull_drift: { type: integer }
+        ssh_hosts: { type: integer }
+        ssh_healthy: { type: integer }
+        ssh_failing: { type: integer }
+        ssh_unknown: { type: integer }
+        hooks_enabled: { type: integer }
+        hooks_pending: { type: integer }
+        hook_failures: { type: integer }
+        latest_event_at: { type: string }
     DashboardDay:
       type: object
       properties:
@@ -997,6 +1363,82 @@ components:
         id: { type: integer }
         name: { type: string }
         created_at: { type: string }
+    DeliveryHeartbeat:
+      type: object
+      required: [project, server_id, status, heartbeat_interval_seconds]
+      properties:
+        project: { type: string }
+        server_id: { type: string }
+        role: { type: string }
+        environment: { type: string }
+        labels: { type: array, items: { type: string } }
+        os: { type: string }
+        arch: { type: string }
+        current_version: { type: string }
+        applied_generation: { type: integer, format: int64 }
+        status: { type: string, enum: [ok, deploying, error] }
+        error_code: { type: string, description: 仅机器可读安全标识；禁止上传原始日志或凭据 }
+        heartbeat_interval_seconds: { type: integer, minimum: 10, maximum: 3600 }
+    AgentGuideIndex:
+      type: object
+      properties:
+        title: { type: string }
+        notice: { type: string }
+        api_path: { type: string }
+        topics:
+          type: array
+          items: { $ref: "#/components/schemas/AgentGuideTopic" }
+    AgentGuideTopic:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        summary: { type: string }
+        content: { type: string, description: 仅在单主题读取时返回；静态 Markdown 文本。 }
+    DeliveryDesired:
+      type: object
+      properties:
+        version: { type: string }
+        generation: { type: integer, format: int64 }
+        needs_deploy: { type: boolean }
+    DeliveryNode:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        project_id: { type: integer, format: int64 }
+        server_id: { type: string }
+        delivery_mode: { type: string, enum: [pull] }
+        role: { type: string }
+        environment: { type: string }
+        labels: { type: array, items: { type: string } }
+        current_version: { type: string }
+        desired_version: { type: string }
+        desired_generation: { type: integer, format: int64 }
+        applied_generation: { type: integer, format: int64 }
+        auto_follow: { type: boolean }
+        status: { type: string }
+        last_seen_at: { type: string }
+    DeliveryNodeView:
+      type: object
+      properties:
+        id: { type: string, example: "pull:42" }
+        delivery_mode: { type: string, enum: [push, pull] }
+        server_id: { type: string }
+        role: { type: string }
+        environment: { type: string }
+        labels: { type: array, items: { type: string } }
+        os: { type: string }
+        arch: { type: string }
+        current_version: { type: string }
+        desired_version: { type: string }
+        desired_generation: { type: integer, format: int64 }
+        applied_generation: { type: integer, format: int64 }
+        auto_follow: { type: boolean }
+        status: { type: string }
+        online: { type: boolean }
+        drift: { type: boolean }
+        host_id: { type: integer, format: int64 }
+        host_name: { type: string }
     Version:
       type: object
       properties:

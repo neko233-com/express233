@@ -32,7 +32,8 @@ import (
 
 const (
 	defaultLogMaxSizeBytes = 10 * 1024 * 1024
-	defaultLogMaxBackups   = 5
+	defaultLogMaxBackups   = 30
+	defaultLogMaxAge       = 30 * 24 * time.Hour
 	defaultLogLevel        = "info"
 	githubRepo             = "neko233-com/express233"
 )
@@ -92,6 +93,8 @@ func serve(listen, dataDir string) error {
 	monitorContext, stopMonitor := context.WithCancel(context.Background())
 	defer stopMonitor()
 	srvAPI.StartSSHHealthMonitor(monitorContext)
+	srvAPI.StartLogRetention(monitorContext)
+	srvAPI.StartReleaseHookWorker(monitorContext)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/__admin/reload-config", func(w http.ResponseWriter, r *http.Request) {
 		if !authorizeControlRequest(r, controlToken) {
@@ -297,6 +300,8 @@ type rotatingFileWriter struct {
 	size       int64
 	maxSize    int64
 	maxBackups int
+	maxAge     time.Duration
+	openedDay  string
 }
 
 func newRotatingFileWriter(path string, maxSize int64, maxBackups int) (*rotatingFileWriter, error) {
@@ -318,7 +323,9 @@ func newRotatingFileWriter(path string, maxSize int64, maxBackups int) (*rotatin
 		_ = file.Close()
 		return nil, err
 	}
-	return &rotatingFileWriter{path: path, file: file, size: info.Size(), maxSize: maxSize, maxBackups: maxBackups}, nil
+	writer := &rotatingFileWriter{path: path, file: file, size: info.Size(), maxSize: maxSize, maxBackups: maxBackups, maxAge: defaultLogMaxAge, openedDay: info.ModTime().Local().Format(time.DateOnly)}
+	writer.pruneExpired(time.Now())
+	return writer, nil
 }
 
 func (w *rotatingFileWriter) Write(p []byte) (int, error) {
@@ -347,7 +354,7 @@ func (w *rotatingFileWriter) rotateIfNeeded(incoming int64) error {
 	if w.file == nil {
 		return fmt.Errorf("log writer is closed")
 	}
-	if w.size+incoming <= w.maxSize {
+	if w.size+incoming <= w.maxSize && w.openedDay == time.Now().Format(time.DateOnly) {
 		return nil
 	}
 	if err := w.file.Close(); err != nil {
@@ -376,7 +383,24 @@ func (w *rotatingFileWriter) rotateIfNeeded(incoming int64) error {
 	}
 	w.file = file
 	w.size = 0
+	w.openedDay = time.Now().Format(time.DateOnly)
+	w.pruneExpired(time.Now())
 	return nil
+}
+
+func (w *rotatingFileWriter) pruneExpired(now time.Time) {
+	matches, _ := filepath.Glob(w.path + ".*")
+	cutoff := now.Add(-w.maxAge)
+	for _, path := range matches {
+		suffix := strings.TrimPrefix(path, w.path+".")
+		if _, err := strconv.Atoi(suffix); err != nil {
+			continue
+		}
+		info, err := os.Stat(path)
+		if err == nil && info.ModTime().Before(cutoff) {
+			_ = os.Remove(path)
+		}
+	}
 }
 
 func loadRuntimeConfig(dataDir string) (runtimeConfig, error) {

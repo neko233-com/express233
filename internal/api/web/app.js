@@ -169,6 +169,7 @@ function setGlobalView(view) {
   document.getElementById("globalStorage").classList.toggle("hidden", view !== "storage");
   document.getElementById("globalSettings").classList.toggle("hidden", view !== "settings");
   document.getElementById("globalDashboard").classList.toggle("hidden", view !== "dashboard");
+  document.getElementById("globalGuide").classList.toggle("hidden", view !== "guide");
   document.getElementById("globalAgent").classList.toggle("hidden", view !== "agent");
   const inProject = view === "workspace" && state.projectId;
   document.getElementById("projectWorkspace").classList.toggle("hidden", !inProject);
@@ -180,20 +181,31 @@ function setGlobalView(view) {
   }
   if (view === "storage") loadStorageOverview();
   if (view === "dashboard") loadDashboard();
+  if (view === "guide") loadGuideDirectory();
   if (view === "agent" && state.isAdmin) loadAgentWorkspace();
 }
 
 function setProjectTab(tab) {
   state.projectTab = tab;
+  if (tab !== "pushlogs" && pushLogRefreshTimer) {
+    window.clearTimeout(pushLogRefreshTimer);
+    pushLogRefreshTimer = null;
+  }
+  if (tab !== "hooks" && releaseHookRefreshTimer) {
+    window.clearTimeout(releaseHookRefreshTimer);
+    releaseHookRefreshTimer = null;
+  }
   document.querySelectorAll(".project-tab").forEach((b) => {
     b.classList.toggle("active", b.dataset.ptab === tab);
   });
-  ["versions", "preview", "team", "deploy", "push", "pushlogs", "diff"].forEach((t) => {
+  ["versions", "cluster", "preview", "team", "deploy", "push", "hooks", "pushlogs", "diff"].forEach((t) => {
     const el = document.getElementById("ptab-" + t);
     if (el) el.classList.toggle("hidden", t !== tab);
   });
   if (tab === "deploy") generateDeployScript();
-  if (tab === "push") loadPushWorkspace();
+  if (tab === "push") loadPushTasks();
+  if (tab === "cluster") loadDeliveryNodes();
+  if (tab === "hooks") loadReleaseHooks();
   if (tab === "pushlogs") loadPushLogs();
 }
 
@@ -475,7 +487,7 @@ document.getElementById("btnPushAddHost")?.addEventListener("click", async () =>
       health_check_interval_seconds: Number(document.getElementById("pushHostHealthInterval").value || 3600),
     }) });
     ["pushHostName", "pushHostAddress", "pushHostUser", "pushHostCredential", "pushHostKey"].forEach((id) => { document.getElementById(id).value = ""; });
-    await loadPushWorkspace(); showToast("SSH 配置已保存");
+    await loadAgentWorkspace(); showToast("SSH 资源已保存，凭据不可回读");
   } catch (e) { showToast(e.message, "err"); }
 });
 document.getElementById("btnPushAddBinding")?.addEventListener("click", async () => {
@@ -488,20 +500,13 @@ document.getElementById("btnPushAddBinding")?.addEventListener("click", async ()
     pushBindings = await api(`/api/push/hosts/${selectedPushHostID}/servers`); renderPushBindings(); showToast("服务器绑定已保存");
   } catch (e) { showToast(e.message, "err"); }
 });
-async function createPushDeployment(dryRun) {
-  if (!state.projectId) return;
-  try {
-    const version = document.getElementById("pushVersion").value;
-    await api(`/api/projects/${state.projectId}/push-deployments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-      version, server_ids: csvValues(document.getElementById("pushServerIDs").value), tags: csvValues(document.getElementById("pushTags").value || "test"),
-      tag_match: document.getElementById("pushTagMatch").value, dry_run: dryRun,
-    }) });
-    showToast(dryRun ? "目标筛选完成（未连接 SSH）" : "批量发布任务已排队"); setProjectTab("pushlogs");
-  } catch (e) { showToast(e.message, "err"); }
-}
-document.getElementById("btnPushDryRun")?.addEventListener("click", () => createPushDeployment(true));
-document.getElementById("btnPushDeploy")?.addEventListener("click", () => createPushDeployment(false));
+document.getElementById("btnSavePushTask")?.addEventListener("click", savePushTask);
+document.getElementById("btnCancelPushTask")?.addEventListener("click", resetPushTaskEditor);
+document.getElementById("btnSaveReleaseHook")?.addEventListener("click", saveReleaseHook);
+document.getElementById("btnCancelReleaseHook")?.addEventListener("click", resetReleaseHookEditor);
+document.getElementById("btnReloadReleaseHooks")?.addEventListener("click", loadReleaseHooks);
 document.getElementById("btnReloadPushLogs")?.addEventListener("click", loadPushLogs);
+document.getElementById("btnReloadDeliveryNodes")?.addEventListener("click", loadDeliveryNodes);
 
 document.querySelectorAll("#settingsTabs .seg-tab").forEach((btn) => {
   btn.onclick = () => {
@@ -605,6 +610,7 @@ async function selectProject(p) {
   await loadProjects();
   state.versions = (await api(`/api/projects/${p.id}/versions`)) || [];
   renderVersionList();
+  if (state.projectTab === "cluster") await loadDeliveryNodes();
   // Populate diff dropdowns
   populateDiffDropdowns(state.versions);
   // Generate deploy script when switching to deploy tab
@@ -738,6 +744,56 @@ function renderFileList() {
 let pushHosts = [];
 let pushBindings = [];
 let selectedPushHostID = null;
+let pushTasks = [];
+let editingPushTaskID = null;
+let pushLogRefreshTimer = null;
+let releaseHooks = [];
+let releaseHookEvents = [];
+let editingReleaseHookID = null;
+let releaseHookRefreshTimer = null;
+let deliveryNodes = [];
+
+async function loadDeliveryNodes() {
+  if (!state.projectId) return;
+  try {
+    deliveryNodes = (await api(`/api/projects/${state.projectId}/delivery-nodes`)) || [];
+    renderDeliveryNodes();
+  } catch (e) { showToast(e.message, "err"); }
+}
+
+function renderDeliveryNodes() {
+  const box = document.getElementById("deliveryNodeList");
+  if (!box) return;
+  const push = deliveryNodes.filter((node) => node.delivery_mode === "push").length;
+  const pull = deliveryNodes.filter((node) => node.delivery_mode === "pull").length;
+  const online = deliveryNodes.filter((node) => node.online).length;
+  const drift = deliveryNodes.filter((node) => node.drift).length;
+  document.getElementById("clusterPushCount").textContent = push;
+  document.getElementById("clusterPullCount").textContent = pull;
+  document.getElementById("clusterOnlineCount").textContent = `${online}/${deliveryNodes.length}`;
+  document.getElementById("clusterDriftCount").textContent = drift;
+  if (!deliveryNodes.length) { box.innerHTML = '<div class="agent-empty">暂无节点。Pull Agent 心跳或 SSH server_id 绑定后自动出现。</div>'; return; }
+  const options = (state.versions || []).filter((version) => version.status === "published").map((version) => `<option value="${escapeAttr(version.version)}">${escapeHtml(version.version)}</option>`).join("");
+  box.innerHTML = `<table class="data-table cluster-node-table"><thead><tr><th>节点</th><th>模式</th><th>拓扑</th><th>版本</th><th>连接 / 心跳</th><th>策略</th></tr></thead><tbody>${deliveryNodes.map((node) => `<tr class="${node.drift ? "node-drift" : ""}"><td><strong>${escapeHtml(node.server_id)}</strong><small>${escapeHtml(node.os || "—")}/${escapeHtml(node.arch || "—")}</small><small>${escapeHtml((node.labels || []).join(" · "))}</small></td><td><span class="badge badge-${node.delivery_mode === "pull" ? "ok" : "draft"}">${node.delivery_mode === "pull" ? "Pull" : "Push"}</span></td><td>${escapeHtml(node.role || "未标角色")}<small>${escapeHtml(node.environment || node.host_name || "—")}</small></td><td><code>${escapeHtml(node.current_version || "未部署")}</code>${node.delivery_mode === "pull" ? `<span class="version-arrow">→</span><code>${escapeHtml(node.desired_version || "未设置")}</code><small>generation ${node.applied_generation}/${node.desired_generation} · ${node.drift ? "待收敛" : "已收敛"}</small>` : "<small>最近成功发布</small>"}</td><td><span class="node-presence ${node.online ? "online" : "offline"}"></span>${node.online ? "在线" : "离线"}<small>${escapeHtml(node.last_seen_at || "尚无检测记录")}</small></td><td>${node.delivery_mode === "pull" ? `<div class="cluster-policy"><select class="input input-sm" data-node-version="${escapeAttr(node.server_id)}"><option value="">选择已发布版本</option>${options}</select><label class="check-label"><input type="checkbox" data-node-auto="${escapeAttr(node.server_id)}" ${node.auto_follow ? "checked" : ""}/>自动跟随新版本</label><div><button type="button" class="btn btn-primary btn-sm project-write" data-apply-node="${escapeAttr(node.server_id)}">应用</button><button type="button" class="btn btn-danger btn-sm project-write" data-delete-node="${escapeAttr(node.server_id)}">移除</button></div></div>` : `<span class="badge badge-draft">任务 / Hook 驱动</span><small>${escapeHtml(node.host_name || "SSH 资源")}</small>`}</td></tr>`).join("")}</tbody></table>`;
+  deliveryNodes.filter((node) => node.delivery_mode === "pull").forEach((node) => {
+    const select = box.querySelector(`[data-node-version="${CSS.escape(node.server_id)}"]`); if (select) select.value = node.desired_version || "";
+  });
+  box.querySelectorAll("[data-apply-node]").forEach((button) => button.onclick = () => updateDeliveryNode(button.dataset.applyNode));
+  box.querySelectorAll("[data-delete-node]").forEach((button) => button.onclick = () => deleteDeliveryNode(button.dataset.deleteNode));
+  updateProjectWriteUI();
+}
+
+async function updateDeliveryNode(serverID) {
+  const box = document.getElementById("deliveryNodeList");
+  const version = box.querySelector(`[data-node-version="${CSS.escape(serverID)}"]`)?.value || "";
+  const autoFollow = !!box.querySelector(`[data-node-auto="${CSS.escape(serverID)}"]`)?.checked;
+  try { await api(`/api/projects/${state.projectId}/delivery-nodes/${encodeURIComponent(serverID)}/desired`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version, auto_follow: autoFollow }) }); showToast("节点期望状态已更新"); await loadDeliveryNodes(); } catch (e) { showToast(e.message, "err"); }
+}
+
+async function deleteDeliveryNode(serverID) {
+  if (!confirm(`移除 Pull 节点“${serverID}”的控制面状态？`)) return;
+  try { await api(`/api/projects/${state.projectId}/delivery-nodes/${encodeURIComponent(serverID)}`, { method: "DELETE" }); await loadDeliveryNodes(); } catch (e) { showToast(e.message, "err"); }
+}
 
 function csvValues(value) {
   return String(value || "").split(",").map((v) => v.trim()).filter(Boolean);
@@ -747,20 +803,207 @@ function latestPublishedVersion() {
   return (state.versions || []).find((v) => v.status === "published") || null;
 }
 
-async function loadPushWorkspace() {
+async function loadPushTasks() {
   if (!state.projectId) return;
   const latest = latestPublishedVersion();
-  const version = document.getElementById("pushVersion");
+  const version = document.getElementById("pushTaskVersion");
   const hint = document.getElementById("pushLatestHint");
   if (version) {
     version.innerHTML = `<option value="">最新已发布版本${latest ? `（${escapeHtml(latest.version)}）` : ""}</option>` + (state.versions || [])
       .filter((v) => v.status === "published")
       .map((v) => `<option value="${escapeAttr(v.version)}">${escapeHtml(v.version)}${v.version === latest?.version ? " · 最新" : ""}</option>`).join("");
-    if (state.versionStatus === "published") version.value = state.version;
   }
   if (hint) hint.textContent = latest ? `最新已发布版本：${latest.version}` : "暂无已发布版本";
-  if (!state.isAdmin) return;
-  try { pushHosts = await api("/api/push/hosts"); renderPushHosts(); } catch (e) { showToast(e.message, "err"); }
+  try {
+    pushTasks = await api(`/api/projects/${state.projectId}/push-tasks`);
+    renderPushTasks();
+  } catch (e) { showToast(e.message, "err"); }
+}
+
+function resetPushTaskEditor() {
+  editingPushTaskID = null;
+  document.getElementById("pushTaskName").value = "";
+  document.getElementById("pushTaskVersion").value = "";
+  document.getElementById("pushTaskServerIDs").value = "";
+  document.getElementById("pushTaskTags").value = "test";
+  document.getElementById("pushTaskTagMatch").value = "all";
+  document.getElementById("btnSavePushTask").textContent = "保存任务";
+  document.getElementById("btnCancelPushTask").classList.add("hidden");
+}
+
+async function savePushTask() {
+  if (!state.projectId) return;
+  const payload = {
+    name: document.getElementById("pushTaskName").value.trim(),
+    version: document.getElementById("pushTaskVersion").value,
+    server_ids: csvValues(document.getElementById("pushTaskServerIDs").value),
+    tags: csvValues(document.getElementById("pushTaskTags").value || "test"),
+    tag_match: document.getElementById("pushTaskTagMatch").value,
+  };
+  try {
+    const path = editingPushTaskID ? `/api/projects/${state.projectId}/push-tasks/${editingPushTaskID}` : `/api/projects/${state.projectId}/push-tasks`;
+    await api(path, { method: editingPushTaskID ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    showToast(editingPushTaskID ? "发布任务已更新" : "发布任务已保存");
+    resetPushTaskEditor();
+    await loadPushTasks();
+  } catch (e) { showToast(e.message, "err"); }
+}
+
+function renderPushTasks() {
+  const box = document.getElementById("pushTaskList");
+  if (!box) return;
+  if (!pushTasks.length) {
+    box.innerHTML = '<div class="empty-state compact"><h3>还没有发布任务</h3><p>先保存一个任务；SSH 节点与 server_id 绑定在全局 Agent 页面维护。</p></div>';
+    return;
+  }
+  box.innerHTML = `<table class="data-table release-task-table"><thead><tr><th>任务</th><th>版本策略</th><th>目标筛选</th><th>执行</th><th>最近运行</th><th>操作</th></tr></thead><tbody>${pushTasks.map((task) => `<tr><td><strong>${escapeHtml(task.name)}</strong><small>#${task.id}</small></td><td>${task.version ? `<code>${escapeHtml(task.version)}</code>` : '<span class="badge badge-ok">每次取最新已发布</span>'}</td><td><small>server_id：${escapeHtml((task.server_ids || []).join(", ") || "全部")}</small><small>标签（${task.tag_match === "any" ? "任一" : "全部"}）：${escapeHtml((task.tags || []).join(", ") || "test")}</small></td><td><strong>${task.run_count || 0}</strong><small>次</small></td><td><small>${escapeHtml(task.last_run_at || "尚未执行")}</small></td><td class="release-task-actions"><button type="button" class="btn btn-secondary btn-sm" data-run-push-task="${task.id}" data-dry-run="true">预演</button><button type="button" class="btn btn-primary btn-sm" data-run-push-task="${task.id}">执行</button><button type="button" class="btn btn-ghost btn-sm" data-edit-push-task="${task.id}">编辑</button><button type="button" class="btn btn-danger btn-sm" data-delete-push-task="${task.id}">删除</button></td></tr>`).join("")}</tbody></table>`;
+  box.querySelectorAll("[data-run-push-task]").forEach((button) => button.onclick = () => runPushTask(Number(button.dataset.runPushTask), button.dataset.dryRun === "true"));
+  box.querySelectorAll("[data-edit-push-task]").forEach((button) => button.onclick = () => editPushTask(Number(button.dataset.editPushTask)));
+  box.querySelectorAll("[data-delete-push-task]").forEach((button) => button.onclick = () => deletePushTask(Number(button.dataset.deletePushTask)));
+}
+
+function editPushTask(taskID) {
+  const task = pushTasks.find((item) => item.id === taskID);
+  if (!task) return;
+  editingPushTaskID = taskID;
+  document.getElementById("pushTaskName").value = task.name;
+  document.getElementById("pushTaskVersion").value = task.version || "";
+  document.getElementById("pushTaskServerIDs").value = (task.server_ids || []).join(", ");
+  document.getElementById("pushTaskTags").value = (task.tags || []).join(", ");
+  document.getElementById("pushTaskTagMatch").value = task.tag_match || "all";
+  document.getElementById("btnSavePushTask").textContent = "更新任务";
+  document.getElementById("btnCancelPushTask").classList.remove("hidden");
+}
+
+async function runPushTask(taskID, dryRun) {
+  try {
+    await api(`/api/projects/${state.projectId}/push-tasks/${taskID}/run`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dry_run: dryRun }) });
+    showToast(dryRun ? "预演完成，已写入发布日志" : "发布任务已排队");
+    await loadPushTasks();
+    setProjectTab("pushlogs");
+  } catch (e) { showToast(e.message, "err"); }
+}
+
+async function deletePushTask(taskID) {
+  if (!await showConfirm({ title: "删除发布任务", message: "仅删除可复用任务定义，历史执行日志仍会保留 30 天。", danger: true })) return;
+  try {
+    await api(`/api/projects/${state.projectId}/push-tasks/${taskID}`, { method: "DELETE" });
+    if (editingPushTaskID === taskID) resetPushTaskEditor();
+    await loadPushTasks();
+    showToast("任务已删除，历史日志未受影响");
+  } catch (e) { showToast(e.message, "err"); }
+}
+
+function resetReleaseHookEditor() {
+  editingReleaseHookID = null;
+  document.getElementById("releaseHookName").value = "";
+  document.getElementById("releaseHookTask").value = "";
+  document.getElementById("releaseHookDebounce").value = "30";
+  document.getElementById("releaseHookEnabled").checked = true;
+  document.getElementById("btnSaveReleaseHook").textContent = "保存 Hook";
+  document.getElementById("btnCancelReleaseHook").classList.add("hidden");
+}
+
+async function loadReleaseHooks() {
+  if (!state.projectId) return;
+  try {
+    const [tasks, hooks, events] = await Promise.all([
+      api(`/api/projects/${state.projectId}/push-tasks`),
+      api(`/api/projects/${state.projectId}/release-hooks`),
+      api(`/api/projects/${state.projectId}/release-hook-events?limit=100`),
+    ]);
+    pushTasks = tasks || [];
+    releaseHooks = hooks || [];
+    releaseHookEvents = events || [];
+    const taskSelect = document.getElementById("releaseHookTask");
+    if (taskSelect) {
+      const selected = taskSelect.value;
+      taskSelect.innerHTML = '<option value="">选择发布任务</option>' + pushTasks.map((task) => `<option value="${task.id}">${escapeHtml(task.name)}</option>`).join("");
+      if (pushTasks.some((task) => String(task.id) === selected)) taskSelect.value = selected;
+    }
+    renderReleaseHooks();
+    renderReleaseHookEvents();
+    if (releaseHookRefreshTimer) window.clearTimeout(releaseHookRefreshTimer);
+    if (state.projectTab === "hooks" && releaseHooks.some((hook) => hook.pending_events > 0 || hook.last_status === "running")) {
+      releaseHookRefreshTimer = window.setTimeout(loadReleaseHooks, 2000);
+    }
+  } catch (error) { showToast(error.message, "err"); }
+}
+
+async function saveReleaseHook() {
+  const payload = {
+    name: document.getElementById("releaseHookName").value.trim(),
+    task_id: Number(document.getElementById("releaseHookTask").value),
+    debounce_seconds: Number(document.getElementById("releaseHookDebounce").value || 30),
+    enabled: document.getElementById("releaseHookEnabled").checked,
+  };
+  try {
+    const path = editingReleaseHookID ? `/api/projects/${state.projectId}/release-hooks/${editingReleaseHookID}` : `/api/projects/${state.projectId}/release-hooks`;
+    await api(path, { method: editingReleaseHookID ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    showToast(editingReleaseHookID ? "Hook 已更新" : "Hook 已创建");
+    resetReleaseHookEditor();
+    await loadReleaseHooks();
+  } catch (error) { showToast(error.message, "err"); }
+}
+
+function renderReleaseHooks() {
+  const box = document.getElementById("releaseHookList");
+  if (!box) return;
+  if (!releaseHooks.length) {
+    box.innerHTML = '<div class="empty-state compact"><h3>还没有自动 Hook</h3><p>先在“发布任务”创建可重复任务，再在这里关联并启用。</p></div>';
+    return;
+  }
+  box.innerHTML = `<table class="data-table release-hook-table"><thead><tr><th>Hook</th><th>关联任务</th><th>开关</th><th>合并窗口</th><th>触发统计</th><th>最近状态</th><th>操作</th></tr></thead><tbody>${releaseHooks.map((hook) => `<tr><td><strong>${escapeHtml(hook.name)}</strong><small>#${hook.id}</small></td><td><strong>${escapeHtml(hook.task_name || "任务已失效")}</strong><small>任务 #${hook.task_id}</small></td><td><label class="switch"><input type="checkbox" data-toggle-release-hook="${hook.id}" ${hook.enabled ? "checked" : ""}/><span></span></label><small>${hook.enabled ? "已启用" : "已停用"}</small></td><td><strong>${hook.debounce_seconds} 秒</strong>${hook.pending_events ? `<small class="hook-pending">等待中 · 已合并 ${hook.pending_events} 次</small><small>${escapeHtml(hook.due_at)}</small>` : '<small>当前无等待任务</small>'}</td><td><strong>${hook.trigger_count || 0}</strong><small>触发 · ${hook.merge_count || 0} 合并 · ${hook.run_count || 0} 派发</small></td><td><span class="badge badge-${hook.last_status === "failed" ? "warn" : hook.last_status === "success" ? "ok" : "draft"}">${escapeHtml(hook.last_status || "尚未触发")}</span><small title="${escapeAttr(hook.last_error || "")}">${escapeHtml(hook.last_error || hook.last_trigger_at || "—")}</small></td><td class="release-task-actions"><button type="button" class="btn btn-secondary btn-sm" data-trigger-release-hook="${hook.id}" ${hook.enabled ? "" : "disabled"}>立即触发</button><button type="button" class="btn btn-ghost btn-sm" data-edit-release-hook="${hook.id}">编辑</button><button type="button" class="btn btn-danger btn-sm" data-delete-release-hook="${hook.id}">删除</button></td></tr>`).join("")}</tbody></table>`;
+  box.querySelectorAll("[data-toggle-release-hook]").forEach((input) => input.onchange = () => toggleReleaseHook(Number(input.dataset.toggleReleaseHook), input.checked));
+  box.querySelectorAll("[data-trigger-release-hook]").forEach((button) => button.onclick = () => triggerReleaseHook(Number(button.dataset.triggerReleaseHook)));
+  box.querySelectorAll("[data-edit-release-hook]").forEach((button) => button.onclick = () => editReleaseHook(Number(button.dataset.editReleaseHook)));
+  box.querySelectorAll("[data-delete-release-hook]").forEach((button) => button.onclick = () => deleteReleaseHook(Number(button.dataset.deleteReleaseHook)));
+}
+
+function editReleaseHook(hookID) {
+  const hook = releaseHooks.find((item) => item.id === hookID);
+  if (!hook) return;
+  editingReleaseHookID = hookID;
+  document.getElementById("releaseHookName").value = hook.name;
+  document.getElementById("releaseHookTask").value = String(hook.task_id);
+  document.getElementById("releaseHookDebounce").value = String(hook.debounce_seconds);
+  document.getElementById("releaseHookEnabled").checked = hook.enabled;
+  document.getElementById("btnSaveReleaseHook").textContent = "更新 Hook";
+  document.getElementById("btnCancelReleaseHook").classList.remove("hidden");
+}
+
+async function toggleReleaseHook(hookID, enabled) {
+  const hook = releaseHooks.find((item) => item.id === hookID);
+  if (!hook) return;
+  try {
+    await api(`/api/projects/${state.projectId}/release-hooks/${hookID}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: hook.name, task_id: hook.task_id, debounce_seconds: hook.debounce_seconds, enabled }) });
+    showToast(enabled ? "Hook 已启用" : "Hook 已停用，等待中的触发已取消");
+    await loadReleaseHooks();
+  } catch (error) { showToast(error.message, "err"); await loadReleaseHooks(); }
+}
+
+async function triggerReleaseHook(hookID) {
+  try {
+    const hook = await api(`/api/projects/${state.projectId}/release-hooks/${hookID}/trigger`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: "manual_ui" }) });
+    showToast(`已进入合并窗口，将于 ${hook.due_at} 后派发`);
+    await loadReleaseHooks();
+  } catch (error) { showToast(error.message, "err"); }
+}
+
+async function deleteReleaseHook(hookID) {
+  if (!await showConfirm({ title: "删除自动 Hook", message: "Hook 触发历史仍会按 30 天策略保留。通常只需关闭开关，无需删除。", danger: true })) return;
+  try {
+    await api(`/api/projects/${state.projectId}/release-hooks/${hookID}`, { method: "DELETE" });
+    if (editingReleaseHookID === hookID) resetReleaseHookEditor();
+    await loadReleaseHooks();
+    showToast("Hook 已删除，历史记录未删除");
+  } catch (error) { showToast(error.message, "err"); }
+}
+
+function renderReleaseHookEvents() {
+  const box = document.getElementById("releaseHookEventList");
+  if (!box) return;
+  box.innerHTML = `<table class="data-table hook-event-table"><thead><tr><th>时间</th><th>Hook</th><th>事件</th><th>来源 / 版本</th><th>合并</th><th>结果</th></tr></thead><tbody>${releaseHookEvents.map((event) => `<tr><td>${escapeHtml(event.created_at)}</td><td><strong>${escapeHtml(event.hook_name)}</strong><small>#${event.hook_id}</small></td><td><span class="badge badge-${event.status === "failed" ? "warn" : event.status === "success" ? "ok" : "draft"}">${event.status === "cancelled" ? "等待已取消" : event.kind === "dispatch" ? "最终派发" : event.status === "merged" ? "合并触发" : "首次触发"}</span></td><td><small>${escapeHtml(event.source || "system")}</small><code>${escapeHtml(event.version)}</code></td><td>${event.merged_events || 1} 次</td><td><strong>${escapeHtml(event.deployment_status || event.status)}</strong>${event.deployment_id ? `<small>发布 #${event.deployment_id}</small>` : ""}</td></tr>`).join("")}</tbody></table>`;
 }
 
 function renderPushHosts() {
@@ -770,7 +1013,7 @@ function renderPushHosts() {
   hostList.innerHTML = `<table class="data-table"><thead><tr><th>配置</th><th>地址</th><th>认证</th><th>存活状态</th><th>Host key</th><th></th></tr></thead><tbody>${pushHosts.map((h) => `<tr class="${h.id === selectedPushHostID ? "selected-row" : ""}"><td>${escapeHtml(h.name)}</td><td>${escapeHtml(h.username)}@${escapeHtml(h.address)}:${h.port}</td><td>${escapeHtml(h.auth_mode || "private_key")}</td><td>${agentHealthBadge(h)} <span class="table-meta">${h.health_check_enabled ? formatAgentInterval(h.health_check_interval_seconds) : "已关闭"}</span></td><td><code>${escapeHtml(h.host_key_fingerprint || (h.host_key ? "已固定" : "首次连接自动记录"))}</code></td><td><button type="button" class="btn btn-ghost btn-sm" data-check-push-host="${h.id}">${agentIcon("activity")}检查</button><button type="button" class="btn btn-ghost btn-sm" data-push-host="${h.id}">绑定</button><button type="button" class="btn btn-danger btn-sm" data-del-push-host="${h.id}">删除</button></td></tr>`).join("")}</tbody></table>`;
   hostList.querySelectorAll("[data-push-host]").forEach((btn) => btn.onclick = async () => { selectedPushHostID = Number(btn.dataset.pushHost); editor?.classList.remove("hidden"); pushBindings = await api(`/api/push/hosts/${selectedPushHostID}/servers`); renderPushBindings(); });
   hostList.querySelectorAll("[data-check-push-host]").forEach((btn) => btn.onclick = () => runAgentHostCheck(Number(btn.dataset.checkPushHost), btn));
-  hostList.querySelectorAll("[data-del-push-host]").forEach((btn) => btn.onclick = async () => { if (!await showConfirm({ title: "删除 SSH 配置", message: "会一并删除该配置下的服务器绑定。", danger: true })) return; await api(`/api/push/hosts/${btn.dataset.delPushHost}`, { method: "DELETE" }); selectedPushHostID = null; pushBindings = []; renderPushBindings(); await loadPushWorkspace(); });
+  hostList.querySelectorAll("[data-del-push-host]").forEach((btn) => btn.onclick = async () => { if (!await showConfirm({ title: "删除 SSH 资源", message: "会一并删除该资源下的服务器绑定。", danger: true })) return; await api(`/api/push/hosts/${btn.dataset.delPushHost}`, { method: "DELETE" }); selectedPushHostID = null; pushBindings = []; renderPushBindings(); await loadAgentWorkspace(); });
 }
 
 function agentIcon(name) {
@@ -813,6 +1056,7 @@ async function loadAgentWorkspace() {
     renderAgentSummary(capabilityPayload, pushHosts);
     renderAgentCapabilities(capabilityPayload.capabilities || []);
     renderAgentHosts(pushHosts);
+    renderPushHosts();
   } catch (error) {
     if (summary) summary.innerHTML = `<div class="agent-error">${escapeHtml(error.message)}</div>`;
     showToast(error.message, "err");
@@ -843,7 +1087,7 @@ function renderAgentCapabilities(capabilities) {
 function renderAgentHosts(hosts) {
   const box = document.getElementById("agentHostList");
   if (!hosts.length) {
-    box.innerHTML = '<div class="agent-empty">还没有 SSH 节点。进入任一项目的“发布到远程”创建第一台节点。</div>';
+    box.innerHTML = '<div class="agent-empty">还没有 SSH 节点。请在本页“SSH 资源管理”创建第一台节点。</div>';
     return;
   }
   box.innerHTML = `<table class="data-table agent-host-table"><thead><tr><th>节点</th><th>连接</th><th>状态</th><th>定时检查</th><th>最近 / 下次</th><th>操作</th></tr></thead><tbody>${hosts.map((host) => `<tr><td><strong>${escapeHtml(host.name)}</strong><small>${escapeHtml(host.host_key_fingerprint || (host.host_key ? "Host key 已固定" : "Host key 待登记"))}</small></td><td><code>${escapeHtml(host.username)}@${escapeHtml(host.address)}:${host.port}</code><small>${escapeHtml(host.auth_mode)}</small></td><td>${agentHealthBadge(host)}<small>${host.last_check_latency_ms ? `${host.last_check_latency_ms} ms` : "—"}</small></td><td><label class="switch"><input type="checkbox" data-agent-enabled="${host.id}" ${host.health_check_enabled ? "checked" : ""}/><span></span></label><select class="input input-sm agent-interval" data-agent-interval="${host.id}" ${host.health_check_enabled ? "" : "disabled"}>${agentIntervalOptions(host.health_check_interval_seconds || 3600)}</select></td><td><small>${escapeHtml(host.last_check_at || "尚未检查")}</small><small class="next-check">${escapeHtml(host.next_check_at || "未安排")}</small></td><td><button type="button" class="btn btn-primary btn-sm" data-agent-check="${host.id}">${agentIcon("activity")}立即检查</button><button type="button" class="btn btn-ghost btn-sm" data-agent-history="${host.id}">${agentIcon("history")}历史</button></td></tr>`).join("")}</tbody></table>`;
@@ -874,7 +1118,7 @@ async function runAgentHostCheck(hostID, button) {
     const result = await api(`/api/push/hosts/${hostID}/check`, { method: "POST" });
     showToast(result.status === "ok" ? `SSH 可连接，${result.latency_ms} ms` : `SSH 连接失败：${result.error}`, result.status === "ok" ? "ok" : "err");
     if (state.globalView === "agent") { await loadAgentWorkspace(); await loadAgentHostHistory(hostID); }
-    else await loadPushWorkspace();
+    else await loadAgentWorkspace();
   } catch (error) { showToast(error.message, "err"); }
   finally { if (button) { button.disabled = false; button.classList.remove("is-checking"); } }
 }
@@ -895,11 +1139,9 @@ document.getElementById("btnAgentReload")?.addEventListener("click", loadAgentWo
 
 function renderPushBindings() {
   const box = document.getElementById("pushBindingList");
-  const targetBox = document.getElementById("pushTargets");
   if (!box) return;
   const rows = pushBindings.map((b) => `<tr><td>${escapeHtml(b.server_id)}</td><td>${escapeHtml(b.labels)}</td><td>${escapeHtml(b.content_tags || "全部")}</td><td><code>${escapeHtml(b.remote_root)}</code></td><td><button type="button" class="btn btn-danger btn-sm" data-del-push-binding="${b.id}">删除</button></td></tr>`).join("");
   box.innerHTML = `<table class="data-table"><thead><tr><th>服务器 ID</th><th>发布标签</th><th>内容标签</th><th>远端根目录</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
-  if (targetBox && selectedPushHostID) targetBox.innerHTML = `<p class="hint">当前 SSH 配置包含 ${pushBindings.length} 个绑定：${pushBindings.map((b) => escapeHtml(b.server_id)).join("、") || "无"}</p>`;
   box.querySelectorAll("[data-del-push-binding]").forEach((btn) => btn.onclick = async () => { await api(`/api/push/hosts/${selectedPushHostID}/servers/${btn.dataset.delPushBinding}`, { method: "DELETE" }); pushBindings = await api(`/api/push/hosts/${selectedPushHostID}/servers`); renderPushBindings(); });
 }
 
@@ -908,9 +1150,16 @@ async function loadPushLogs() {
   const box = document.getElementById("pushLogList");
   if (!box) return;
   const deployments = await api(`/api/projects/${state.projectId}/push-deployments`);
-  box.innerHTML = `<table class="data-table"><thead><tr><th>时间</th><th>版本</th><th>状态</th><th>服务器日志</th><th></th></tr></thead><tbody>${deployments.map((d) => `<tr><td>${escapeHtml(d.created_at)}</td><td>${escapeHtml(d.version)}</td><td><span class="badge badge-${d.status === "success" ? "ok" : d.status === "failed" ? "warn" : "draft"}">${escapeHtml(d.status)}</span></td><td><button type="button" class="btn btn-ghost btn-sm" data-push-log="${d.id}">查看逐服输出</button></td><td class="project-write"><button type="button" class="btn btn-danger btn-sm" data-del-push-log="${d.id}">删除</button></td></tr>`).join("")}</tbody></table>`;
-  box.querySelectorAll("[data-push-log]").forEach((btn) => btn.onclick = async () => { const d = await api(`/api/projects/${state.projectId}/push-deployments/${btn.dataset.pushLog}`); const lines = (d.targets || []).map((t) => `# ${t.host_name} / ${t.server_id} [${t.status}]\n${t.output || "等待执行"}`).join("\n\n"); showModal({ title: `发布任务 #${d.id}`, message: lines || "没有目标", confirmText: "关闭", cancelText: "关闭", mode: "confirm" }); });
-  box.querySelectorAll("[data-del-push-log]").forEach((btn) => btn.onclick = async () => { if (!await showConfirm({ title: "删除发布日志", message: "删除后不可恢复。", danger: true })) return; await api(`/api/projects/${state.projectId}/push-deployments/${btn.dataset.delPushLog}`, { method: "DELETE" }); loadPushLogs(); });
+  box.innerHTML = `<table class="data-table"><thead><tr><th>时间</th><th>任务快照</th><th>版本</th><th>筛选</th><th>状态</th><th>服务器日志</th></tr></thead><tbody>${deployments.map((d) => { const selector = parsePushSelector(d.selector); return `<tr><td>${escapeHtml(d.created_at)}</td><td><strong>${escapeHtml(d.task_name || "临时发布")}</strong><small>${d.task_id ? `任务 #${d.task_id}` : `执行 #${d.id}`}</small></td><td><code>${escapeHtml(d.version)}</code></td><td><small>server_id：${escapeHtml((selector.server_ids || []).join(", ") || "全部")}</small><small>标签：${escapeHtml((selector.tags || []).join(", ") || "test")}</small></td><td><span class="badge badge-${d.status === "success" ? "ok" : d.status === "failed" ? "warn" : "draft"}">${escapeHtml(d.status)}</span></td><td><button type="button" class="btn btn-ghost btn-sm" data-push-log="${d.id}">查看逐服输出</button></td></tr>`; }).join("")}</tbody></table>`;
+  box.querySelectorAll("[data-push-log]").forEach((btn) => btn.onclick = async () => { const d = await api(`/api/projects/${state.projectId}/push-deployments/${btn.dataset.pushLog}`); const lines = (d.targets || []).map((t) => `# ${t.host_name} / ${t.server_id} [${t.status}]\n${t.output || "等待执行"}`).join("\n\n"); showModal({ title: `${d.task_name || "临时发布"} · 执行 #${d.id}`, message: lines || "没有目标", confirmText: "关闭", cancelText: "关闭", mode: "confirm" }); });
+  if (pushLogRefreshTimer) window.clearTimeout(pushLogRefreshTimer);
+  if (state.projectTab === "pushlogs" && deployments.some((item) => item.status === "queued" || item.status === "running")) {
+    pushLogRefreshTimer = window.setTimeout(loadPushLogs, 3000);
+  }
+}
+
+function parsePushSelector(value) {
+  try { return JSON.parse(value || "{}"); } catch (_) { return {}; }
 }
 
 function filterFileRows(rows, query) {
@@ -1122,6 +1371,9 @@ function formatBytes(size) {
 }
 
 let dashboardRequestID = 0;
+let dashboardActivityChart = null;
+let dashboardFailureChart = null;
+let dashboardChartObserver = null;
 
 function populateDashboardProjects() {
   const select = document.getElementById("dashboardProject");
@@ -1164,8 +1416,7 @@ function renderDashboardKpis(summary = {}) {
   </article>`).join("");
 }
 
-function renderDashboardChart(series = []) {
-  const host = document.getElementById("dashboardChart");
+function renderDashboardChartFallback(host, series = []) {
   if (!host) return;
   const width = 960, height = 260, left = 46, right = 18, top = 16, bottom = 34;
   const plotWidth = width - left - right, plotHeight = height - top - bottom;
@@ -1192,6 +1443,78 @@ function renderDashboardChart(series = []) {
   }).join("");
   const total = series.reduce((sum, day) => sum + (day.uploads || 0) + (day.pulls || 0) + (day.deployments || 0), 0);
   host.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="presentation">${grid}${labels}${lines}</svg>${total ? "" : '<div class="dashboard-chart-empty">当前筛选范围暂无发布活动</div>'}`;
+}
+
+function initDashboardCharts() {
+  if (!window.echarts || dashboardChartObserver) return;
+  const activity = document.getElementById("dashboardChart");
+  const failure = document.getElementById("dashboardQualityChart");
+  if (!activity || !failure) return;
+  dashboardActivityChart = window.echarts.init(activity, null, { renderer: "svg" });
+  dashboardFailureChart = window.echarts.init(failure, null, { renderer: "svg" });
+  dashboardChartObserver = new ResizeObserver(() => {
+    dashboardActivityChart?.resize();
+    dashboardFailureChart?.resize();
+  });
+  dashboardChartObserver.observe(activity);
+  dashboardChartObserver.observe(failure);
+}
+
+function dashboardChartOption(series, failureMode) {
+  const dates = series.map((day) => String(day.date || "").slice(5));
+  const lines = failureMode
+    ? [
+      { name: "拉取失败", key: "pull_failures", color: "#ef4444" },
+      { name: "SSH 发布失败", key: "deployment_failures", color: "#f59e0b" },
+      { name: "目标失败", key: "target_failures", color: "#a855f7" },
+    ]
+    : [
+      { name: "上传", key: "uploads", color: "#10b981" },
+      { name: "拉取", key: "pulls", color: "#3b82f6" },
+      { name: "SSH 发布", key: "deployments", color: "#f59e0b" },
+    ];
+  return {
+    animationDuration: 240,
+    color: lines.map((line) => line.color),
+    tooltip: { trigger: "axis", backgroundColor: "#171b22", borderColor: "#303844", textStyle: { color: "#e5e7eb" } },
+    legend: { top: 4, right: 4, textStyle: { color: "#9ca3af", fontSize: 11 }, itemWidth: 10, itemHeight: 10 },
+    grid: { top: 42, right: 18, bottom: 30, left: 42, containLabel: false },
+    xAxis: { type: "category", boundaryGap: failureMode, data: dates, axisLine: { lineStyle: { color: "#303844" } }, axisLabel: { color: "#8792a2", fontSize: 10, interval: Math.max(0, Math.ceil(dates.length / 7) - 1) } },
+    yAxis: { type: "value", minInterval: 1, axisLine: { show: false }, splitLine: { lineStyle: { color: "#262d37" } }, axisLabel: { color: "#8792a2", fontSize: 10 } },
+    series: lines.map((line) => ({ name: line.name, type: failureMode ? "bar" : "line", stack: failureMode ? "failures" : undefined, smooth: !failureMode, symbol: "circle", symbolSize: 5, emphasis: { focus: "series" }, data: series.map((day) => Number(day[line.key] || 0)) })),
+  };
+}
+
+function renderDashboardChart(series = []) {
+  const activityHost = document.getElementById("dashboardChart");
+  const failureHost = document.getElementById("dashboardQualityChart");
+  if (!activityHost || !failureHost) return;
+  initDashboardCharts();
+  if (!dashboardActivityChart || !dashboardFailureChart) {
+    renderDashboardChartFallback(activityHost, series);
+    renderDashboardChartFallback(failureHost, series.map((day) => ({ ...day, uploads: day.pull_failures || 0, pulls: day.deployment_failures || 0, deployments: day.target_failures || 0 })));
+    return;
+  }
+  dashboardActivityChart.setOption(dashboardChartOption(series, false), true);
+  dashboardFailureChart.setOption(dashboardChartOption(series, true), true);
+}
+
+function renderDashboardHealth(health = {}, generatedAt = "") {
+  const host = document.getElementById("dashboardHealthGrid");
+  const freshness = document.getElementById("dashboardFreshness");
+  if (!host) return;
+  const pullNodes = Number(health.pull_nodes || 0);
+  const pullOnline = Number(health.pull_online || 0);
+  const sshHosts = Number(health.ssh_hosts || 0);
+  const sshFailing = Number(health.ssh_failing || 0);
+  const items = [
+    { label: "Pull 在线", value: `${pullOnline}/${pullNodes}`, meta: Number(health.pull_drift || 0) ? `${health.pull_drift} 个节点待收敛` : "无配置漂移", tone: health.pull_drift ? "warn" : "ok" },
+    { label: "SSH 存活（租户）", value: `${health.ssh_healthy || 0}/${sshHosts}`, meta: sshFailing ? `${sshFailing} 台检测失败` : `${health.ssh_unknown || 0} 台待首次检测`, tone: sshFailing ? "warn" : "info" },
+    { label: "自动 Hook", value: health.hooks_enabled || 0, meta: Number(health.hooks_pending || 0) ? `${health.hooks_pending} 个等待防抖` : "无等待任务", tone: health.hooks_pending ? "warn" : "primary" },
+    { label: "Hook 失败", value: health.hook_failures || 0, meta: health.latest_event_at ? `最近事件 ${health.latest_event_at}` : "当前筛选暂无事件", tone: health.hook_failures ? "warn" : "ok" },
+  ];
+  host.innerHTML = items.map((item) => `<article class="dashboard-health ${item.tone}"><span>${escapeHtml(item.label)}</span><strong>${escapeHtml(item.value)}</strong><small>${escapeHtml(item.meta)}</small></article>`).join("");
+  if (freshness) freshness.textContent = generatedAt ? `刷新于 ${new Date(generatedAt).toLocaleString("zh-CN", { hour12: false })}` : "等待数据";
 }
 
 function dashboardStatusBadge(status) {
@@ -1248,6 +1571,7 @@ async function loadDashboard() {
     if (requestID !== dashboardRequestID) return;
     renderDashboardKpis(dashboard.summary);
     renderDashboardChart(dashboard.series || []);
+    renderDashboardHealth(dashboard.health || {}, dashboard.generated_at);
     renderDashboardDaily(dashboard.series || []);
     renderDashboardRecords(dashboard.recent || []);
     const updated = document.getElementById("dashboardUpdatedAt");
@@ -1265,6 +1589,49 @@ document.getElementById("dashboardProject")?.addEventListener("change", loadDash
 window.setInterval(() => {
   if (state.globalView === "dashboard" && !document.hidden) loadDashboard();
 }, 60000);
+
+let guideDirectory = null;
+let selectedGuideTopic = "";
+
+async function loadGuideDirectory() {
+  if (guideDirectory) {
+    renderGuideDirectory();
+    return;
+  }
+  const content = document.getElementById("guideContent");
+  try {
+    guideDirectory = await api("/api/agent/guide");
+    selectedGuideTopic = guideDirectory.topics?.[0]?.id || "";
+    renderGuideDirectory();
+    if (selectedGuideTopic) await loadGuideTopic(selectedGuideTopic);
+  } catch (error) {
+    if (content) content.textContent = "官方指南加载失败: " + error.message;
+  }
+}
+
+function renderGuideDirectory() {
+  const host = document.getElementById("guideTopicList");
+  if (!host || !guideDirectory) return;
+  host.innerHTML = `<div class="guide-topic-head"><strong>${escapeHtml(guideDirectory.title || "官方接入指南")}</strong><small>${escapeHtml(guideDirectory.notice || "")}</small></div>${(guideDirectory.topics || []).map((topic) => `<button type="button" class="guide-topic ${topic.id === selectedGuideTopic ? "active" : ""}" data-guide-topic="${escapeAttr(topic.id)}"><strong>${escapeHtml(topic.title)}</strong><small>${escapeHtml(topic.summary)}</small></button>`).join("")}`;
+  host.querySelectorAll("[data-guide-topic]").forEach((button) => {
+    button.onclick = () => loadGuideTopic(button.dataset.guideTopic);
+  });
+}
+
+async function loadGuideTopic(topicID) {
+  if (!topicID) return;
+  const content = document.getElementById("guideContent");
+  if (!content) return;
+  selectedGuideTopic = topicID;
+  renderGuideDirectory();
+  content.textContent = "正在加载官方指南…";
+  try {
+    const topic = await api("/api/agent/guide/" + encodeURIComponent(topicID));
+    content.innerHTML = `<div class="guide-content-head"><h2>${escapeHtml(topic.title)}</h2><p>${escapeHtml(topic.summary || "")}</p></div><pre>${escapeHtml(topic.content || "")}</pre>`;
+  } catch (error) {
+    content.textContent = "官方指南加载失败: " + error.message;
+  }
+}
 
 let previewDebounceTimer = null;
 let renderedPreviewIndex = 0;

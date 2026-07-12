@@ -4,7 +4,9 @@
 [![Lint](https://github.com/neko233-com/express233/actions/workflows/lint.yml/badge.svg)](https://github.com/neko233-com/express233/actions/workflows/lint.yml)
 [![CodeQL](https://github.com/neko233-com/express233/actions/workflows/codeql.yml/badge.svg)](https://github.com/neko233-com/express233/actions/workflows/codeql.yml)
 
-游戏逻辑服 **拉模式** 部署：中央上传一次，SSH 集群 `express233-cli deploy` 拉齐；按 `server_id` 预览配置 diff。
+面向游戏服务器集群与数据计算节点的 **推/拉一体交付控制平面**：统一管理版本制品、按 `server_id` 渲染差异配置、SSH Push 发布、Pull Agent 期望状态收敛、自动 Hook、健康门禁、回滚与 30 天审计。
+
+它不是简单的文件上传器。网关、N 个逻辑服、N 个战斗服或 Spark Worker 都作为“交付节点”进入同一项目拓扑；控制面决定“哪个节点应运行哪个版本”，节点的数据库连接等差异由 `server.yaml[server_id]` 在交付时生成。
 
 ## 功能概览
 
@@ -16,6 +18,10 @@
 | **版本 diff** | 对比任意两发布版本在同一 `server_id` 下的有效配置 |
 | **存储空间** | 磁盘占用总览、目录树、索引搜索、关联删除（草稿文件 / 版本 / 项目） |
 | **安全部署** | CLI `deploy` = 拉取到 `.tmp` → stop → swap → start（见 [SAFE_DEPLOY](docs/SAFE_DEPLOY.md)） |
+| **统一 Push / Pull** | SSH 绑定和 Pull Agent 位于同一集群节点清单，展示在线、当前/期望版本和 drift |
+| **期望状态收敛** | Pull Agent 心跳领取 version + generation；健康检查成功后才确认，失败不推进、不立即重试 |
+| **发布编排** | 可重复发布任务、Gitea/GitHub 上传后 Hook、30 秒尾随防抖合并、串行执行与幂等重放 |
+| **可观测与安全** | ECharts 按日活动/失败趋势、实时 Pull/SSH/Hook 态势、Prometheus 指标、操作/发布/Hook 日志 30 天；登录 IP 限速封禁、SSH 密文不可回读 |
 | **多租户与 RBAC** | 租户隔离、`viewer` / `operator` / `admin`、项目邀请链接 |
 | **Blob 去重** | 内容寻址存储，多版本共享相同文件块，删除时按引用计数回收 |
 
@@ -51,6 +57,9 @@
 | 配置约束 | 配置文件 **basename 全局唯一**；`server.yaml` 按 **文件名** 替换（无视路径） |
 | 预览 | Web 或 `express233-cli preview` 查看每个键 before → after |
 | 节点部署 | `express233-cli deploy` = 拉取 + 替换 + `post_hook` |
+| 持续收敛 | `express233-cli agent` 定期心跳，发现新 generation 后调用安全部署 runner |
+
+详细架构、推拉边界和生产拓扑见 [交付控制平面](docs/DELIVERY_CONTROL_PLANE.md)。
 
 ## 安装
 
@@ -132,7 +141,7 @@ express233-server stop
 - `reload-config`：校验并热重载租户 `server.yaml`，无需重启进程
 - `backup-config` / `restore-config`：备份并恢复中央 `server.yaml`；`restore-config --default` 可恢复为示例模板
 - `reset-root-password`：仅命令行强制重置 `root` 密码，适合忘记密码时救援
-- 运行日志：默认 `info` 级别，写入 `run/server.log`，按大小滚动，避免单文件无限增长；高频 2xx 请求默认不记日志
+- 运行日志：默认 `info` 级别，写入 `run/server.log`，按天或 10 MiB 滚动，最多 30 份并清理超过 30 天的备份；高频 2xx 请求默认不记日志
 
 PowerShell 示例：
 
@@ -178,6 +187,26 @@ express233-cli deploy --project mygame --server-id game-logic-042 --version 1.0.
 版本 diff：`express233-cli diff --from 1.0.0 --to 1.1.0 --server-id ID`（对比两版本在 server_id 下的有效配置键）
 
 项目拉取日志：`GET /api/projects/{id}/logs?server_id=game-logic-042&version=1.0.0`（默认保留最近 30 天）
+
+## Pull Agent（持续收敛）
+
+Linux/macOS 安装脚本同时安装 `express233-cli` 与 `safe-deploy.sh`。常驻 Agent 可由 systemd、Supervisor 或容器编排器托管：
+
+```bash
+export EXPRESS233_SERVER=https://control.example.invalid
+export EXPRESS233_TOKEN=<pull-token>
+express233-cli agent \
+  --project game-cluster \
+  --server-id logic-021 \
+  --role logic \
+  --environment production \
+  --label role:logic \
+  --label env:production \
+  --root /opt/game-servers \
+  --interval 1m
+```
+
+Windows 使用同等 stop → backup → swap → start → health gate 的 `scripts/safe-deploy.ps1`。凭据仅通过 HTTP 请求头和 runner 子进程环境传递，不进入节点状态 JSON、心跳请求体或日志。
 
 审批流：operator 上传并「提交审批」→ admin「正式发布」或「驳回」
 
