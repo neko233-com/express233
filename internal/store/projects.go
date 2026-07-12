@@ -21,13 +21,15 @@ type Project struct {
 
 // Version 版本。
 type Version struct {
-	ID          int64  `json:"id"`
-	ProjectID   int64  `json:"project_id"`
-	ProjectName string `json:"project_name,omitempty"`
-	Version     string `json:"version"`
-	Status      string `json:"status"` // draft | published
-	CreatedAt   string `json:"created_at"`
-	PublishedAt string `json:"published_at,omitempty"`
+	ID          int64            `json:"id"`
+	ProjectID   int64            `json:"project_id"`
+	ProjectName string           `json:"project_name,omitempty"`
+	Version     string           `json:"version"`
+	Status      string           `json:"status"` // draft | published
+	CreatedAt   string           `json:"created_at"`
+	PublishedAt string           `json:"published_at,omitempty"`
+	VCS         VCSProvenance    `json:"vcs"`
+	Artifact    ArtifactManifest `json:"artifact"`
 }
 
 // ListProjects 列出用户可见项目（成员或租户 admin）。
@@ -122,7 +124,7 @@ func (s *Store) ProjectNameInTenant(tenantID, projectID int64) (string, error) {
 // ListVersions 列出项目下版本。
 func (s *Store) ListVersions(projectID int64) ([]Version, error) {
 	rows, err := s.db.Query(
-		`SELECT id, project_id, version, status, created_at, COALESCE(published_at,'') FROM versions WHERE project_id = ? ORDER BY created_at DESC, id DESC`,
+		`SELECT `+versionColumns+` FROM versions WHERE project_id = ? ORDER BY created_at DESC, id DESC`,
 		projectID,
 	)
 	if err != nil {
@@ -132,7 +134,7 @@ func (s *Store) ListVersions(projectID int64) ([]Version, error) {
 	var out []Version
 	for rows.Next() {
 		var v Version
-		if err := rows.Scan(&v.ID, &v.ProjectID, &v.Version, &v.Status, &v.CreatedAt, &v.PublishedAt); err != nil {
+		if err := scanVersion(rows, &v); err != nil {
 			return nil, err
 		}
 		out = append(out, v)
@@ -231,16 +233,9 @@ func isUniqueVersionError(err error) bool {
 // GetVersion 获取版本元数据。
 func (s *Store) GetVersion(projectID int64, version string) (*Version, error) {
 	var v Version
-	var pub sql.NullString
-	err := s.db.QueryRow(
-		`SELECT id, project_id, version, status, created_at, published_at FROM versions WHERE project_id = ? AND version = ?`,
-		projectID, version,
-	).Scan(&v.ID, &v.ProjectID, &v.Version, &v.Status, &v.CreatedAt, &pub)
+	err := scanVersion(s.db.QueryRow(`SELECT `+versionColumns+` FROM versions WHERE project_id = ? AND version = ?`, projectID, version), &v)
 	if err != nil {
 		return nil, err
-	}
-	if pub.Valid {
-		v.PublishedAt = pub.String
 	}
 	return &v, nil
 }
@@ -279,10 +274,11 @@ func (s *Store) PublishVersion(tenantID, projectID int64, version string) error 
 		return err
 	}
 	now := time.Now().Format(timeLayout)
-	_, err = s.db.Exec(
-		`UPDATE versions SET status = 'published', published_at = ? WHERE project_id = ? AND version = ?`,
-		now, projectID, version,
-	)
+	manifest, err := BuildArtifactManifest(dir)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`UPDATE versions SET status='published', published_at=?, artifact_sha256=?, artifact_file_count=?, artifact_bytes=? WHERE project_id=? AND version=?`, now, manifest.SHA256, manifest.FileCount, manifest.Bytes, projectID, version)
 	return err
 }
 
@@ -324,7 +320,7 @@ func (s *Store) DeleteVersion(tenantID, projectID int64, projectName, version st
 // ListPublishedVersions 返回项目下所有已发布版本（新→旧）。
 func (s *Store) ListPublishedVersions(projectID int64) ([]Version, error) {
 	rows, err := s.db.Query(
-		`SELECT id, project_id, version, status, created_at, COALESCE(published_at,'') FROM versions
+		`SELECT `+versionColumns+` FROM versions
 			 WHERE project_id = ? AND status = 'published' ORDER BY published_at DESC, id DESC`,
 		projectID,
 	)
@@ -335,7 +331,7 @@ func (s *Store) ListPublishedVersions(projectID int64) ([]Version, error) {
 	var out []Version
 	for rows.Next() {
 		var v Version
-		if err := rows.Scan(&v.ID, &v.ProjectID, &v.Version, &v.Status, &v.CreatedAt, &v.PublishedAt); err != nil {
+		if err := scanVersion(rows, &v); err != nil {
 			return nil, err
 		}
 		out = append(out, v)

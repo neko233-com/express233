@@ -280,6 +280,7 @@ paths:
               type: object
               properties:
                 name: { type: string, description: 版本号；留空则自动创建 0.0.1 或当前最大三段数字版本 patch + 1 }
+                vcs: { $ref: "#/components/schemas/VCSProvenance" }
       responses:
         "201":
           description: 已创建
@@ -341,6 +342,36 @@ paths:
       responses:
         "200":
           description: 已发布
+
+  /api/projects/{id}/versions/{ver}/vcs:
+    put:
+      tags: [projects]
+      summary: 设置草稿版本的 Git/Gitea/GitHub 溯源；发布后不可修改
+      security: [{ cookieAuth: [] }, { basicAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: ver
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [vcs]
+              properties:
+                vcs: { $ref: "#/components/schemas/VCSProvenance" }
+      responses:
+        "200":
+          description: 已更新
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Version" }
 
   /api/projects/{id}/versions/{ver}/files:
     post:
@@ -1446,6 +1477,25 @@ components:
         status: { type: string, enum: [draft, pending_review, rejected, published] }
         created_at: { type: string }
         published_at: { type: string }
+        vcs: { $ref: "#/components/schemas/VCSProvenance" }
+        artifact: { $ref: "#/components/schemas/ArtifactManifest" }
+    VCSProvenance:
+      type: object
+      description: 无凭据 VCS 来源；发布后随版本冻结。
+      properties:
+        provider: { type: string, enum: [git, github, gitea] }
+        repository: { type: string, format: uri, description: credential-free HTTPS URL }
+        ref: { type: string }
+        commit: { type: string, description: 7-128 hexadecimal commit ID }
+        run_url: { type: string, format: uri }
+        run_id: { type: string }
+    ArtifactManifest:
+      type: object
+      description: 服务端在发布时生成的确定性文件清单摘要。
+      properties:
+        sha256: { type: string }
+        file_count: { type: integer, format: int64 }
+        bytes: { type: integer, format: int64 }
     VersionFileTag:
       type: object
       properties:

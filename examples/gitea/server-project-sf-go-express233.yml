@@ -2,6 +2,7 @@ name: Deploy server-project-sf-go through express233
 
 on:
   push:
+    branches: [main, master]
     tags: ["v*"]
 
 # Copy this file into poke-game/server-project-sf-go/.gitea/workflows/ after
@@ -15,7 +16,13 @@ jobs:
       EXPRESS233_USERNAME: ${{ secrets.EXPRESS233_USERNAME }}
       EXPRESS233_PASSWORD: ${{ secrets.EXPRESS233_PASSWORD }}
       PROJECT: server-project-sf-go
-      VERSION: ${{ github.ref_name }}
+      # A tag is an explicit release number. A branch build intentionally sends
+      # an empty name so express233 allocates the next patch atomically.
+      VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      VCS_COMMIT: ${{ github.sha }}
+      VCS_REF: ${{ github.ref }}
+      VCS_RUN_ID: ${{ github.run_id }}
+      VCS_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - uses: actions/checkout@v4
       - name: Build all Go main packages
@@ -51,9 +58,11 @@ jobs:
               -X POST "$BASE/api/projects" -d "$project_payload")
             project_id=$(printf '%s' "$project" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
           fi
-          version_payload=$(python3 -c 'import json,os; print(json.dumps({"name":os.environ["VERSION"]}))')
-          curl --fail --silent --show-error -b "$JAR" -H 'Content-Type: application/json' \
-            -X POST "$BASE/api/projects/$project_id/versions" -d "$version_payload" >/dev/null
+          version_payload=$(python3 -c 'import json,os; print(json.dumps({"name":os.environ["VERSION"],"vcs":{"provider":"gitea","repository":os.environ["GITHUB_SERVER_URL"]+"/"+os.environ["GITHUB_REPOSITORY"],"ref":os.environ["VCS_REF"],"commit":os.environ["VCS_COMMIT"],"run_id":os.environ["VCS_RUN_ID"],"run_url":os.environ["VCS_RUN_URL"]}}))')
+          version_result=$(curl --fail --silent --show-error -b "$JAR" -H 'Content-Type: application/json' \
+            -X POST "$BASE/api/projects/$project_id/versions" -d "$version_payload")
+          VERSION=$(printf '%s' "$version_result" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+          export VERSION
           tar --format=pax --numeric-owner --exclude-vcs --exclude='.gitea' --exclude='node_modules' --exclude='./.deploy' -czf /tmp/server-project-sf-go.tar.gz .
           curl --fail --silent --show-error -b "$JAR" -F "file=@/tmp/server-project-sf-go.tar.gz" \
             "$BASE/api/projects/$project_id/versions/$VERSION/files" >/dev/null

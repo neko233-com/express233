@@ -68,6 +68,15 @@ CREATE TABLE IF NOT EXISTS versions (
   status TEXT NOT NULL DEFAULT 'draft',
   created_at TEXT NOT NULL,
   published_at TEXT,
+  vcs_provider TEXT NOT NULL DEFAULT '',
+  vcs_repository TEXT NOT NULL DEFAULT '',
+  vcs_ref TEXT NOT NULL DEFAULT '',
+  vcs_commit TEXT NOT NULL DEFAULT '',
+  vcs_run_url TEXT NOT NULL DEFAULT '',
+  vcs_run_id TEXT NOT NULL DEFAULT '',
+  artifact_sha256 TEXT NOT NULL DEFAULT '',
+  artifact_file_count INTEGER NOT NULL DEFAULT 0,
+  artifact_bytes INTEGER NOT NULL DEFAULT 0,
   UNIQUE(project_id, version),
   FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
@@ -80,6 +89,9 @@ CREATE TABLE IF NOT EXISTS versions (
 		return err
 	}
 	if err := s.migrateExtra(); err != nil {
+		return err
+	}
+	if err := s.migrateVersionProvenance(); err != nil {
 		return err
 	}
 	if err := s.migrateTenant(); err != nil {

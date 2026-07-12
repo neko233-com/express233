@@ -1,0 +1,57 @@
+name: Build, trace and upload an express233 artifact
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    env:
+      EXPRESS233_URL: ${{ secrets.EXPRESS233_URL }}
+      EXPRESS233_USERNAME: ${{ secrets.EXPRESS233_USERNAME }}
+      EXPRESS233_PASSWORD: ${{ secrets.EXPRESS233_PASSWORD }}
+      PROJECT: example-game-server
+      # Tags retain their explicit semantic version; branch pushes atomically
+      # allocate the next patch through POST /versions with an empty name.
+      REQUESTED_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.26.x" }
+
+      - name: Build archive and create a traceable version
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${EXPRESS233_URL:?configure repository secret}"
+          : "${EXPRESS233_USERNAME:?configure repository secret}"
+          : "${EXPRESS233_PASSWORD:?configure repository secret}"
+          BASE="${EXPRESS233_URL%/}"
+          COOKIE=$(mktemp)
+          trap 'rm -f "$COOKIE" dist/release.tar.gz' EXIT
+          mkdir -p dist
+          CGO_ENABLED=0 go build -trimpath -o dist/game-server ./cmd/game-server
+          tar --format=pax --numeric-owner --exclude-vcs -czf dist/release.tar.gz -C dist game-server
+
+          login=$(python3 -c 'import json,os; print(json.dumps({"username":os.environ["EXPRESS233_USERNAME"],"password":os.environ["EXPRESS233_PASSWORD"]}))')
+          curl --fail --silent --show-error -c "$COOKIE" -H 'Content-Type: application/json' -X POST "$BASE/api/login" -d "$login" >/dev/null
+          project_id=$(curl --fail --silent --show-error -b "$COOKIE" "$BASE/api/projects" | python3 -c 'import json,os,sys; print(next((str(p["id"]) for p in json.load(sys.stdin) if p["name"] == os.environ["PROJECT"]), ""))')
+          if [ -z "$project_id" ]; then
+            project=$(curl --fail --silent --show-error -b "$COOKIE" -H 'Content-Type: application/json' -X POST "$BASE/api/projects" -d "{\"name\":\"$PROJECT\"}")
+            project_id=$(printf '%s' "$project" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+          fi
+          payload=$(python3 -c 'import json,os; print(json.dumps({"name":os.environ["REQUESTED_VERSION"],"vcs":{"provider":"github","repository":os.environ["GITHUB_SERVER_URL"]+"/"+os.environ["GITHUB_REPOSITORY"],"ref":os.environ["GITHUB_REF"],"commit":os.environ["GITHUB_SHA"],"run_id":os.environ["GITHUB_RUN_ID"],"run_url":os.environ["GITHUB_SERVER_URL"]+"/"+os.environ["GITHUB_REPOSITORY"]+"/actions/runs/"+os.environ["GITHUB_RUN_ID"]}}))')
+          created=$(curl --fail --silent --show-error -b "$COOKIE" -H 'Content-Type: application/json' -X POST "$BASE/api/projects/$project_id/versions" -d "$payload")
+          VERSION=$(printf '%s' "$created" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+          curl --fail --silent --show-error -b "$COOKIE" -F "file=@dist/release.tar.gz" "$BASE/api/projects/$project_id/versions/$VERSION/files" >/dev/null
+          curl --fail --silent --show-error -b "$COOKIE" -X POST "$BASE/api/projects/$project_id/versions/$VERSION/publish" >/dev/null
+          echo "Published $PROJECT/$VERSION from ${GITHUB_SHA}"

@@ -668,6 +668,14 @@ async function selectVersion(v) {
   setVersionStatusBadge(v.status);
   document.getElementById("verCreated").textContent = v.created_at;
   document.getElementById("verPublished").textContent = v.published_at || "—";
+  const provenance = document.getElementById("verProvenance");
+  if (provenance) {
+    const vcs = v.vcs || {};
+    const artifact = v.artifact || {};
+    const source = vcs.commit ? `${vcs.provider || "git"} · ${vcs.ref || "—"} · ${vcs.commit}` : "未绑定 VCS 来源（手工草稿可后续由 CI 写入）";
+    const manifest = artifact.sha256 ? `制品清单 SHA-256 ${artifact.sha256} · ${artifact.file_count || 0} 文件 · ${artifact.bytes || 0} bytes` : "制品清单会在正式发布时生成";
+    provenance.textContent = `${source}；${manifest}`;
+  }
   document.getElementById("btnPublish").disabled = v.status === "published";
   document.getElementById("btnValidate").disabled = v.status === "published";
   updateReviewButtons(v.status);

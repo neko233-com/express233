@@ -21,6 +21,11 @@ type nameReq struct {
 	Name string `json:"name"`
 }
 
+type createVersionReq struct {
+	Name string              `json:"name"`
+	VCS  store.VCSProvenance `json:"vcs"`
+}
+
 func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 	tid, ok := s.tenantFromSession(r)
 	if !ok {
@@ -112,7 +117,7 @@ func (s *Server) handleCreateVersion(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, http.StatusForbidden, "project admin required")
 		return
 	}
-	var req nameReq
+	var req createVersionReq
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	_ = r.Body.Close()
 	if err != nil {
@@ -125,6 +130,10 @@ func (s *Server) handleCreateVersion(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if err := store.ValidateVCSProvenance(req.VCS); err != nil {
+		errJSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	var v *store.Version
 	if strings.TrimSpace(req.Name) == "" {
 		v, err = s.Store.CreateNextPatchVersion(tid, pid, pname)
@@ -135,7 +144,39 @@ func (s *Server) handleCreateVersion(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if err := s.Store.SetVersionVCSProvenance(pid, v.Version, req.VCS); err != nil {
+		errJSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	v, _ = s.Store.GetVersion(pid, v.Version)
 	writeJSON(w, http.StatusCreated, v)
+}
+
+func (s *Server) handlePutVersionVCS(w http.ResponseWriter, r *http.Request) {
+	pid, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	pc, err := s.projectByID(r, pid)
+	if err != nil {
+		errJSON(w, http.StatusNotFound, "project not found")
+		return
+	}
+	version := chi.URLParam(r, "ver")
+	if !s.requireMutableVersion(w, pc, version) {
+		return
+	}
+	var req struct {
+		VCS store.VCSProvenance `json:"vcs"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		errJSON(w, http.StatusBadRequest, "invalid VCS metadata")
+		return
+	}
+	if err := s.Store.SetVersionVCSProvenance(pid, version, req.VCS); err != nil {
+		errJSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.auditSession(r, "version.vcs.update", fmt.Sprintf("project_id=%d version=%s provider=%s commit=%s", pid, version, req.VCS.Provider, req.VCS.Commit))
+	v, _ := s.Store.GetVersion(pid, version)
+	writeJSON(w, http.StatusOK, v)
 }
 
 func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {

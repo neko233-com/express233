@@ -28,6 +28,8 @@
 - **产物**（每个平台各 2 个二进制 + sha256）：
   - `express233-cli-{os}-{arch}[.exe]`
   - `express233-server-{os}-{arch}[.exe]`
+- **VCS 溯源**：每个 CI/Release artifact 都附带 `PROVENANCE.json`（repository、ref、commit、run URL/ID）和 `SHA256SUMS`。将游戏/数据项目上传到 express233 时，应同时在创建版本请求中传入同一组 `vcs` 字段；发布后它们与服务端生成的制品清单摘要一同冻结。
+- **版本自增**：tag 构建传入 tag 作为 `name`；分支构建将 `name` 留空，服务端会在 SQLite 事务内生成下一个 patch。必须使用响应中的 `version` 执行后续上传、发布和部署，避免多个并发 Runner 发生版本号竞争。
 - **发布**：合并 matrix 产物后由 `softprops/action-gh-release` 创建 GitHub Release
 
 ### Helm (`helm.yml`)

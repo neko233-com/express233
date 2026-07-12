@@ -77,6 +77,18 @@ jobs:
             env CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -ldflags "${LDFLAGS}" -o "dist/${cli}" ./cmd/express233-cli
             env CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -ldflags "${LDFLAGS}" -o "dist/${srv}" ./cmd/express233-server
           done
+          python3 - <<'PY' > dist/PROVENANCE.json
+          import json, os
+          print(json.dumps({
+              "schema": "express233.artifact-provenance/v1",
+              "version": os.environ["VERSION"],
+              "repository": os.environ["GITHUB_SERVER_URL"] + "/" + os.environ["GITHUB_REPOSITORY"],
+              "ref": os.environ["GITHUB_REF"],
+              "commit": os.environ["COMMIT"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_url": os.environ["GITHUB_SERVER_URL"] + "/" + os.environ["GITHUB_REPOSITORY"] + "/actions/runs/" + os.environ["GITHUB_RUN_ID"],
+          }, sort_keys=True))
+          PY
           sha256sum dist/* > dist/SHA256SUMS
 
       - uses: actions/upload-artifact@v4

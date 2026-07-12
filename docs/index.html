@@ -354,17 +354,18 @@
         <div class="brand-mark">E</div>
         <div>
           <strong>express233</strong>
-          <span>拉模式部署控制台</span>
+          <span>推拉一体交付控制台</span>
         </div>
       </div>
       <h2>快速导航</h2>
       <a href="#start">1. 启动与登录</a>
       <a href="#project">2. 项目与版本</a>
-      <a href="#tags">3. 多平台文件标签</a>
-      <a href="#replace">4. 配置替换预览</a>
-      <a href="#publish">5. 发布与拉取</a>
-      <a href="#automation">6. 自动化 HTTP</a>
-      <a href="#ops">7. 运维建议</a>
+      <a href="#provenance">3. 制品与 VCS 溯源</a>
+      <a href="#tags">4. 多平台文件标签</a>
+      <a href="#replace">5. 配置替换预览</a>
+      <a href="#delivery">6. Push / Pull 交付</a>
+      <a href="#automation">7. 自动化 HTTP</a>
+      <a href="#ops">8. 大盘与运维建议</a>
       <h2>参考</h2>
       <a href="openapi.yaml">OpenAPI YAML</a>
       <a href="https://github.com/neko233-com/express233/releases">GitHub Releases</a>
@@ -375,7 +376,7 @@
         <div>
           <p class="eyebrow">Game Server Pull Deployment Console</p>
           <h1>express233 使用文档</h1>
-          <p class="lead">一个中央控制台维护多项目、多版本、多平台二进制包，并按 <code>server_id</code> 做配置替换。节点只拉取自己需要的文件，减少弱网环境下的上传、下载浪费。</p>
+          <p class="lead">一个中央控制台维护多项目、多版本、多平台制品，并按 <code>server_id</code> 做嵌套配置替换。它统一 Pull Agent 与 SSH Push 发布，并将制品内容摘要、Git/Gitea/GitHub 提交和构建运行固化为可审计快照。</p>
           <div class="actions">
             <a class="button primary" href="#start">开始使用</a>
             <a class="button" href="openapi.yaml">查看 OpenAPI</a>
@@ -444,11 +445,30 @@
           <div><span>04</span>设置平台标签</div>
           <div><span>05</span>预览后发布</div>
         </div>
-        <p>版本列表支持搜索。建议版本号从 <code>1.0.0</code> 开始，并把破坏性协议、配置结构或二进制布局变更记录到发布说明。</p>
+          <p>版本列表支持搜索、历史回滚和固定版本。已发布版本（包括文件标签与 VCS 溯源）不可修改；修复必须创建新草稿，避免同一版本号对应不同生产字节。</p>
+      </section>
+
+      <section id="provenance">
+        <h2>3. 制品与 VCS 溯源</h2>
+        <p>每个版本草稿可绑定 Git、GitHub 或 Gitea 的仓库 HTTPS 地址、ref、commit、构建运行 URL/ID。发布时服务端对排序后的每个文件路径、权限、大小和 SHA-256 计算不可变制品清单摘要；它不依赖上传时使用 zip、tar 还是逐文件。</p>
+        <div class="split">
+          <pre>{
+  "name": "4.3.0",
+  "vcs": {
+    "provider": "gitea",
+    "repository": "https://git.example.com/game/server",
+    "ref": "refs/tags/v4.3.0",
+    "commit": "0123456789abcdef",
+    "run_url": "https://git.example.com/game/server/actions/runs/42",
+    "run_id": "42"
+  }
+}</pre>
+          <div class="card"><strong>供应链边界</strong><p>仓库和运行链接只接受无凭据 HTTPS URL；commit 必须是 7–128 位十六进制。CI 二进制产物额外携带 <code>PROVENANCE.json</code> 与 <code>SHA256SUMS</code>，方便离线验证和导入。</p></div>
+        </div>
       </section>
 
       <section id="tags">
-        <h2>3. 多平台文件标签</h2>
+        <h2>4. 多平台文件标签</h2>
         <p>一个版本可以同时上传 Windows、macOS、Linux，x86_64、arm64 等所有二进制。下载方上报自身环境后，服务端只返回匹配标签的文件。未设置标签的文件等价于 <span class="badge">*</span>，所有平台都会下载。</p>
         <div class="visual">
           <div class="visual-head">上传文件树预览</div>
@@ -471,7 +491,7 @@
       </section>
 
       <section id="replace">
-        <h2>4. 配置替换预览</h2>
+        <h2>5. 配置替换预览</h2>
         <p>配置替换不是 key/value 列表，而是路径树、原文件、替换后文件三栏预览。左侧选文件，中间看原始内容，右侧看按 <code>server_id</code> 替换后的内容，修改行会高亮。</p>
         <div class="split">
           <div>
@@ -492,20 +512,20 @@
         </div>
       </section>
 
-      <section id="publish">
-        <h2>5. 发布与拉取</h2>
-        <p>发布后，节点通过 HTTP API 拉取版本清单和文件。安全部署必须使用 stop、swap、start 流程，不能直接覆盖运行中的二进制。</p>
+      <section id="delivery">
+        <h2>6. Push / Pull 交付与自动化</h2>
+        <p>Pull Agent 以最小权限 Token 或 Basic Auth 心跳并收敛 desired version/generation；Push 使用已固定 Host Key 的 SSH 资源和可重复发布任务。两种模式共用版本、配置渲染、审计与集群节点清单。</p>
         <pre># 典型节点流程
 pull 到 GAME_ROOT/.tmp/{server_id}/
 停止 GAME_ROOT/{server_id}/run/server.pid 对应进程
 rsync 临时目录到正式目录，保留 logs/ 与 run/
 执行 scripts/restart.sh</pre>
-        <p>详细部署约束见仓库内 <code>docs/SAFE_DEPLOY.md</code>。</p>
+        <p>Release Hook 可选择开启，默认在 30 秒尾随窗口合并多个触发为一次最新版本发布；Pull 节点可选择自动跟随。日志、Hook 事件与发布输出默认保留 30 天。</p>
       </section>
 
       <section id="automation">
-        <h2>6. 自动化 HTTP 操作</h2>
-        <p>Agent 或运维脚本可以使用 API 做批量标签、上传、预览和发布。接口以 OpenAPI 为准，下面是自动化思路示例。</p>
+        <h2>7. 自动化 HTTP 操作</h2>
+        <p>Agent 或运维脚本可以使用 API 做批量标签、上传、预览、VCS 溯源和发布。接口以 OpenAPI 为准；公开 <code>/api/agent/guide</code> 仅返回官方脱敏接入说明。</p>
         <pre># 查询 OpenAPI
 curl -fsSL https://neko233-com.github.io/express233/openapi.yaml
 
@@ -518,11 +538,11 @@ tags=linux,amd64,server</pre>
       </section>
 
       <section id="ops">
-        <h2>7. 运维建议</h2>
+        <h2>8. 数据大盘与运维建议</h2>
         <div class="grid">
           <div class="card"><strong>弱网优化</strong><p>优先上传 zip 产物，服务端按文件标签选择性下载。zip 内部已压缩的二进制再 gzip 收益有限，重点应放在断点重试、校验和、分平台过滤。</p></div>
-          <div class="card"><strong>版本治理</strong><p>一个大版本只维护一个多平台包，标签决定下载范围。破坏性变更使用新的主版本号。</p></div>
-          <div class="card"><strong>安全发布</strong><p>发布前跑 CI，节点更新时串行部署，保留 <code>logs/</code> 和 <code>run/</code>，失败时保留备份目录。</p></div>
+          <div class="card"><strong>版本治理</strong><p>用 VCS commit + 制品清单摘要证明生产字节来源；一个大版本只维护一个多平台包，标签决定下载范围。</p></div>
+          <div class="card"><strong>快速定位</strong><p>ECharts 大盘显示按日上传、拉取、SSH 发布和失败压力；实时卡片显示 Pull 漂移、SSH 健康和 Hook 积压。</p></div>
         </div>
       </section>
     </main>

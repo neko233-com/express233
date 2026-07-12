@@ -144,6 +144,7 @@ func (s *Server) Router() http.Handler {
 				r.Post("/versions", s.handleCreateVersion)
 				r.Post("/versions/{ver}/submit-review", s.handleSubmitReview)
 				r.Post("/versions/{ver}/publish", s.handlePublishVersion)
+				r.Put("/versions/{ver}/vcs", s.handlePutVersionVCS)
 				r.Post("/versions/{ver}/reject", s.handleRejectReview)
 				r.Delete("/versions/{ver}", s.handleDeleteVersion)
 				r.Post("/versions/{ver}/files", s.handleUploadFile)

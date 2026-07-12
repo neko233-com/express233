@@ -1,5 +1,7 @@
 export type Project = { id: number; name: string; my_role?: string };
-export type Version = { id: number; version: string; status: string; created_at: string; published_at?: string };
+export type VCSProvenance = { provider?: "git" | "github" | "gitea"; repository?: string; ref?: string; commit?: string; run_url?: string; run_id?: string };
+export type ArtifactManifest = { sha256?: string; file_count?: number; bytes?: number };
+export type Version = { id: number; version: string; status: string; created_at: string; published_at?: string; vcs: VCSProvenance; artifact: ArtifactManifest };
 export type PushDeployment = { id: number; task_id?: number; task_name?: string; version: string; selector: string; status: string; created_at: string; targets?: { id: number; host_name: string; server_id: string; status: string; output: string }[] };
 export type PushDeploymentTask = { id: number; project_id: number; name: string; version?: string; server_ids: string[]; tags: string[]; tag_match: "all" | "any"; run_count: number; last_run_at?: string; created_at: string; updated_at: string };
 export type PushHost = {
