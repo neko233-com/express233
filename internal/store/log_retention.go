@@ -26,6 +26,8 @@ func (s *Store) PruneLogs(now time.Time) (LogPruneResult, error) {
 		return out, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	// Use one captured cutoff for every table so a run cannot retain partial
+	// slices of a deployment merely because cleanup crossed a clock boundary.
 	cutoff := now.Add(-LogRetention).Format(timeLayout)
 	statements := []struct {
 		query string

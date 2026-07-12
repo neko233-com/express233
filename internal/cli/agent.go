@@ -158,6 +158,9 @@ func runAgentCycle(ctx context.Context, opts AgentOptions) error {
 	if !response.Desired.NeedsDeploy || response.Desired.Version == "" {
 		return nil
 	}
+	// Mark the transition before executing the runner. Operators can therefore
+	// tell an in-progress safe swap from an offline node without exposing any
+	// deployment credentials in the heartbeat payload.
 	_, _ = sendAgentHeartbeat(ctx, opts, state, "deploying", "")
 	if err := agentRunDeployment(ctx, opts, response.Desired.Version); err != nil {
 		_, _ = sendAgentHeartbeat(ctx, opts, state, "error", "deployment_failed")
@@ -231,6 +234,10 @@ func runAgentDeployment(ctx context.Context, opts AgentOptions, version string) 
 	} else {
 		command = exec.CommandContext(ctx, opts.Runner, args...)
 	}
+	// The runner consumes secrets from its process environment rather than
+	// command-line flags. Command lines are commonly visible to other local
+	// users and tend to be copied into diagnostics; the runner must never print
+	// these values.
 	command.Env = append(os.Environ(),
 		"EXPRESS233_SERVER="+opts.ServerURL,
 		"EXPRESS233_PROJECT="+opts.Project,

@@ -67,6 +67,9 @@ func (s *Server) handleDeliveryNodeHeartbeat(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		metrics.agentHeartbeatErrors.Add(1)
 		if token != "" {
+			// An agent has no interactive CAPTCHA flow. Reuse the account/IP
+			// throttling store so a leaked or guessed pull token cannot be tried
+			// indefinitely against this otherwise public endpoint.
 			banned, retry, remaining := s.recordLoginFailure(r, "agent-token")
 			if banned {
 				w.Header().Set("Retry-After", strconv.Itoa(max(1, int(retry.Seconds()))))
@@ -120,6 +123,9 @@ func (s *Server) handleDeliveryNodeHeartbeat(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	metrics.agentHeartbeats.Add(1)
+	// A version match alone is insufficient: a node must also acknowledge the
+	// desired generation. This distinguishes a deliberate re-deploy of the same
+	// version from an older successful deployment.
 	needsDeploy := node.DesiredVersion != "" && (node.CurrentVersion != node.DesiredVersion || node.AppliedGeneration < node.DesiredGeneration)
 	if needsDeploy {
 		metrics.agentDrift.Add(1)

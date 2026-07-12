@@ -151,6 +151,10 @@ func (s *Store) HeartbeatDeliveryNode(heartbeat DeliveryNodeHeartbeat, now time.
 	}
 	stamp := now.Format(timeLayout)
 	labels := normaliseLabels(strings.Join(heartbeat.Labels, ","))
+	// The generation never moves backwards. Older agents can report a stale
+	// state after a restart; accepting it would make the console believe a newer
+	// rollout regressed. A matching desired version is allowed to acknowledge
+	// the generation even when an older agent did not persist it locally yet.
 	_, err := s.db.Exec(`INSERT INTO delivery_nodes(tenant_id,project_id,server_id,delivery_mode,role,environment,labels,os,arch,current_version,applied_generation,status,last_error,heartbeat_interval_seconds,last_seen_at,created_at,updated_at) VALUES(?,?,?,'pull',?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,project_id,server_id,delivery_mode) DO UPDATE SET role=excluded.role,environment=excluded.environment,labels=excluded.labels,os=excluded.os,arch=excluded.arch,current_version=excluded.current_version,applied_generation=CASE WHEN excluded.applied_generation>delivery_nodes.applied_generation THEN excluded.applied_generation WHEN excluded.current_version=delivery_nodes.desired_version AND delivery_nodes.desired_generation>delivery_nodes.applied_generation THEN delivery_nodes.desired_generation ELSE delivery_nodes.applied_generation END,status=excluded.status,last_error=excluded.last_error,heartbeat_interval_seconds=excluded.heartbeat_interval_seconds,last_seen_at=excluded.last_seen_at,updated_at=excluded.updated_at`, heartbeat.TenantID, heartbeat.ProjectID, heartbeat.ServerID, heartbeat.Role, heartbeat.Environment, labels, heartbeat.OS, heartbeat.Arch, heartbeat.CurrentVersion, heartbeat.AppliedGeneration, heartbeat.Status, heartbeat.LastError, heartbeat.HeartbeatIntervalSeconds, stamp, stamp, stamp)
 	if err != nil {
 		return nil, err
@@ -212,6 +216,8 @@ func (s *Store) SetDeliveryNodeDesired(tenantID, projectID int64, serverID, vers
 }
 
 func (s *Store) AdvanceAutoFollowDeliveryNodes(tenantID, projectID int64, version string, now time.Time) (int64, error) {
+	// Do not advance an already matching node. Besides reducing needless work,
+	// this keeps a duplicate publish request from manufacturing false drift.
 	result, err := s.db.Exec(`UPDATE delivery_nodes SET desired_generation=desired_generation+1,status='pending',desired_version=?,last_error='',updated_at=? WHERE tenant_id=? AND project_id=? AND delivery_mode='pull' AND auto_follow=1 AND desired_version<>?`, version, now.Format(timeLayout), tenantID, projectID, version)
 	if err != nil {
 		return 0, err

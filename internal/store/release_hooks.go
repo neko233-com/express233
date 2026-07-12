@@ -235,6 +235,9 @@ func (s *Store) QueueProjectReleaseHooks(tenantID, projectID int64, version, req
 	if version == "" || requestedBy == "" || !safeReleaseHookSource.MatchString(source) {
 		return nil, fmt.Errorf("version, requested_by, and a safe source are required")
 	}
+	// The pending version, due time and event counter are updated atomically.
+	// Consequently a burst of Gitea/GitHub webhook deliveries becomes one
+	// trailing-edge release task, including across process restarts.
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, err
