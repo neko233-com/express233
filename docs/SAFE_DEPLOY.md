@@ -58,11 +58,11 @@ express233 pull --server-id game-logic-01 --dest /opt/game-servers/.tmp/game-log
 
 ```bash
 PID=$(cat /opt/game-servers/game-logic-01/run/server.pid)
-kill $PID
-# 等待退出（超时 10s）
-for i in $(seq 1 10); do kill -0 $PID 2>/dev/null || break; sleep 1; done
-# 仍未退出则 SIGKILL
-kill -0 $PID 2>/dev/null && kill -9 $PID
+kill -TERM "$PID"
+# 等待退出（默认 90s，可用 --stop-timeout-seconds 调整）
+for i in $(seq 1 90); do kill -0 "$PID" 2>/dev/null || break; sleep 1; done
+# 仍未退出必须终止发布并保留 PID 文件；SIGKILL 只允许人工明确授权的应急操作。
+kill -0 "$PID" 2>/dev/null && exit 1
 ```
 
 **Step 3 — 备份（可选）**
@@ -105,6 +105,7 @@ bash scripts/safe-deploy.sh --server-id game-logic-01
 bash scripts/safe-deploy.sh --server-id game-logic-01 --version 1.0.0  # 指定版本
 bash scripts/safe-deploy.sh --server-id game-logic-01 --backup          # 带备份
 bash scripts/safe-deploy.sh --server-id game-logic-01 --dry-run         # 预览不执行
+bash scripts/safe-deploy.sh --server-id game-logic-01 --stop-timeout-seconds 90
 ```
 
 中央控制台的 SSH 推送始终启用 `--backup`。缺少 `scripts/restart.sh`、启动失败或可选的 `scripts/healthcheck.sh` 返回失败时，脚本会自动停止失败进程、恢复旧文件并重新执行旧版 `scripts/restart.sh`；备份默认保留最近 5 份，可通过 `EXPRESS233_BACKUP_KEEP` 调整。

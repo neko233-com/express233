@@ -19,7 +19,9 @@ set -euo pipefail
 # ═══════════════ 配置 ═══════════════
 GAME_ROOT="${GAME_ROOT:-/opt/game-servers}"
 EXPRESS233_BIN="${EXPRESS233_BIN:-express233-cli}"
-STOP_TIMEOUT="${STOP_TIMEOUT:-10}"        # 等待进程退出的秒数
+# STOP_TIMEOUT_SECONDS 是优雅退出最长等待时间，单位秒。超时必须 fail-closed，
+# 由人工确认后再执行应急强杀，发布脚本绝不能自行 SIGKILL。
+STOP_TIMEOUT_SECONDS="${STOP_TIMEOUT_SECONDS:-90}"
 DRY_RUN=false
 BACKUP=false
 BACKUP_KEEP="${EXPRESS233_BACKUP_KEEP:-5}"
@@ -44,7 +46,8 @@ while [[ $# -gt 0 ]]; do
     --dry-run)    DRY_RUN=true; shift ;;
     --backup)     BACKUP=true; shift ;;
     --root)       GAME_ROOT="$2"; shift 2 ;;
-    --stop-timeout) STOP_TIMEOUT="$2"; shift 2 ;;
+    --stop-timeout-seconds) STOP_TIMEOUT_SECONDS="$2"; shift 2 ;;
+    --stop-timeout) STOP_TIMEOUT_SECONDS="$2"; shift 2 ;;
     -h|--help)
       sed -n '2,18p' "$0"
       exit 0 ;;
@@ -60,8 +63,8 @@ if [[ ! "$SERVER_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]; then
   echo "error: invalid server_id (allowed: letters, digits, dot, underscore, hyphen)"
   exit 1
 fi
-if [[ ! "$STOP_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
-  echo "error: STOP_TIMEOUT must be a positive integer"
+if [[ ! "$STOP_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "error: STOP_TIMEOUT_SECONDS must be a positive integer"
   exit 1
 fi
 if [[ ! "$BACKUP_KEEP" =~ ^[1-9][0-9]*$ ]]; then
@@ -112,23 +115,33 @@ stop_server() {
     return
   fi
 
+  local executable_path
+  executable_path=$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)
+  case "$executable_path" in
+    "$FINAL_DIR"/*) ;;
+    *)
+      log "ERROR: refusing to stop unrelated PID=$pid executable=$executable_path"
+      return 1
+      ;;
+  esac
+
   log "Step 2/5: stopping server PID=$pid..."
   if $DRY_RUN; then
     log "[dry-run] would kill $pid"
     return
   fi
 
-  kill "$pid" 2>/dev/null || true
+  kill -TERM "$pid" 2>/dev/null || true
   local waited=0
-  while kill -0 "$pid" 2>/dev/null && [[ $waited -lt $STOP_TIMEOUT ]]; do
+  while kill -0 "$pid" 2>/dev/null && [[ $waited -lt $STOP_TIMEOUT_SECONDS ]]; do
     sleep 1
     waited=$((waited + 1))
   done
 
   if kill -0 "$pid" 2>/dev/null; then
-    log "WARNING: server did not stop after ${STOP_TIMEOUT}s, sending SIGKILL"
-    kill -9 "$pid" 2>/dev/null || true
-    sleep 1
+    log "ERROR: server did not stop after ${STOP_TIMEOUT_SECONDS}s; refusing automatic SIGKILL"
+    log "ERROR: keep PID file and require explicit human emergency authorization before force stop"
+    return 1
   fi
   rm -f "$PID_FILE"
   log "server stopped"
@@ -188,7 +201,10 @@ rollback_release() {
     return 1
   fi
   log "ROLLBACK: stopping failed release"
-  stop_server
+  if ! stop_server; then
+    log "ROLLBACK failed: failed release did not stop safely"
+    return 1
+  fi
   local rollback_tmp
   rollback_tmp=$(mktemp -d "${GAME_ROOT}/.rollback-${SERVER_ID}-XXXXXX")
   if ! tar -xzf "$BACKUP_ARCHIVE" -C "$rollback_tmp"; then

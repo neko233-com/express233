@@ -146,7 +146,7 @@
 远程 SSH 服务器上**不能直接覆盖运行中的二进制**。正确流程：
 
 1. **Pull 到临时目录** `GAME_ROOT/.tmp/{server_id}/`（不影响正在运行的服务）
-2. **Stop 旧服务** 读取 `run/server.pid`，SIGTERM → 超时 SIGKILL
+2. **Stop 旧服务** 读取 `run/server.pid`，校验 PID 仍属于目标实例后发送 SIGTERM；超时必须终止发布，SIGKILL 仅允许人工明确授权的应急操作
 3. **Swap 文件** rsync --exclude logs/ --exclude run/（保留日志和 PID）
 4. **Start 新服务** 执行 `scripts/restart.sh`
 
