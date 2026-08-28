@@ -55,6 +55,7 @@ mkdir -p "$dest/scripts" "$dest/.express233"
 cat >"$dest/scripts/restart.sh" <<'SCRIPT'
 #!/bin/bash
 set -eu
+printf '%s' "${EXPRESS233_SKIP_BACKUP:-missing}" >"$GAME_ROOT/downstream-skip-backup"
 (sleep 0.2; touch "$GAME_ROOT/health-ready") &
 SCRIPT
 cat >"$dest/scripts/healthcheck.sh" <<'SCRIPT'
@@ -81,6 +82,10 @@ chmod +x "$dest/scripts/restart.sh" "$dest/scripts/healthcheck.sh"
 	}
 	if !strings.Contains(string(output), "health check passed within 2s") {
 		t.Fatalf("missing bounded health success output:\n%s", output)
+	}
+	downstreamSkipBackup, err := os.ReadFile(filepath.Join(root, "downstream-skip-backup"))
+	if err != nil || string(downstreamSkipBackup) != "true" {
+		t.Fatalf("skip-backup policy was not propagated to restart hook: %q err=%v", downstreamSkipBackup, err)
 	}
 }
 
@@ -236,6 +241,7 @@ printf 'schema: new\nnew_field: default\n' >"$dest/config/application.yaml"
 cat >"$dest/scripts/restart.sh" <<'SCRIPT'
 #!/bin/bash
 set -eu
+printf '%s' "${EXPRESS233_SKIP_BACKUP:-missing}" >"$GAME_ROOT/downstream-skip-backup"
 mkdir -p "$GAME_ROOT/$SERVER_ID/run"
 bash -c 'trap "exit 0" TERM; while :; do sleep 0.1; done' </dev/null >/dev/null 2>&1 &
 printf '%s' "$!" >"$GAME_ROOT/$SERVER_ID/run/server.pid"
@@ -272,6 +278,10 @@ chmod +x "$dest/scripts/restart.sh" "$dest/scripts/healthcheck.sh"
 	firstOutput := run()
 	if !strings.Contains(firstOutput, "waiting for graceful exit") {
 		t.Fatalf("missing graceful stop phase:\n%s", firstOutput)
+	}
+	downstreamSkipBackup, err := os.ReadFile(filepath.Join(root, "downstream-skip-backup"))
+	if err != nil || string(downstreamSkipBackup) != "false" {
+		t.Fatalf("backup-enabled policy was not propagated to restart hook: %q err=%v", downstreamSkipBackup, err)
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for {

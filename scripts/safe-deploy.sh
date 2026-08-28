@@ -29,6 +29,7 @@ HEALTH_CHECK_TIMEOUT_SECONDS="${EXPRESS233_HEALTH_CHECK_TIMEOUT_SECONDS:-30}"
 HEALTH_CHECK_POLL_INTERVAL_SECONDS="${EXPRESS233_HEALTH_CHECK_POLL_INTERVAL_SECONDS:-1}"
 DRY_RUN=false
 BACKUP=false
+DOWNSTREAM_SKIP_BACKUP=true
 BACKUP_KEEP="${EXPRESS233_BACKUP_KEEP:-5}"
 VERSION_ARGS=()
 if [[ -n "${VERSION:-}" ]]; then
@@ -59,6 +60,10 @@ while [[ $# -gt 0 ]]; do
     *) echo "unknown flag: $1"; exit 1 ;;
   esac
 done
+
+if $BACKUP; then
+  DOWNSTREAM_SKIP_BACKUP=false
+fi
 
 if [[ -z "$SERVER_ID" ]]; then
   echo "error: --server-id required (or set EXPRESS233_SERVER_ID)"
@@ -401,7 +406,7 @@ else
 
   if [[ -n "$HOOK_SCRIPT" ]]; then
     chmod +x "$HOOK_SCRIPT"
-    if ! env SERVER_ID="$SERVER_ID" EXPRESS233_SERVER_ID="$SERVER_ID" "$HOOK_SCRIPT" 9>&-; then
+    if ! env SERVER_ID="$SERVER_ID" EXPRESS233_SERVER_ID="$SERVER_ID" EXPRESS233_SKIP_BACKUP="$DOWNSTREAM_SKIP_BACKUP" "$HOOK_SCRIPT" 9>&-; then
       fail_and_rollback "new release failed to start"
     fi
     log "post_hook executed"
