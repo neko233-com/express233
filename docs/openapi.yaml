@@ -1241,6 +1241,7 @@ components:
         labels: { type: string, default: test }
         content_tags: { type: string }
         remote_root: { type: string }
+        skip_backup: { type: boolean, default: false, description: "Skip the pre-deployment rollback archive for this target" }
         os: { type: string, default: linux }
         arch: { type: string, default: amd64 }
     PushDeploymentTaskRequest:

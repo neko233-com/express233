@@ -54,6 +54,34 @@ func TestPushBindingsAreScopedByProjectTargetTag(t *testing.T) {
 	}
 }
 
+func TestPushBindingPersistsSkipBackupPolicy(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	host, err := st.CreatePushHost(PushHost{TenantID: 1, Name: "skip-backup-node", Address: "192.0.2.10", Username: "deploy", AuthMode: "agent"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := st.CreatePushServerBinding(PushServerBinding{TenantID: 1, HostID: host.ID, ProjectName: "game", ServerID: "1001", Labels: "prod", RemoteRoot: "/opt/game", SkipBackup: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := st.GetPushBinding(1, binding.ID)
+	if err != nil || !loaded.SkipBackup {
+		t.Fatalf("created binding skip_backup=%t err=%v", loaded.SkipBackup, err)
+	}
+	loaded.SkipBackup = false
+	if err := st.UpdatePushServerBinding(*loaded); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := st.GetPushBinding(1, binding.ID)
+	if err != nil || updated.SkipBackup {
+		t.Fatalf("updated binding skip_backup=%t err=%v", updated.SkipBackup, err)
+	}
+}
+
 func TestPushDeploymentIdempotencyKeyReturnsOriginalExecution(t *testing.T) {
 	st, err := Open(t.TempDir())
 	if err != nil {

@@ -10,7 +10,7 @@ export type PushHost = {
   last_check_at?: string; last_check_status: "unknown" | "ok" | "failed"; last_check_error?: string; last_check_latency_ms: number; next_check_at?: string;
 };
 export type PushHostCheck = { id: number; host_id: number; status: "ok" | "failed"; error?: string; latency_ms: number; trigger: "manual" | "scheduled"; checked_at: string };
-export type PushServerBinding = { id: number; host_id: number; server_id: string; labels: string; content_tags?: string; remote_root: string; os?: string; arch?: string };
+export type PushServerBinding = { id: number; host_id: number; server_id: string; labels: string; content_tags?: string; remote_root: string; skip_backup: boolean; os?: string; arch?: string };
 export type ReleaseHook = { id: number; project_id: number; task_id: number; task_name?: string; name: string; enabled: boolean; debounce_seconds: number; pending_version?: string; pending_source?: string; pending_since?: string; due_at?: string; pending_events: number; trigger_count: number; merge_count: number; run_count: number; last_trigger_at?: string; last_run_at?: string; last_deployment_id?: number; last_status?: string; last_error?: string };
 export type ReleaseHookEvent = { id: number; hook_id: number; hook_name: string; kind: "trigger" | "dispatch"; source: string; version: string; status: string; merged_events: number; deployment_id?: number; deployment_status?: string; detail?: string; created_at: string; completed_at?: string };
 export type DeliveryNode = {

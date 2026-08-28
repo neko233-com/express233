@@ -2212,6 +2212,9 @@ pre.cmdbox,
 .is-checking .btn-svg { animation: agent-pulse 1s ease-in-out infinite; }
 .health-toggle { min-height: 34px; padding: 0 4px; white-space: nowrap; }
 .agent-resource-card { margin-top: var(--space-3); }
+.checkbox-label { min-height: 32px; color: var(--text-muted); border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-subtle); display: inline-flex; align-items: center; gap: 7px; padding: 5px 9px; cursor: pointer; white-space: nowrap; }
+.checkbox-label:hover { color: var(--text); border-color: var(--border-strong); }
+.checkbox-label input { accent-color: var(--primary); }
 .release-task-editor {
   display: grid;
   grid-template-columns: minmax(180px, 1.2fr) minmax(170px, 1fr) minmax(190px, 1.2fr) minmax(160px, 1fr) 130px auto auto;

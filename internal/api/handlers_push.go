@@ -30,6 +30,7 @@ type pushBindingRequest struct {
 	Labels      string `json:"labels"`
 	ContentTags string `json:"content_tags"`
 	RemoteRoot  string `json:"remote_root"`
+	SkipBackup  bool   `json:"skip_backup"`
 	OS          string `json:"os"`
 	Arch        string `json:"arch"`
 }
@@ -188,7 +189,7 @@ func (s *Server) handleCreatePushBinding(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	tid, _ := s.tenantFromSession(r)
-	item, err := s.Store.CreatePushServerBinding(store.PushServerBinding{TenantID: tid, HostID: pushHostID(r), ProjectName: req.ProjectName, ServerID: req.ServerID, Labels: req.Labels, ContentTags: req.ContentTags, RemoteRoot: req.RemoteRoot, OS: req.OS, Arch: req.Arch})
+	item, err := s.Store.CreatePushServerBinding(store.PushServerBinding{TenantID: tid, HostID: pushHostID(r), ProjectName: req.ProjectName, ServerID: req.ServerID, Labels: req.Labels, ContentTags: req.ContentTags, RemoteRoot: req.RemoteRoot, SkipBackup: req.SkipBackup, OS: req.OS, Arch: req.Arch})
 	if err != nil {
 		errJSON(w, 400, err.Error())
 		return
@@ -207,7 +208,7 @@ func (s *Server) handleUpdatePushBinding(w http.ResponseWriter, r *http.Request)
 	}
 	tid, _ := s.tenantFromSession(r)
 	id, _ := strconv.ParseInt(chi.URLParam(r, "bindingID"), 10, 64)
-	if err := s.Store.UpdatePushServerBinding(store.PushServerBinding{ID: id, TenantID: tid, HostID: pushHostID(r), ProjectName: req.ProjectName, ServerID: req.ServerID, Labels: req.Labels, ContentTags: req.ContentTags, RemoteRoot: req.RemoteRoot, OS: req.OS, Arch: req.Arch}); err != nil {
+	if err := s.Store.UpdatePushServerBinding(store.PushServerBinding{ID: id, TenantID: tid, HostID: pushHostID(r), ProjectName: req.ProjectName, ServerID: req.ServerID, Labels: req.Labels, ContentTags: req.ContentTags, RemoteRoot: req.RemoteRoot, SkipBackup: req.SkipBackup, OS: req.OS, Arch: req.Arch}); err != nil {
 		errJSON(w, 400, err.Error())
 		return
 	}

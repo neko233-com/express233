@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- SSH 服务器绑定新增可见的“跳过旧版备份”策略；默认仍保留回滚包，按目标显式跳过时不创建旧版归档
 - `express233-server` 运维命令：`start` / `stop` / `restart` / `status` / `port` / `set-port` / `reload-config` / `backup-config` / `restore-config` / `reset-root-password`
 - `express233-server update`：自更新到最新或指定 Release，并自动重启中央服
 - `express233-server enable-autostart` / `disable-autostart` / `autostart-status`：跨平台原生开机自启动控制（Linux systemd、macOS launchd、Windows schtasks）
