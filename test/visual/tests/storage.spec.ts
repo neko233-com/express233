@@ -1,11 +1,10 @@
 import { test, expect } from "@playwright/test";
 import path from "path";
+import { loginAsRoot } from "./helpers";
 
 test.describe("存储空间", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-    await page.getByTestId("login-submit").click();
-    await expect(page.getByTestId("app-shell")).toBeVisible();
+    await loginAsRoot(page);
   });
 
   test("总览、索引搜索与目录树", async ({ page }) => {

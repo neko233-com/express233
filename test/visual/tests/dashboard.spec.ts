@@ -1,10 +1,9 @@
 import { test, expect } from "@playwright/test";
+import { loginAsRoot } from "./helpers";
 
 test.describe("发布数据大盘", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-    await page.getByTestId("login-submit").click();
-    await expect(page.getByTestId("app-shell")).toBeVisible();
+    await loginAsRoot(page);
     await expect(page).toHaveTitle("express233 · 发布控制台");
   });
 

@@ -1,10 +1,9 @@
 import { expect, test } from "@playwright/test";
 import path from "path";
+import { loginAsRoot } from "./helpers";
 
 test("SSH 资源与可重复发布任务分离，执行日志只读保留", async ({ page }) => {
-  await page.goto("/");
-  await page.getByTestId("login-submit").click();
-  await expect(page.getByTestId("app-shell")).toBeVisible();
+  await loginAsRoot(page);
 
   const projectName = `release-task-${Date.now()}`;
   const hostName = `release-node-${Date.now()}`;

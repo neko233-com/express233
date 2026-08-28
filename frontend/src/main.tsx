@@ -76,6 +76,11 @@ function App() {
   useEffect(() => {
     document.title = me ? "express233 · 发布控制台" : "express233 · 登录";
   }, [me]);
+  useEffect(() => {
+    const handleUnauthorized = () => setMe(null);
+    window.addEventListener("express233:unauthorized", handleUnauthorized);
+    return () => window.removeEventListener("express233:unauthorized", handleUnauthorized);
+  }, []);
   if (!me)
     return (
       <Login
@@ -213,6 +218,7 @@ function Login({
           登录
         </button>
         {error && <p className="err">{error}</p>}
+        <p className="login-hint">登录状态保持 30 天；修改密码或主动退出后立即失效。</p>
       </form>
     </div>
   );
@@ -438,6 +444,17 @@ function VersionsTab({
     [versions],
   );
   const [name, setName] = useState("");
+  const [maxPublishedVersions, setMaxPublishedVersions] = useState(
+    Number(project.max_published_versions ?? 0),
+  );
+  const [limitedRetention, setLimitedRetention] = useState(
+    Number(project.max_published_versions ?? 0) > 0,
+  );
+  useEffect(() => {
+    const value = Number(project.max_published_versions ?? 0);
+    setMaxPublishedVersions(value);
+    setLimitedRetention(value > 0);
+  }, [project.id, project.max_published_versions]);
   async function create() {
     const version = await api<Version>(`/projects/${project.id}/versions`, {
       method: "POST",
@@ -446,6 +463,18 @@ function VersionsTab({
     });
     setName("");
     onMessage(`已创建版本 ${version.version}`);
+    await reload();
+  }
+  async function saveRetention() {
+    const count = limitedRetention ? Math.max(1, maxPublishedVersions || 1) : 0;
+    const updated = await api<Project>(`/projects/${project.id}/version-retention`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ max_published_versions: count }),
+    });
+    setMaxPublishedVersions(Number(updated.max_published_versions ?? 0));
+    setLimitedRetention(Number(updated.max_published_versions ?? 0) > 0);
+    onMessage(count ? `已保留最近 ${count} 个已发布版本` : "已设置为无限保留");
     await reload();
   }
   return (
@@ -489,6 +518,17 @@ function VersionsTab({
           <h3 className="card-title">版本管理</h3>
           <p className="hint">已发布版本是不可变快照；修复请创建新版本，回滚请选择历史已发布版本。</p>
         </div>
+        <aside className="version-inspector">
+          <section className="card version-retention-card" data-testid="version-retention-card">
+            <div className="inspector-title-row"><div><h2>版本保留策略</h2><p>控制已发布制品的存储数量</p></div><span className={`badge ${limitedRetention ? "badge-ok" : "badge-draft"}`}>{limitedRetention ? `最近 ${Math.max(1, maxPublishedVersions)} 个` : "无限保留"}</span></div>
+            <div className="retention-options">
+              <label className="retention-option"><input type="radio" name="reactVersionRetention" checked={limitedRetention} onChange={() => setLimitedRetention(true)}/><span>仅保留最近</span><input className="input input-sm retention-count" type="number" min={1} max={999} value={Math.max(1, maxPublishedVersions || 1)} disabled={!limitedRetention} onChange={(event) => setMaxPublishedVersions(Number(event.target.value))}/><span>个已发布版本</span></label>
+              <label className="retention-option"><input type="radio" name="reactVersionRetention" checked={!limitedRetention} onChange={() => setLimitedRetention(false)}/><span>无限保留</span></label>
+            </div>
+            <p className="retention-hint">{limitedRetention ? "保存后立即清理更早的已发布版本，草稿不受影响。" : "所有已发布版本都会保留，草稿不受影响。"}</p>
+            <button className="btn btn-primary btn-block" onClick={() => void saveRetention()} data-testid="save-version-retention">保存策略</button>
+          </section>
+        </aside>
       </div>
     </section>
   );

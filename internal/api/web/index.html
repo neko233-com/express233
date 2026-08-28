@@ -38,6 +38,7 @@
       </label>
       <button id="btnLogin" type="button" class="btn btn-primary btn-block login-submit" data-testid="login-submit">登录</button>
       <p id="loginErr" class="err"></p>
+      <p class="login-hint">登录状态保持 30 天；修改密码或主动退出后立即失效。</p>
     </div>
   </div>
 
@@ -395,7 +396,7 @@
             <button type="button" id="btnAddUser" class="btn btn-primary">创建</button>
           </div>
           <div class="table-wrap">
-            <table id="userTable" class="data-table"><thead><tr><th>ID</th><th>用户</th><th>Token</th><th></th></tr></thead><tbody></tbody></table>
+            <table id="userTable" class="data-table"><thead><tr><th>ID</th><th>用户</th><th>拉取 Token</th><th></th></tr></thead><tbody></tbody></table>
           </div>
         </div>
         <div id="stab-audit" class="card hidden">
@@ -439,34 +440,43 @@
 
       <div id="projectWorkspace" class="workspace hidden">
         <header class="workspace-header">
-          <div class="workspace-title">
-            <h1 id="curProject" data-testid="cur-project">—</h1>
-            <span id="projectRoleBadge" class="project-role">管理员</span>
-            <button type="button" id="btnDelProject" class="btn btn-danger btn-sm hidden">删除项目</button>
+          <div class="workspace-heading-row">
+            <div class="workspace-title">
+              <h1 id="curProject" data-testid="cur-project">—</h1>
+              <span id="projectRoleBadge" class="project-role">管理员</span>
+              <button type="button" id="btnDelProject" class="btn btn-danger btn-sm hidden">删除项目</button>
+            </div>
+            <div class="workspace-release-summary" aria-label="当前项目交付摘要">
+              <div><span>最新发布</span><strong id="workspaceLatestVersion">—</strong><small id="workspaceLatestState">暂无已发布版本</small></div>
+              <i aria-hidden="true"></i>
+              <div><span>交付目标</span><strong id="workspaceTarget">待选择</strong><small id="workspaceTargetState">进入 Server 配置选择</small></div>
+            </div>
           </div>
-          <nav class="project-tabs project-flow-tabs" role="tablist" aria-label="项目交付流程">
-            <button type="button" class="project-tab active" data-ptab="versions" title="版本" aria-label="版本">
-              <span class="flow-step-number">1</span><span>Artifact 版本</span>
-            </button>
-            <button type="button" class="project-tab" data-ptab="config" title="Server 配置">
-              <span class="flow-step-number">2</span><span>Server 配置</span>
-            </button>
-            <button type="button" class="project-tab" data-ptab="preview" title="拉取预览" aria-label="拉取预览">
-              <span class="flow-step-number">3</span><span>合成预览</span>
-            </button>
-            <button type="button" class="project-tab" data-ptab="publish" title="发布">
-              <span class="flow-step-number">4</span><span>发布</span>
-            </button>
-          </nav>
-          <nav class="project-secondary-tabs" aria-label="项目辅助功能">
-            <button type="button" class="project-tab" data-ptab="diff">差异</button>
-            <button type="button" class="project-tab" data-ptab="cluster">集群节点</button>
-            <button type="button" class="project-tab" data-ptab="team">团队</button>
-            <button type="button" class="project-tab" data-ptab="deploy" aria-label="部署">部署脚本</button>
-            <button type="button" class="project-tab" data-ptab="hooks">自动 Hook</button>
-            <button type="button" class="project-action-tab" data-project-action="release" data-release-target="tasks">发布任务</button>
-            <button type="button" class="project-action-tab sr-only" data-project-action="release" data-release-target="logs">发布日志</button>
-          </nav>
+          <div class="project-module-tabs">
+            <nav class="project-tabs project-flow-tabs" role="tablist" aria-label="项目交付流程">
+              <button type="button" class="project-tab active" data-ptab="versions" title="版本" aria-label="版本">
+                <span class="flow-step-number">1</span><span>Artifact 版本</span>
+              </button>
+              <button type="button" class="project-tab" data-ptab="config" title="Server 配置">
+                <span class="flow-step-number">2</span><span>Server 配置</span>
+              </button>
+              <button type="button" class="project-tab" data-ptab="preview" title="拉取预览" aria-label="拉取预览">
+                <span class="flow-step-number">3</span><span>合成预览</span>
+              </button>
+              <button type="button" class="project-tab" data-ptab="publish" title="发布">
+                <span class="flow-step-number">4</span><span>发布</span>
+              </button>
+            </nav>
+            <nav class="project-secondary-tabs" aria-label="项目辅助功能">
+              <button type="button" class="project-tab" data-ptab="diff">差异</button>
+              <button type="button" class="project-tab" data-ptab="cluster">集群节点</button>
+              <button type="button" class="project-tab" data-ptab="team">团队</button>
+              <button type="button" class="project-tab" data-ptab="deploy" aria-label="部署">部署脚本</button>
+              <button type="button" class="project-tab" data-ptab="hooks">自动 Hook</button>
+              <button type="button" class="project-action-tab" data-project-action="release" data-release-target="tasks">发布任务</button>
+              <button type="button" class="project-action-tab sr-only" data-project-action="release" data-release-target="logs">发布日志</button>
+            </nav>
+          </div>
         </header>
 
         <div class="workflow-trail" aria-label="当前交付进度">
@@ -545,6 +555,32 @@
                 </div>
               </div>
             </div>
+            <aside class="version-inspector" aria-label="版本策略与最近活动">
+              <section class="card version-retention-card" data-testid="version-retention-card">
+                <div class="inspector-title-row">
+                  <div><h2>版本保留策略</h2><p>控制已发布制品的存储数量</p></div>
+                  <span id="versionRetentionBadge" class="badge badge-draft">无限保留</span>
+                </div>
+                <div class="retention-options" role="radiogroup" aria-label="已发布版本保留方式">
+                  <label class="retention-option">
+                    <input id="versionRetentionLimited" type="radio" name="versionRetentionMode" value="limited" />
+                    <span>仅保留最近</span>
+                    <input id="versionRetentionCount" class="input input-sm retention-count" type="number" min="1" max="999" value="10" inputmode="numeric" aria-label="保留最近多少个已发布版本" />
+                    <span>个已发布版本</span>
+                  </label>
+                  <label class="retention-option">
+                    <input id="versionRetentionUnlimited" type="radio" name="versionRetentionMode" value="unlimited" checked />
+                    <span>无限保留</span>
+                  </label>
+                </div>
+                <p id="versionRetentionHint" class="retention-hint">所有已发布版本都会保留，草稿不受影响。</p>
+                <button type="button" id="btnSaveVersionRetention" class="btn btn-primary btn-block" data-testid="save-version-retention">保存策略</button>
+              </section>
+              <section class="card version-activity-card">
+                <div class="inspector-title-row"><div><h2>最近活动</h2><p id="versionActivitySummary">等待版本数据</p></div></div>
+                <ol id="versionActivityList" class="version-activity-list"></ol>
+              </section>
+            </aside>
           </div>
         </div>
 

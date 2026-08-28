@@ -18,7 +18,21 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, users)
+	type userSummary struct {
+		ID        int64  `json:"id"`
+		Username  string `json:"username"`
+		Role      string `json:"role"`
+		IsAdmin   bool   `json:"is_admin"`
+		CreatedAt string `json:"created_at"`
+	}
+	out := make([]userSummary, 0, len(users))
+	for _, user := range users {
+		out = append(out, userSummary{
+			ID: user.ID, Username: user.Username, Role: user.Role,
+			IsAdmin: user.IsAdmin, CreatedAt: user.CreatedAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 type createUserReq struct {
@@ -45,7 +59,11 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.auditSession(r, "user.create", "username="+req.Username)
-	writeJSON(w, http.StatusCreated, u)
+	// 拉取 Token 只在创建或主动刷新时返回一次；用户列表永不回传完整 Token。
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"id": u.ID, "username": u.Username, "role": u.Role,
+		"is_admin": u.IsAdmin, "created_at": u.CreatedAt, "token": u.Token,
+	})
 }
 
 func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {

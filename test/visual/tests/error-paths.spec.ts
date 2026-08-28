@@ -1,12 +1,9 @@
 import { test, expect } from "@playwright/test";
+import { loginAsRoot } from "./helpers";
 
 // ─── helpers ───────────────────────────────────────────
 async function login(page) {
-  await page.goto("/");
-  await expect(page.getByTestId("login-panel")).toBeVisible();
-  await page.getByTestId("login-submit").click();
-  await expect(page.getByTestId("app-shell")).toBeVisible();
-  await expect(page.getByTestId("whoami")).toContainText("root");
+  await loginAsRoot(page);
 }
 
 async function createProject(page, name: string) {
@@ -29,7 +26,7 @@ test.describe("登录与认证", () => {
   test("错误密码登录失败", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByTestId("login-panel")).toBeVisible();
-    // 清空默认值，输入错误密码
+    await page.locator("#user").fill("root");
     await page.locator("#pass").fill("wrong-password");
     await page.getByTestId("login-submit").click();
     // 应该显示错误信息
@@ -42,6 +39,7 @@ test.describe("登录与认证", () => {
     await page.goto("/");
     await expect(page.getByTestId("login-panel")).toBeVisible();
     await page.locator("#user").fill("");
+    await page.locator("#pass").fill("root");
     await page.getByTestId("login-submit").click();
     await expect(page.locator("#loginErr")).toContainText(/\S+/, { timeout: 5_000 });
   });
@@ -280,6 +278,8 @@ test.describe("系统设置页签", () => {
   test("用户表显示 root 用户", async ({ page }) => {
     await page.locator('.sidebar-nav-item[data-global="settings"]').click();
     await expect(page.locator("#userTable")).toContainText("root");
+    await expect(page.locator("#userTable")).toContainText("已隐藏");
+    expect(await page.locator("#userTable").innerText()).not.toMatch(/\b[0-9a-f]{64}\b/i);
   });
 });
 

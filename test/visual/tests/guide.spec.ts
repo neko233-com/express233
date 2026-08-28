@@ -1,9 +1,8 @@
 import { expect, test } from "@playwright/test";
+import { loginAsRoot } from "./helpers";
 
 test("文档目录展示 Gitea/GitHub/Agent 官方接入说明且不泄露运行信息", async ({ page }) => {
-  await page.goto("/");
-  await page.getByTestId("login-submit").click();
-  await expect(page.getByTestId("app-shell")).toBeVisible();
+  await loginAsRoot(page);
   await page.getByTestId("nav-guide").click();
   await expect(page.getByTestId("guide-panel")).toBeVisible();
   await expect(page.getByTestId("guide-topic-list")).toContainText("Gitea Actions 接入");

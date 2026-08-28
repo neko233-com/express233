@@ -2,12 +2,20 @@ package api
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/neko233-com/express233/internal/store"
 )
+
+func TestPersistentSessionTTLIsThirtyDays(t *testing.T) {
+	if got, want := persistentSessionTTL, 30*24*time.Hour; got != want {
+		t.Fatalf("persistentSessionTTL=%s want=%s", got, want)
+	}
+}
 
 func TestJWTSignVerify(t *testing.T) {
 	j := newJWTAuth()
@@ -34,6 +42,54 @@ func TestJWTBearerAuth(t *testing.T) {
 	r.Header.Set("Authorization", "Bearer "+tok)
 	if _, ok := srv.currentSession(r); !ok {
 		t.Fatal("expected bearer session")
+	}
+}
+
+func TestHandleMeRefreshesBrowserJWTForThirtyDays(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	srv := New(st)
+	tok, err := srv.jwt.sign(session{UserID: 1, Username: "root", IsAdmin: true, AuthVersion: 1, TenantID: 1, TenantSlug: "default"}, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	claims, err := srv.jwt.verify(payload.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remaining := time.Until(time.Unix(claims.Exp, 0))
+	if remaining < 29*24*time.Hour || remaining > persistentSessionTTL+time.Minute {
+		t.Fatalf("refreshed token remaining=%s", remaining)
+	}
+	cookies := rec.Result().Cookies()
+	foundJWT := false
+	for _, cookie := range cookies {
+		if cookie.Name == jwtCookie {
+			foundJWT = true
+			if cookie.MaxAge != int(persistentSessionTTL.Seconds()) {
+				t.Fatalf("jwt cookie max age=%d", cookie.MaxAge)
+			}
+		}
+	}
+	if !foundJWT {
+		t.Fatal("refreshed JWT cookie missing")
 	}
 }
 

@@ -16,7 +16,7 @@ const jwtCookie = "express233_jwt"
 
 // persistentSessionTTL keeps an authenticated browser signed in until explicit
 // logout, expiry, or a password change invalidates its auth version.
-const persistentSessionTTL = 365 * 24 * time.Hour
+const persistentSessionTTL = 30 * 24 * time.Hour
 
 type jwtClaims struct {
 	UserID      int64  `json:"uid"`
@@ -118,12 +118,14 @@ func extractBearerToken(r *http.Request) string {
 }
 
 func (s *Server) setJWTCookie(w http.ResponseWriter, token string) {
+	expiresAt := time.Now().Add(persistentSessionTTL)
 	http.SetCookie(w, &http.Cookie{
 		Name:     jwtCookie,
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
+		Expires:  expiresAt,
 		MaxAge:   int(persistentSessionTTL.Seconds()),
 	})
 }

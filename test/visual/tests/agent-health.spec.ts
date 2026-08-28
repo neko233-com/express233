@@ -1,10 +1,9 @@
 import { expect, test } from "@playwright/test";
+import { loginAsRoot } from "./helpers";
 
 test.describe("Agent 与 SSH 节点", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-    await page.getByTestId("login-submit").click();
-    await expect(page.getByTestId("app-shell")).toBeVisible();
+    await loginAsRoot(page);
   });
 
   test("能力清单、定时间隔、单次检查和历史均可操作", async ({ page }) => {

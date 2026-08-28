@@ -1,4 +1,4 @@
-export type Project = { id: number; name: string; my_role?: string };
+export type Project = { id: number; name: string; my_role?: string; max_published_versions?: number };
 export type VCSProvenance = { provider?: "git" | "github" | "gitea"; repository?: string; ref?: string; commit?: string; run_url?: string; run_id?: string };
 export type ArtifactManifest = { sha256?: string; file_count?: number; bytes?: number };
 export type Version = { id: number; version: string; status: string; created_at: string; published_at?: string; vcs: VCSProvenance; artifact: ArtifactManifest };
@@ -44,6 +44,10 @@ const tokenKey = "express233_jwt";
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const token = localStorage.getItem(tokenKey);
   const response = await fetch(`/api${path}`, { credentials: "include", ...init, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(init?.headers ?? {}) } });
+  if (response.status === 401) {
+    localStorage.removeItem(tokenKey);
+    window.dispatchEvent(new CustomEvent("express233:unauthorized"));
+  }
   if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.error ?? response.statusText); }
   return response.status === 204 ? undefined as T : response.json() as Promise<T>;
 }

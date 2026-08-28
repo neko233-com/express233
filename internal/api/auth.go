@@ -42,7 +42,7 @@ func (ss *sessionStore) create(userID int64, username string, isAdmin bool, auth
 		AuthVersion: authVersion,
 		TenantID:    tenantID,
 		TenantSlug:  tenantSlug,
-		Expires:     time.Now().Add(24 * time.Hour),
+		Expires:     time.Now().Add(persistentSessionTTL),
 	}
 	ss.mu.Unlock()
 	return id, nil
@@ -122,13 +122,15 @@ func (s *Server) basicAuthSession(r *http.Request) (session, bool) {
 }
 
 func (s *Server) setSessionCookie(w http.ResponseWriter, id string) {
+	expiresAt := time.Now().Add(persistentSessionTTL)
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
 		Value:    id,
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   86400,
+		Expires:  expiresAt,
+		MaxAge:   int(persistentSessionTTL.Seconds()),
 	})
 }
 

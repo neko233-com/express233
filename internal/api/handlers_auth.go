@@ -83,7 +83,14 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, http.StatusUnauthorized, "not logged in")
 		return
 	}
-	writeJSON(w, http.StatusOK, s.mePayload(sess, ""))
+	// 活跃浏览器滑动续签 30 天；密码变更会递增 auth_version，使旧 token 立即失效。
+	tok, err := s.jwt.sign(sess, persistentSessionTTL)
+	if err != nil {
+		errJSON(w, http.StatusInternalServerError, "token error")
+		return
+	}
+	s.setJWTCookie(w, tok)
+	writeJSON(w, http.StatusOK, s.mePayload(sess, tok))
 }
 
 func (s *Server) requireLogin(next http.Handler) http.Handler {

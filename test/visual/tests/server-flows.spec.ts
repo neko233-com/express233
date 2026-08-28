@@ -1,13 +1,10 @@
 import { test, expect } from "@playwright/test";
 import path from "path";
+import { loginAsRoot } from "./helpers";
 
 test.describe("express233 控制台全流程", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-    await expect(page.getByTestId("login-panel")).toBeVisible();
-    await page.getByTestId("login-submit").click();
-    await expect(page.getByTestId("app-shell")).toBeVisible();
-    await expect(page.getByTestId("whoami")).toContainText("root");
+    await loginAsRoot(page);
   });
 
   test("登录 → 项目/版本 → 上传 → 预览 → 发布前检查 → 发布", async ({ page }) => {

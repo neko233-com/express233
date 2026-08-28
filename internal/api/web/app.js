@@ -53,6 +53,7 @@ let state = {
   role: "viewer",
   tenantSlug: null,
   projectRole: null,
+  projectMaxPublishedVersions: 0,
   pendingInviteToken: null,
   globalView: "workspace",
   projectTab: "versions",
@@ -68,6 +69,7 @@ let serverIDs = [];
 let fileTreeModulePromise = null;
 let filePreviewRequestID = 0;
 const navigationHistory = [];
+const recentUserTokens = new Map();
 let navigationRestoring = false;
 const collapsedFileTreeFolders = {
   version: new Set(),
@@ -292,6 +294,8 @@ function setProjectTab(tab) {
     return;
   }
   state.projectTab = tab;
+  const workspace = document.getElementById("projectWorkspace");
+  if (workspace) workspace.dataset.activeTab = tab;
   if (tab !== "pushlogs" && pushLogRefreshTimer) {
     window.clearTimeout(pushLogRefreshTimer);
     pushLogRefreshTimer = null;
@@ -370,6 +374,15 @@ function updateWorkflowUI() {
   if (previewCheck) previewCheck.textContent = state.previewConfirmed ? "预览已确认" : "预览尚未确认";
   const flowPublishButton = document.getElementById("btnFlowPublish");
   if (flowPublishButton) flowPublishButton.disabled = !(state.version && selectedServer && state.previewConfirmed) || state.versionStatus === "published";
+  const latest = latestPublishedVersion();
+  const latestVersion = document.getElementById("workspaceLatestVersion");
+  const latestState = document.getElementById("workspaceLatestState");
+  const workspaceTarget = document.getElementById("workspaceTarget");
+  const workspaceTargetState = document.getElementById("workspaceTargetState");
+  if (latestVersion) latestVersion.textContent = latest?.version || "—";
+  if (latestState) latestState.textContent = latest ? "已发布 · 不可变制品" : "暂无已发布版本";
+  if (workspaceTarget) workspaceTarget.textContent = selectedServer || "待选择";
+  if (workspaceTargetState) workspaceTargetState.textContent = selectedServer ? targetTag(selectedServer) : "进入 Server 配置选择";
 }
 
 function setVersionStatusBadge(status) {
@@ -911,6 +924,14 @@ document.getElementById("versionSearch")?.addEventListener("input", (e) => {
   renderVersionList();
 });
 
+document.querySelectorAll("input[name='versionRetentionMode']").forEach((input) => {
+  input.addEventListener("change", updateVersionRetentionHint);
+});
+document.getElementById("versionRetentionCount")?.addEventListener("input", updateVersionRetentionHint);
+document.getElementById("btnSaveVersionRetention")?.addEventListener("click", () => {
+  saveVersionRetention().catch((error) => showToast(error.message, "error"));
+});
+
 document.getElementById("fileSearch")?.addEventListener("input", (e) => {
   state.fileFilter = e.target.value.trim().toLowerCase();
   renderFileList();
@@ -978,6 +999,10 @@ function updateProjectWriteUI() {
   });
   const fileInput = document.getElementById("fileInput");
   if (fileInput) fileInput.disabled = !w;
+  ["versionRetentionLimited", "versionRetentionUnlimited", "versionRetentionCount", "btnSaveVersionRetention"].forEach((id) => {
+    const element = document.getElementById(id);
+    if (element) element.disabled = !w;
+  });
 }
 
 async function loadProjectTeam() {
@@ -1000,6 +1025,7 @@ async function selectProject(p, { remember = true } = {}) {
   state.projectId = p.id;
   state.projectName = p.name;
   state.projectRole = p.my_role || (state.isAdmin ? "admin" : "viewer");
+  state.projectMaxPublishedVersions = Number(p.max_published_versions || 0);
   state.version = null;
   state.versionStatus = null;
   if (projectChanged) {
@@ -1015,15 +1041,21 @@ async function selectProject(p, { remember = true } = {}) {
   setGlobalView("workspace");
   setProjectTab(state.projectTab || "versions");
   await loadProjects();
+  const refreshedProject = state.projects.find((item) => item.id === p.id);
+  if (refreshedProject) state.projectMaxPublishedVersions = Number(refreshedProject.max_published_versions || 0);
   state.versions = (await api(`/api/projects/${p.id}/versions`)) || [];
   renderVersionList();
+  renderVersionRetention();
+  renderVersionActivity();
   if (state.isAdmin) await loadServerConfigs();
   if (state.projectTab === "cluster") await loadDeliveryNodes();
   // Populate diff dropdowns
   populateDiffDropdowns(state.versions);
   // Generate deploy script when switching to deploy tab
   generateDeployScript();
-  document.getElementById("versionDetail").classList.add("hidden");
+  const preferredVersion = latestPublishedVersion() || state.versions[0];
+  if (preferredVersion) await selectVersion(preferredVersion);
+  else document.getElementById("versionDetail").classList.add("hidden");
   updateWorkflowUI();
   return state.versions;
 }
@@ -1042,11 +1074,99 @@ function renderVersionList() {
     li.className = "version-item";
     if (v.version === latestPublished?.version) li.classList.add("latest-published");
     li.setAttribute("title", `${v.version} · ${status.label}`);
-    li.innerHTML = `<span class="version-item-main"><span class="version-status-dot ${status.className}" aria-hidden="true"></span><span class="version-name">${escapeHtml(v.version)}</span>${v.version === latestPublished?.version ? '<span class="latest-version-label">最新</span>' : ""}</span><span class="version-status ${status.className}">${status.label}<span class="sr-only"> ${escapeHtml(v.status)}</span></span>`;
+    const activityAt = v.published_at || v.created_at || "";
+    li.innerHTML = `<span class="version-item-main"><span class="version-status-dot ${status.className}" aria-hidden="true"></span><span class="version-copy"><span><span class="version-name">${escapeHtml(v.version)}</span>${v.version === latestPublished?.version ? '<span class="latest-version-label">最新</span>' : ""}</span><small>${escapeHtml(v.published_at ? `发布于 ${activityAt}` : `创建于 ${activityAt}`)}</small></span></span><span class="version-status ${status.className}">${status.label}<span class="sr-only"> ${escapeHtml(v.status)}</span></span>`;
     li.onclick = () => selectVersion(v);
     if (v.version === state.version) li.classList.add("selected");
     ul.appendChild(li);
   });
+}
+
+function renderVersionRetention() {
+  const maxPublishedVersions = Number(state.projectMaxPublishedVersions || 0);
+  const limited = maxPublishedVersions > 0;
+  const limitedRadio = document.getElementById("versionRetentionLimited");
+  const unlimitedRadio = document.getElementById("versionRetentionUnlimited");
+  const countInput = document.getElementById("versionRetentionCount");
+  const badge = document.getElementById("versionRetentionBadge");
+  if (limitedRadio) limitedRadio.checked = limited;
+  if (unlimitedRadio) unlimitedRadio.checked = !limited;
+  if (countInput) {
+    if (limited) countInput.value = String(maxPublishedVersions);
+    countInput.disabled = !limited || !canWriteProject();
+  }
+  if (badge) {
+    badge.textContent = limited ? `最近 ${maxPublishedVersions} 个` : "无限保留";
+    badge.className = limited ? "badge badge-ok" : "badge badge-draft";
+  }
+  updateVersionRetentionHint();
+}
+
+function updateVersionRetentionHint() {
+  const hint = document.getElementById("versionRetentionHint");
+  const countInput = document.getElementById("versionRetentionCount");
+  const limited = !!document.getElementById("versionRetentionLimited")?.checked;
+  if (countInput) countInput.disabled = !limited || !canWriteProject();
+  if (!hint) return;
+  if (!limited) {
+    hint.textContent = "所有已发布版本都会保留，草稿不受影响。";
+    return;
+  }
+  const count = Math.max(1, Number(countInput?.value || 1));
+  hint.textContent = `保存后立即清理更早的已发布版本，仅保留最近 ${count} 个；草稿不受影响。`;
+}
+
+function renderVersionActivity() {
+  const list = document.getElementById("versionActivityList");
+  const summary = document.getElementById("versionActivitySummary");
+  if (!list || !summary) return;
+  const versions = state.versions || [];
+  const publishedCount = versions.filter((version) => version.status === "published").length;
+  summary.textContent = `${versions.length} 个版本 · ${publishedCount} 个已发布`;
+  if (!versions.length) {
+    list.innerHTML = '<li class="version-activity-empty">还没有版本活动</li>';
+    return;
+  }
+  list.innerHTML = versions.slice(0, 5).map((version) => {
+    const status = versionStatusMeta(version.status);
+    const time = version.published_at || version.created_at || "—";
+    return `<li><span class="activity-dot ${status.className}" aria-hidden="true"></span><div><strong>${escapeHtml(status.label)} ${escapeHtml(version.version)}</strong><small>${escapeHtml(time)}</small></div></li>`;
+  }).join("");
+}
+
+async function saveVersionRetention() {
+  if (!state.projectId || !canWriteProject()) return;
+  const limited = !!document.getElementById("versionRetentionLimited")?.checked;
+  const count = limited ? Number(document.getElementById("versionRetentionCount")?.value || 0) : 0;
+  if (limited && (!Number.isInteger(count) || count < 1 || count > 999)) {
+    showToast("保留数量必须是 1 到 999 的整数", "warn");
+    return;
+  }
+  const publishedCount = (state.versions || []).filter((version) => version.status === "published").length;
+  if (count > 0 && publishedCount > count) {
+    const confirmed = await showConfirm({
+      title: "更新版本保留策略",
+      message: `保存后会立即删除最早的 ${publishedCount - count} 个已发布版本及其制品文件，草稿不会删除。确认继续？`,
+      confirmText: "保存并清理",
+      danger: true,
+    });
+    if (!confirmed) return;
+  }
+  const updated = await api(`/api/projects/${state.projectId}/version-retention`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ max_published_versions: count }),
+  });
+  state.projectMaxPublishedVersions = Number(updated.max_published_versions || 0);
+  state.projects = state.projects.map((project) => project.id === updated.id ? { ...project, ...updated } : project);
+  state.versions = (await api(`/api/projects/${state.projectId}/versions`)) || [];
+  renderVersionRetention();
+  renderVersionList();
+  renderVersionActivity();
+  const selected = state.versions.find((version) => version.version === state.version) || latestPublishedVersion() || state.versions[0];
+  if (selected) await selectVersion(selected);
+  else document.getElementById("versionDetail")?.classList.add("hidden");
+  showToast(count ? `已保留最近 ${count} 个已发布版本` : "已设置为无限保留");
 }
 
 function populateDiffDropdowns(versions) {
@@ -2441,17 +2561,25 @@ document.getElementById("btnAddProject").onclick = async () => {
 };
 
 document.getElementById("btnAddVersion").onclick = async () => {
-  const name = document.getElementById("newVersion").value.trim();
+  const button = document.getElementById("btnAddVersion");
+  const input = document.getElementById("newVersion");
+  const name = input.value.trim();
   if (!name || !state.projectId) return;
   if (!/^\d+\.\d+\.\d+$/.test(name)) {
     showToast("正式版本推荐使用 X.Y.Z（例如 0.0.1）；server_id 差异写 server.yaml", "warn");
   }
-  await api(`/api/projects/${state.projectId}/versions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
-  });
-  selectProject({ id: state.projectId, name: state.projectName });
+  button.disabled = true;
+  try {
+    await api(`/api/projects/${state.projectId}/versions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (input.value.trim() === name) input.value = "";
+    await selectProject({ id: state.projectId, name: state.projectName });
+  } finally {
+    button.disabled = !canWriteProject();
+  }
 };
 
 document.getElementById("btnValidate").onclick = async () => {
@@ -2723,14 +2851,39 @@ async function loadUsers() {
   tbody.innerHTML = "";
   users.forEach((u) => {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${u.id}</td><td>${escapeHtml(u.username)}</td><td><code>${escapeHtml(u.token)}</code></td>
-      <td><button data-id="${u.id}" class="btn btn-secondary btn-sm refresh">刷新 Token</button>
+    const hasNewToken = recentUserTokens.has(Number(u.id));
+    tr.innerHTML = `<td>${u.id}</td><td>${escapeHtml(u.username)}</td><td><span class="secret-masked">${hasNewToken ? "新 Token 已生成" : "已隐藏"}</span></td>
+      <td>${hasNewToken ? `<button data-id="${u.id}" class="btn btn-primary btn-sm copy-token">复制新 Token</button>` : ""}
+      <button data-id="${u.id}" data-username="${escapeAttr(u.username)}" class="btn btn-secondary btn-sm refresh">刷新 Token</button>
       <button data-id="${u.id}" class="btn btn-danger btn-sm del">删除</button></td>`;
     tbody.appendChild(tr);
   });
+  tbody.querySelectorAll(".copy-token").forEach((button) => {
+    button.onclick = async () => {
+      const id = Number(button.dataset.id);
+      const token = recentUserTokens.get(id);
+      if (!token) return;
+      try {
+        await navigator.clipboard.writeText(token);
+        recentUserTokens.delete(id);
+        showToast("新 Token 已复制；离开后不可再次查看", "ok", 4800);
+        loadUsers();
+      } catch (_) {
+        showToast("浏览器拒绝剪贴板访问，请允许权限后重试", "warn", 4800);
+      }
+    };
+  });
   tbody.querySelectorAll(".refresh").forEach((b) => {
     b.onclick = async () => {
-      await api(`/api/users/${b.dataset.id}/refresh-token`, { method: "POST" });
+      const confirmed = await showConfirm({
+        title: "刷新拉取 Token",
+        message: `刷新 ${b.dataset.username || "该账号"} 的 Token 后，使用旧 Token 的节点会立即失效。确认继续？`,
+        confirmText: "刷新 Token",
+        danger: true,
+      });
+      if (!confirmed) return;
+      const result = await api(`/api/users/${b.dataset.id}/refresh-token`, { method: "POST" });
+      recentUserTokens.set(Number(b.dataset.id), result.token);
       loadUsers();
     };
   });
@@ -2744,7 +2897,7 @@ async function loadUsers() {
 }
 
 document.getElementById("btnAddUser").onclick = async () => {
-  await api("/api/users", {
+  const created = await api("/api/users", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -2754,12 +2907,16 @@ document.getElementById("btnAddUser").onclick = async () => {
       is_admin: document.getElementById("newUserAdmin").checked,
     }),
   });
+  recentUserTokens.set(Number(created.id), created.token);
+  document.getElementById("newUser").value = "";
+  document.getElementById("newUserPass").value = "";
   loadUsers();
+  showToast("账号已创建；请复制一次性显示的新 Token", "ok", 4800);
 };
 
 async function loadAuditLogs() {
   if (!state.isAdmin) return;
-  const rows = await api("/api/audit-logs");
+  const rows = (await api("/api/audit-logs")) || [];
   const tbody = document.querySelector("#auditTable tbody");
   tbody.innerHTML = rows
     .map(

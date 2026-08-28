@@ -1,9 +1,8 @@
 import { expect, test } from "@playwright/test";
+import { loginAsRoot } from "./helpers";
 
 test("Push/Pull 统一节点清单展示心跳、拓扑与自动跟随策略", async ({ page }) => {
-  await page.goto("/");
-  await page.getByTestId("login-submit").click();
-  await expect(page.getByTestId("app-shell")).toBeVisible();
+  await loginAsRoot(page);
 
   const originalYAML = await page.evaluate(async () => (await fetch("/api/server-yaml")).json().then((x) => x.content));
 

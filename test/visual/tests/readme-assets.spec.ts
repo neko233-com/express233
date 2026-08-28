@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import path from "path";
 import fs from "fs";
+import { loginAsRoot } from "./helpers";
 
 const assetsDir = path.resolve(__dirname, "../../../.assets");
 
@@ -10,9 +11,7 @@ test.describe("README 功能截图", () => {
   });
 
   test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-    await page.getByTestId("login-submit").click();
-    await expect(page.getByTestId("app-shell")).toBeVisible();
+    await loginAsRoot(page);
   });
 
   test("capture feature screenshots", async ({ page }) => {

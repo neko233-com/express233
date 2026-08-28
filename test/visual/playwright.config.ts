@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 import path from "path";
 
 const repoRoot = path.resolve(__dirname, "../..");
-const dataDir = path.join(repoRoot, ".visual-e2e-data");
+const dataDir = process.env.EXPRESS233_VISUAL_DATA_DIR || path.join(repoRoot, ".visual-e2e-data");
 const port = process.env.EXPRESS233_VISUAL_PORT || "39234";
 const baseURL = process.env.EXPRESS233_BASE_URL || `http://127.0.0.1:${port}`;
 
