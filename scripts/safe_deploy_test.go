@@ -27,6 +27,61 @@ func TestSafeDeployDefaultsToGracefulStopOnly(t *testing.T) {
 	if !strings.Contains(text, "deployment aborted without swapping files") {
 		t.Fatal("graceful stop timeout must abort before file swap")
 	}
+	if !strings.Contains(text, `HEALTH_CHECK_TIMEOUT_SECONDS="${EXPRESS233_HEALTH_CHECK_TIMEOUT_SECONDS:-30}"`) {
+		t.Fatal("new releases must allow a bounded health-check readiness window")
+	}
+}
+
+func TestSafeDeployWaitsForBoundedHealthReadiness(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("safe-deploy.sh executes on Linux targets")
+	}
+	for _, command := range []string{"bash", "flock", "rsync", "sha256sum"} {
+		if _, err := exec.LookPath(command); err != nil {
+			t.Skipf("%s unavailable", command)
+		}
+	}
+
+	root := t.TempDir()
+	serverID := "rank-main"
+	fakePull := filepath.Join(root, "express233-cli")
+	fakePullBody := `#!/bin/bash
+set -eu
+dest=""
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" == "--dest" ]]; then dest="$2"; shift 2; else shift; fi
+done
+mkdir -p "$dest/scripts" "$dest/.express233"
+cat >"$dest/scripts/restart.sh" <<'SCRIPT'
+#!/bin/bash
+set -eu
+(sleep 0.2; touch "$GAME_ROOT/health-ready") &
+SCRIPT
+cat >"$dest/scripts/healthcheck.sh" <<'SCRIPT'
+#!/bin/bash
+test -f "$GAME_ROOT/health-ready"
+SCRIPT
+chmod +x "$dest/scripts/restart.sh" "$dest/scripts/healthcheck.sh"
+`
+	if err := os.WriteFile(fakePull, []byte(fakePullBody), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	command := exec.Command("bash", "safe-deploy.sh", "--server-id", serverID)
+	command.Dir = "."
+	command.Env = append(os.Environ(),
+		"GAME_ROOT="+root,
+		"EXPRESS233_BIN="+fakePull,
+		"EXPRESS233_HEALTH_CHECK_TIMEOUT_SECONDS=2",
+		"EXPRESS233_HEALTH_CHECK_POLL_INTERVAL_SECONDS=0.05",
+	)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("safe deploy did not wait for readiness: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "health check passed within 2s") {
+		t.Fatalf("missing bounded health success output:\n%s", output)
+	}
 }
 
 func TestSafeDeployTimeoutAbortsBeforeSwap(t *testing.T) {

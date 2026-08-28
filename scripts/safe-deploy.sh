@@ -25,6 +25,8 @@ STOP_POLL_INTERVAL="${EXPRESS233_STOP_POLL_INTERVAL:-0.2}"
 FORCE_KILL_AFTER_TIMEOUT="${EXPRESS233_FORCE_KILL_AFTER_TIMEOUT:-0}"
 POST_KILL_SETTLE_SECONDS="${EXPRESS233_POST_KILL_SETTLE_SECONDS:-3}"
 DEPLOY_LOCK_TIMEOUT="${EXPRESS233_DEPLOY_LOCK_TIMEOUT:-300}"
+HEALTH_CHECK_TIMEOUT_SECONDS="${EXPRESS233_HEALTH_CHECK_TIMEOUT_SECONDS:-30}"
+HEALTH_CHECK_POLL_INTERVAL_SECONDS="${EXPRESS233_HEALTH_CHECK_POLL_INTERVAL_SECONDS:-1}"
 DRY_RUN=false
 BACKUP=false
 BACKUP_KEEP="${EXPRESS233_BACKUP_KEEP:-5}"
@@ -76,6 +78,14 @@ if [[ ! "$BACKUP_KEEP" =~ ^[1-9][0-9]*$ ]]; then
 fi
 if [[ ! "$DEPLOY_LOCK_TIMEOUT" =~ ^[0-9]+$ ]]; then
   echo "error: EXPRESS233_DEPLOY_LOCK_TIMEOUT must be a non-negative integer"
+  exit 1
+fi
+if [[ ! "$HEALTH_CHECK_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "error: EXPRESS233_HEALTH_CHECK_TIMEOUT_SECONDS must be a positive integer"
+  exit 1
+fi
+if [[ ! "$HEALTH_CHECK_POLL_INTERVAL_SECONDS" =~ ^[0-9]+([.][0-9]+)?$ ]] || [[ "$HEALTH_CHECK_POLL_INTERVAL_SECONDS" == "0" ]]; then
+  echo "error: EXPRESS233_HEALTH_CHECK_POLL_INTERVAL_SECONDS must be a positive number"
   exit 1
 fi
 if [[ "$FORCE_KILL_AFTER_TIMEOUT" != "0" && "$FORCE_KILL_AFTER_TIMEOUT" != "1" ]]; then
@@ -133,6 +143,20 @@ current_release_matches() {
     env SERVER_ID="$SERVER_ID" EXPRESS233_SERVER_ID="$SERVER_ID" "$FINAL_DIR/scripts/healthcheck.sh" 9>&- >/dev/null 2>&1 || return 1
   fi
   return 0
+}
+
+wait_for_healthcheck() {
+  local health_script="$FINAL_DIR/scripts/healthcheck.sh"
+  local started_seconds=$SECONDS
+  while true; do
+    if env SERVER_ID="$SERVER_ID" EXPRESS233_SERVER_ID="$SERVER_ID" "$health_script" 9>&-; then
+      return 0
+    fi
+    if (( SECONDS - started_seconds >= HEALTH_CHECK_TIMEOUT_SECONDS )); then
+      return 1
+    fi
+    sleep "$HEALTH_CHECK_POLL_INTERVAL_SECONDS"
+  done
 }
 
 # ═══════════════ Step 1: 拉取到临时目录 ═══════════════
@@ -386,10 +410,10 @@ else
   fi
   if [[ -f "$FINAL_DIR/scripts/healthcheck.sh" ]]; then
     chmod +x "$FINAL_DIR/scripts/healthcheck.sh"
-    if ! env SERVER_ID="$SERVER_ID" EXPRESS233_SERVER_ID="$SERVER_ID" "$FINAL_DIR/scripts/healthcheck.sh" 9>&-; then
-      fail_and_rollback "new release health check failed"
+    if ! wait_for_healthcheck; then
+      fail_and_rollback "new release health check failed after ${HEALTH_CHECK_TIMEOUT_SECONDS}s"
     fi
-    log "health check passed"
+    log "health check passed within ${HEALTH_CHECK_TIMEOUT_SECONDS}s"
   fi
   mkdir -p "$(dirname "$STATE_FILE")"
   state_tmp="${STATE_FILE}.tmp.$$"
