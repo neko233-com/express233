@@ -604,14 +604,16 @@ func runUpdate(args []string) error {
 	if err != nil {
 		return err
 	}
+	// 先完整下载再停服务。systemd/launchd 可能在主进程退出后立即重启；
+	// 若停服后才下载，新二进制尚未就绪时旧进程就会重新占用目标文件。
+	downloaded, err := downloadReleaseBinary(targetVersion)
+	if err != nil {
+		return err
+	}
 	if running {
 		if err := stopServer(runningState); err != nil {
 			return err
 		}
-	}
-	downloaded, err := downloadReleaseBinary(targetVersion)
-	if err != nil {
-		return err
 	}
 	if err := scheduleBinarySwap(exePath, downloaded, dataDir, listen, *restart); err != nil {
 		return err
@@ -766,14 +768,14 @@ func updaterScriptContent(targetExe, downloadedPath, dataDir, listen string, sel
 		if restart {
 			restartFlag = "1"
 		}
-		return fmt.Sprintf("@echo off\r\nsetlocal\r\nset \"TARGET=%s\"\r\nset \"SOURCE=%s\"\r\nset \"DATA=%s\"\r\nset \"ADDR=%s\"\r\nset \"WAITPID=%d\"\r\nset \"RESTART=%s\"\r\nfor /L %%%%i in (1,1,30) do (\r\n  tasklist /FI \"PID eq %%WAITPID%%\" 2>NUL | find \"%%WAITPID%%\" >NUL\r\n  if errorlevel 1 goto COPY\r\n  timeout /t 1 /nobreak >NUL\r\n)\r\n:COPY\r\ncopy /Y \"%%SOURCE%%\" \"%%TARGET%%\" >NUL || exit /b 1\r\ndel /F /Q \"%%SOURCE%%\" >NUL 2>NUL\r\nif \"%%RESTART%%\"==\"1\" %s\r\ndel /F /Q \"%%~f0\" >NUL 2>NUL\r\n",
+		return fmt.Sprintf("@echo off\r\nsetlocal\r\nset \"TARGET=%s\"\r\nset \"SOURCE=%s\"\r\nset \"DATA=%s\"\r\nset \"ADDR=%s\"\r\nset \"WAITPID=%d\"\r\nset \"RESTART=%s\"\r\nset \"LOG=%%DATA%%\\run\\apply-update.log\"\r\necho [%%date%% %%time%%] waiting for updater pid=%%WAITPID%% >> \"%%LOG%%\" 2>&1\r\nfor /L %%%%i in (1,1,30) do (\r\n  tasklist /FI \"PID eq %%WAITPID%%\" 2>NUL | find \"%%WAITPID%%\" >NUL\r\n  if errorlevel 1 goto COPY\r\n  timeout /t 1 /nobreak >NUL\r\n)\r\n:COPY\r\ncopy /Y \"%%SOURCE%%\" \"%%TARGET%%\" >> \"%%LOG%%\" 2>&1 || (echo [%%date%% %%time%%] binary replacement failed >> \"%%LOG%%\" & exit /b 1)\r\ndel /F /Q \"%%SOURCE%%\" >NUL 2>NUL\r\necho [%%date%% %%time%%] binary replacement completed >> \"%%LOG%%\"\r\nif \"%%RESTART%%\"==\"1\" %s\r\ndel /F /Q \"%%~f0\" >NUL 2>NUL\r\n",
 			escapeBatchValue(targetExe), escapeBatchValue(downloadedPath), escapeBatchValue(dataDir), escapeBatchValue(listen), selfPID, restartFlag, restartCommand)
 	}
 	restartShell := ""
 	if restart {
 		restartShell = "\n" + restartCommand
 	}
-	return fmt.Sprintf("#!/bin/sh\nTARGET=%s\nSOURCE=%s\nWAITPID=%d\nfor _ in $(seq 1 30); do\n  if ! kill -0 \"$WAITPID\" 2>/dev/null; then\n    break\n  fi\n  sleep 1\ndone\ncp \"$SOURCE\" \"$TARGET\"\nchmod +x \"$TARGET\"\nrm -f \"$SOURCE\"%s\nrm -f \"$0\"\n", shellEscape(targetExe), shellEscape(downloadedPath), selfPID, restartShell)
+	return fmt.Sprintf("#!/bin/sh\nTARGET=%s\nSOURCE=%s\nDATA=%s\nWAITPID=%d\nLOG=\"$DATA/run/apply-update.log\"\nexec >>\"$LOG\" 2>&1\necho \"[$(date -Iseconds)] waiting for updater pid=$WAITPID\"\nfor _ in $(seq 1 30); do\n  if ! kill -0 \"$WAITPID\" 2>/dev/null; then\n    break\n  fi\n  sleep 1\ndone\nif ! cp \"$SOURCE\" \"$TARGET\"; then\n  echo \"[$(date -Iseconds)] binary replacement failed\"\n  exit 1\nfi\nchmod +x \"$TARGET\"\nrm -f \"$SOURCE\"\necho \"[$(date -Iseconds)] binary replacement completed\"%s\nrm -f \"$0\"\n", shellEscape(targetExe), shellEscape(downloadedPath), shellEscape(dataDir), selfPID, restartShell)
 }
 
 func shellEscape(value string) string {

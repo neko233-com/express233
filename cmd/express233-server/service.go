@@ -328,7 +328,7 @@ func launchdPlistPath() string {
 }
 
 func systemdUnitContent(exePath, dataDir, listen string) string {
-	return fmt.Sprintf("[Unit]\nDescription=express233-server\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart=%s serve -data %s -addr %s\nRestart=on-failure\nRestartSec=5\nWorkingDirectory=%s\n\n[Install]\nWantedBy=multi-user.target\n", systemdEscapeArg(exePath), systemdEscapeArg(dataDir), systemdEscapeArg(listen), systemdEscapeArg(filepath.Dir(exePath)))
+	return fmt.Sprintf("[Unit]\nDescription=express233-server\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart=%s serve -data %s -addr %s\nRestart=on-failure\nRestartSec=5\n# Self-update uses a short-lived child to replace the stopped executable.\nKillMode=process\nWorkingDirectory=%s\n\n[Install]\nWantedBy=multi-user.target\n", systemdEscapeArg(exePath), systemdEscapeArg(dataDir), systemdEscapeArg(listen), systemdEscapeArg(filepath.Dir(exePath)))
 }
 
 func launchdPlistContent(exePath, dataDir, listen string) string {

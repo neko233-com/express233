@@ -184,6 +184,11 @@ func TestUpdaterScriptContentIncludesRestart(t *testing.T) {
 	if !strings.Contains(content, "start command") {
 		t.Fatalf("expected restart command in updater script: %q", content)
 	}
+	for _, expected := range []string{"apply-update.log", "binary replacement failed", "binary replacement completed"} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("expected %q in updater script: %q", expected, content)
+		}
+	}
 }
 
 func TestSystemdUnitContent(t *testing.T) {
@@ -193,6 +198,9 @@ func TestSystemdUnitContent(t *testing.T) {
 	}
 	if !strings.Contains(content, "WantedBy=multi-user.target") {
 		t.Fatalf("missing install target: %q", content)
+	}
+	if !strings.Contains(content, "KillMode=process") {
+		t.Fatalf("systemd self-update child must survive graceful server shutdown: %q", content)
 	}
 }
 
