@@ -7,6 +7,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/neko233-com/express233/internal/store"
 )
@@ -20,6 +21,9 @@ func TestLoginIPBanAndAdminClear(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
+	if err := st.SetLoginProtectionEnabled(true); err != nil {
+		t.Fatal(err)
+	}
 	ts := httptest.NewServer(New(st).Router())
 	defer ts.Close()
 
@@ -64,10 +68,74 @@ func TestLoginIPBanAndAdminClear(t *testing.T) {
 	}
 }
 
+func TestLoginProtectionDefaultsToRecordOnlyAndSeparatesForwardedIPs(t *testing.T) {
+	t.Setenv("EXPRESS233_TRUST_PROXY", "1")
+	t.Setenv("EXPRESS233_LOGIN_FAILURE_LIMIT", "2")
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ts := httptest.NewServer(New(st).Router())
+	defer ts.Close()
+
+	attacker := &http.Client{}
+	for i := 0; i < 4; i++ {
+		if got := doLoginStatusFromIP(t, attacker, ts.URL, "203.0.113.10", "root", "wrong-password"); got != http.StatusUnauthorized {
+			t.Fatalf("record-only failure %d status=%d", i, got)
+		}
+	}
+	if got := doLoginStatusFromIP(t, attacker, ts.URL, "203.0.113.10", "root", "root"); got != http.StatusOK {
+		t.Fatalf("record-only valid login=%d", got)
+	}
+
+	if err := st.SetLoginProtectionEnabled(true); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if got := doLoginStatusFromIP(t, attacker, ts.URL, "203.0.113.20", "root", "wrong-password"); got != http.StatusUnauthorized && got != http.StatusTooManyRequests {
+			t.Fatalf("enforced failure %d status=%d", i, got)
+		}
+	}
+	if got := doLoginStatusFromIP(t, attacker, ts.URL, "203.0.113.20", "root", "root"); got != http.StatusTooManyRequests {
+		t.Fatalf("attacker must be paused, got %d", got)
+	}
+	if got := doLoginStatusFromIP(t, attacker, ts.URL, "203.0.113.21", "root", "root"); got != http.StatusOK {
+		t.Fatalf("independent IP login=%d", got)
+	}
+
+	bans, err := st.ListLoginIPBans(time.Now(), 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ban := range bans {
+		if ban.IP == "203.0.113.10" && (ban.AttemptCount != 4 || len(ban.LastAttemptTimes) != 3) {
+			t.Fatalf("record=%+v", ban)
+		}
+	}
+}
+
 func doLoginStatus(t *testing.T, client *http.Client, base, username, password string) int {
 	t.Helper()
 	body, _ := json.Marshal(map[string]string{"username": username, "password": password})
 	resp, err := client.Post(base+"/api/login", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode
+}
+
+func doLoginStatusFromIP(t *testing.T, client *http.Client, base, ip, username, password string) int {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{"username": username, "password": password})
+	req, err := http.NewRequest(http.MethodPost, base+"/api/login", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Real-IP", ip)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}

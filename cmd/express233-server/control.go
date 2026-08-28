@@ -16,12 +16,14 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/neko233-com/express233/internal/api"
@@ -108,20 +110,35 @@ func serve(listen, dataDir string) error {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	server := &http.Server{Addr: listen}
+	var shutdownOnce sync.Once
+	shutdownServer := func(reason string) {
+		shutdownOnce.Do(func() {
+			logger.Info("server graceful shutdown requested", "reason", reason)
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				if err := server.Shutdown(ctx); err != nil {
+					logger.Error("server graceful shutdown failed", "reason", reason, "error", err)
+				}
+			}()
+		})
+	}
 	mux.HandleFunc("/__admin/shutdown", func(w http.ResponseWriter, r *http.Request) {
 		if !authorizeControlRequest(r, controlToken) {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_ = server.Shutdown(ctx)
-		}()
+		shutdownServer("control_api")
 	})
 	mux.Handle("/", srvAPI.Router())
 	server.Handler = mux
+	signalContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	go func() {
+		<-signalContext.Done()
+		shutdownServer("os_signal")
+	}()
 
 	logger.Info("server starting", "version", version.String("express233-server"))
 	if err := warnIfPortBlocked(listen); err != nil {

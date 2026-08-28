@@ -13,10 +13,11 @@ import (
 
 // Project 项目。
 type Project struct {
-	ID        int64  `json:"id"`
-	Name      string `json:"name"`
-	CreatedAt string `json:"created_at"`
-	MyRole    string `json:"my_role,omitempty"`
+	ID                   int64  `json:"id"`
+	Name                 string `json:"name"`
+	MaxPublishedVersions int    `json:"max_published_versions"`
+	CreatedAt            string `json:"created_at"`
+	MyRole               string `json:"my_role,omitempty"`
 }
 
 // Version 版本。
@@ -37,10 +38,10 @@ func (s *Store) ListProjects(tenantID, userID int64, tenantRole string) ([]Proje
 	var rows *sql.Rows
 	var err error
 	if tenantRole == RoleAdmin {
-		rows, err = s.db.Query(`SELECT id, name, created_at, 'admin' FROM projects WHERE tenant_id = ? ORDER BY name`, tenantID)
+		rows, err = s.db.Query(`SELECT id, name, max_published_versions, created_at, 'admin' FROM projects WHERE tenant_id = ? ORDER BY name`, tenantID)
 	} else {
 		rows, err = s.db.Query(`
-SELECT p.id, p.name, p.created_at, m.role FROM projects p
+SELECT p.id, p.name, p.max_published_versions, p.created_at, m.role FROM projects p
 INNER JOIN project_members m ON m.project_id = p.id AND m.user_id = ?
 WHERE p.tenant_id = ?
 ORDER BY p.name`, userID, tenantID)
@@ -52,7 +53,7 @@ ORDER BY p.name`, userID, tenantID)
 	var out []Project
 	for rows.Next() {
 		var p Project
-		if err := rows.Scan(&p.ID, &p.Name, &p.CreatedAt, &p.MyRole); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.MaxPublishedVersions, &p.CreatedAt, &p.MyRole); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -62,6 +63,13 @@ ORDER BY p.name`, userID, tenantID)
 
 // CreateProject 创建项目并将创建者设为项目管理员。
 func (s *Store) CreateProject(tenantID, ownerUserID int64, name string) (*Project, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, fmt.Errorf("project name required")
+	}
+	if strings.Contains(name, "|") {
+		return nil, fmt.Errorf("project name cannot contain | because project|serverId is reserved for deployment target tags")
+	}
 	now := time.Now().Format(timeLayout)
 	res, err := s.db.Exec(`INSERT INTO projects(tenant_id, name, created_at) VALUES(?,?,?)`, tenantID, name, now)
 	if err != nil {
@@ -107,7 +115,7 @@ func (s *Store) DeleteProject(tenantID, id int64) error {
 // GetProjectByName 按名称查项目（租户内）；不校验成员，调用方需检查权限。
 func (s *Store) GetProjectByName(tenantID int64, name string) (*Project, error) {
 	var p Project
-	err := s.db.QueryRow(`SELECT id, name, created_at FROM projects WHERE tenant_id = ? AND name = ?`, tenantID, name).Scan(&p.ID, &p.Name, &p.CreatedAt)
+	err := s.db.QueryRow(`SELECT id, name, max_published_versions, created_at FROM projects WHERE tenant_id = ? AND name = ?`, tenantID, name).Scan(&p.ID, &p.Name, &p.MaxPublishedVersions, &p.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -119,6 +127,34 @@ func (s *Store) ProjectNameInTenant(tenantID, projectID int64) (string, error) {
 	var name string
 	err := s.db.QueryRow(`SELECT name FROM projects WHERE id = ? AND tenant_id = ?`, projectID, tenantID).Scan(&name)
 	return name, err
+}
+
+// ProjectMaxPublishedVersions returns the project artifact retention limit.
+// Zero means unlimited retention.
+func (s *Store) ProjectMaxPublishedVersions(tenantID, projectID int64) (int, error) {
+	var maxPublishedVersions int
+	err := s.db.QueryRow(`SELECT max_published_versions FROM projects WHERE id = ? AND tenant_id = ?`, projectID, tenantID).Scan(&maxPublishedVersions)
+	return maxPublishedVersions, err
+}
+
+// SetProjectMaxPublishedVersions changes the project artifact retention limit.
+// Zero means unlimited retention; positive values keep that many newest releases.
+func (s *Store) SetProjectMaxPublishedVersions(tenantID, projectID int64, maxPublishedVersions int) error {
+	if maxPublishedVersions < 0 {
+		return fmt.Errorf("max_published_versions must be greater than or equal to zero")
+	}
+	result, err := s.db.Exec(`UPDATE projects SET max_published_versions = ? WHERE id = ? AND tenant_id = ?`, maxPublishedVersions, projectID, tenantID)
+	if err != nil {
+		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // ListVersions 列出项目下版本。
@@ -167,6 +203,10 @@ func (s *Store) CreateVersion(tenantID, projectID int64, projectName, version st
 }
 
 var semanticVersionRE = regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)$`)
+
+// IsReleaseVersion accepts shared, formal release versions only. Keep
+// per-server differences in server.yaml, not a server-specific version name.
+func IsReleaseVersion(version string) bool { return semanticVersionRE.MatchString(version) }
 
 // NextPatchVersion 返回项目当前最大三段数字版本的下一个 patch；无版本时从 0.0.1 开始。
 func (s *Store) NextPatchVersion(projectID int64) (string, error) {
@@ -251,6 +291,9 @@ func (s *Store) PublishVersion(tenantID, projectID int64, version string) error 
 	}
 	if v.Status == "published" {
 		return fmt.Errorf("already published")
+	}
+	if !IsReleaseVersion(version) {
+		return fmt.Errorf("formal release version must use X.Y.Z (for example 0.0.1); do not publish server-specific versions such as %s", version)
 	}
 	if v.Status != "draft" && v.Status != "pending_review" {
 		return fmt.Errorf("version status %q cannot be published", v.Status)
@@ -337,6 +380,34 @@ func (s *Store) ListPublishedVersions(projectID int64) ([]Version, error) {
 		out = append(out, v)
 	}
 	return out, rows.Err()
+}
+
+// PrunePublishedVersions removes published artifacts older than retainCount.
+// A retainCount of zero disables cleanup and keeps every published version.
+// Version deletion reuses the normal blob reference cleanup path.
+func (s *Store) PrunePublishedVersions(tenantID, projectID int64, projectName string, retainCount int) ([]string, error) {
+	if retainCount < 0 {
+		return nil, fmt.Errorf("retain count must be greater than or equal to zero")
+	}
+	if retainCount == 0 {
+		return []string{}, nil
+	}
+	versions, err := s.ListPublishedVersions(projectID)
+	if err != nil {
+		return nil, err
+	}
+	if len(versions) <= retainCount {
+		return []string{}, nil
+	}
+	removedCapacity := len(versions) - retainCount
+	removed := make([]string, 0, removedCapacity)
+	for _, version := range versions[retainCount:] {
+		if err := s.DeleteVersion(tenantID, projectID, projectName, version.Version); err != nil {
+			return removed, err
+		}
+		removed = append(removed, version.Version)
+	}
+	return removed, nil
 }
 
 // LatestPublishedVersion 最近发布的版本号。

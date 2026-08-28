@@ -74,13 +74,39 @@ func TestReusablePushTaskAPIAndImmutableLogs(t *testing.T) {
 			t.Fatalf("deployment snapshot: %+v", deployment)
 		}
 	}
+	var firstReplay, secondReplay store.PushDeployment
+	requestRun := func(want int, out *store.PushDeployment) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("%s%s/push-tasks/%d/run", ts.URL, base, task.ID), strings.NewReader(`{"dry_run":true}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", "ui-release-request-001")
+		for _, cookie := range jar {
+			req.AddCookie(cookie)
+		}
+		response, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		if response.StatusCode != want {
+			t.Fatalf("idempotent run status=%d want=%d", response.StatusCode, want)
+		}
+		if err := json.NewDecoder(response.Body).Decode(out); err != nil {
+			t.Fatal(err)
+		}
+	}
+	requestRun(http.StatusCreated, &firstReplay)
+	requestRun(http.StatusOK, &secondReplay)
+	if firstReplay.ID != secondReplay.ID || !secondReplay.Replayed {
+		t.Fatalf("idempotent API replay: first=%+v second=%+v", firstReplay, secondReplay)
+	}
 	tasks := mustGET[[]store.PushDeploymentTask](t, ts, jar, base+"/push-tasks")
-	if len(tasks) != 1 || tasks[0].RunCount != 2 {
+	if len(tasks) != 1 || tasks[0].RunCount != 3 {
 		t.Fatalf("tasks after repeat: %+v", tasks)
 	}
 	doJSON(http.MethodDelete, fmt.Sprintf("%s/push-tasks/%d", base, task.ID), nil, http.StatusNoContent, nil)
 	logs := mustGET[[]store.PushDeployment](t, ts, jar, base+"/push-deployments")
-	if len(logs) != 2 || logs[0].TaskName != task.Name {
+	if len(logs) != 3 || logs[0].TaskName != task.Name {
 		t.Fatalf("logs after task deletion: %+v", logs)
 	}
 	doJSON(http.MethodDelete, fmt.Sprintf("%s/push-deployments/%d", base, logs[0].ID), nil, http.StatusConflict, nil)

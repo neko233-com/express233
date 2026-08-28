@@ -302,6 +302,23 @@ test.describe("侧边栏导航", () => {
     await expect(page.locator('.sidebar-nav-item[data-global="workspace"]')).toHaveClass(/active/);
   });
 
+  test("远程发布可直接返回项目工作区，流程步骤支持上一步", async ({ page }) => {
+    const name = `nav-back-${Date.now()}`;
+    await createProject(page, name);
+
+    await page.locator('.project-tab[data-ptab="config"]').click();
+    await expect(page.locator("#ptab-config")).toBeVisible();
+    await page.getByTestId("navigate-back").click();
+    await expect(page.locator("#ptab-versions")).toBeVisible();
+
+    await page.getByRole("button", { name: "发布任务" }).click();
+    await expect(page.getByTestId("release-panel")).toBeVisible();
+    await expect(page.getByTestId("return-project-workspace")).toBeVisible();
+    await page.getByTestId("return-project-workspace").click();
+    await expect(page.getByTestId("cur-project")).toContainText(name);
+    await expect(page.getByTestId("release-panel")).not.toBeVisible();
+  });
+
   test("项目搜索过滤", async ({ page }) => {
     const nameA = `search-a-${Date.now()}`;
     const nameB = `search-b-${Date.now()}`;

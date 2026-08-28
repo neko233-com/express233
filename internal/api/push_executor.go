@@ -24,7 +24,10 @@ type pushHealthChecker interface {
 	Check(context.Context, store.PushHost) error
 }
 type sshPushExecutor struct{ credentials *pushCredentialCipher }
-type pushCommand struct{ CentralURL, Project, Version, ServerID, PullToken string }
+type pushCommand struct {
+	CentralURL, Project, Version, ServerID, PullToken string
+	DeploymentID, IdempotencyKey, TargetTag           string
+}
 type pushCommandContextKey struct{}
 
 // Check performs exactly one TCP connection and SSH handshake. It intentionally
@@ -89,8 +92,13 @@ func (e sshPushExecutor) Deploy(ctx context.Context, host store.PushHost, bindin
 	// pre-installed host script.  A controller must never overwrite a running
 	// game binary directly. The pull token is an environment value rather than
 	// an argv argument so ordinary process listings do not disclose it.
-	script := "set -eu; command -v safe-deploy.sh >/dev/null 2>&1 || { echo 'safe-deploy.sh is required on the target'; exit 127; }; EXPRESS233_SERVER=" + shellQuote(command.CentralURL) + " EXPRESS233_TOKEN=" + shellQuote(command.PullToken) + " EXPRESS233_PROJECT=" + shellQuote(command.Project) + " EXPRESS233_SERVER_ID=" + shellQuote(command.ServerID) + " VERSION=" + shellQuote(command.Version) + " EXPRESS233_TAGS=" + shellQuote(strings.Join(splitCSV(binding.ContentTags), ",")) + " GAME_ROOT=" + shellQuote(binding.RemoteRoot) + " safe-deploy.sh --backup --server-id " + shellQuote(command.ServerID)
-	if err := session.Run(script); err != nil {
+	script := "set -eu\n" +
+		"command -v safe-deploy.sh >/dev/null 2>&1 || { echo 'safe-deploy.sh is required on the target'; exit 127; }\n" +
+		"EXPRESS233_SERVER=" + shellQuote(command.CentralURL) + " EXPRESS233_TOKEN=" + shellQuote(command.PullToken) + " EXPRESS233_PROJECT=" + shellQuote(command.Project) + " EXPRESS233_SERVER_ID=" + shellQuote(command.ServerID) + " VERSION=" + shellQuote(command.Version) + " EXPRESS233_TAGS=" + shellQuote(strings.Join(splitCSV(binding.ContentTags), ",")) + " GAME_ROOT=" + shellQuote(binding.RemoteRoot) + " EXPRESS233_DEPLOYMENT_ID=" + shellQuote(command.DeploymentID) + " EXPRESS233_IDEMPOTENCY_KEY=" + shellQuote(command.IdempotencyKey) + " EXPRESS233_TARGET_TAG=" + shellQuote(command.TargetTag) + " safe-deploy.sh --backup --server-id " + shellQuote(command.ServerID) + "\n"
+	// Feed the script over stdin so the pull token and other environment values
+	// never appear in the remote shell process argv or ordinary process lists.
+	session.Stdin = strings.NewReader(script)
+	if err := session.Run("sh -s"); err != nil {
 		return output.String(), fmt.Errorf("remote CLI deploy: %w", err)
 	}
 	return output.String(), nil

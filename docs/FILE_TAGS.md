@@ -37,7 +37,7 @@ express233-cli pull \
 账号密码方式：
 
 ```bash
-EXPRESS233_USERNAME=root EXPRESS233_PASSWORD=root \
+EXPRESS233_USERNAME='<username>' EXPRESS233_PASSWORD='<password>' \
 express233-cli pull --server http://central:23380 --project mygame --server-id game-logic-01
 ```
 

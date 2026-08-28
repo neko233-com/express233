@@ -54,7 +54,9 @@ type PushServerBinding struct {
 	TenantID    int64  `json:"tenant_id,omitempty"`
 	HostID      int64  `json:"host_id"`
 	HostName    string `json:"host_name,omitempty"`
+	ProjectName string `json:"project_name,omitempty"`
 	ServerID    string `json:"server_id"`
+	TargetTag   string `json:"target_tag,omitempty"`
 	Labels      string `json:"labels"`
 	ContentTags string `json:"content_tags,omitempty"`
 	RemoteRoot  string `json:"remote_root"`
@@ -65,20 +67,22 @@ type PushServerBinding struct {
 }
 
 type PushDeployment struct {
-	ID          int64                  `json:"id"`
-	TenantID    int64                  `json:"tenant_id,omitempty"`
-	ProjectID   int64                  `json:"project_id"`
-	TaskID      int64                  `json:"task_id,omitempty"`
-	TaskName    string                 `json:"task_name,omitempty"`
-	HookEventID int64                  `json:"hook_event_id,omitempty"`
-	Version     string                 `json:"version"`
-	RequestedBy string                 `json:"requested_by"`
-	Selector    string                 `json:"selector"`
-	Status      string                 `json:"status"`
-	CreatedAt   string                 `json:"created_at"`
-	StartedAt   string                 `json:"started_at,omitempty"`
-	CompletedAt string                 `json:"completed_at,omitempty"`
-	Targets     []PushDeploymentTarget `json:"targets,omitempty"`
+	ID             int64                  `json:"id"`
+	TenantID       int64                  `json:"tenant_id,omitempty"`
+	ProjectID      int64                  `json:"project_id"`
+	TaskID         int64                  `json:"task_id,omitempty"`
+	TaskName       string                 `json:"task_name,omitempty"`
+	HookEventID    int64                  `json:"hook_event_id,omitempty"`
+	IdempotencyKey string                 `json:"idempotency_key,omitempty"`
+	Replayed       bool                   `json:"replayed,omitempty"`
+	Version        string                 `json:"version"`
+	RequestedBy    string                 `json:"requested_by"`
+	Selector       string                 `json:"selector"`
+	Status         string                 `json:"status"`
+	CreatedAt      string                 `json:"created_at"`
+	StartedAt      string                 `json:"started_at,omitempty"`
+	CompletedAt    string                 `json:"completed_at,omitempty"`
+	Targets        []PushDeploymentTarget `json:"targets,omitempty"`
 }
 
 type PushDeploymentTarget struct {
@@ -118,6 +122,7 @@ CREATE TABLE IF NOT EXISTS push_server_bindings (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tenant_id INTEGER NOT NULL,
   host_id INTEGER NOT NULL,
+	project_name TEXT NOT NULL DEFAULT '',
   server_id TEXT NOT NULL,
   labels TEXT NOT NULL DEFAULT 'test',
   content_tags TEXT NOT NULL DEFAULT '',
@@ -126,7 +131,7 @@ CREATE TABLE IF NOT EXISTS push_server_bindings (
   arch TEXT NOT NULL DEFAULT 'amd64',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  UNIQUE(host_id, server_id, labels),
+	UNIQUE(host_id, project_name, server_id, labels),
   FOREIGN KEY(host_id) REFERENCES push_hosts(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS push_deployments (
@@ -136,6 +141,7 @@ CREATE TABLE IF NOT EXISTS push_deployments (
   task_id INTEGER NOT NULL DEFAULT 0,
   task_name TEXT NOT NULL DEFAULT '',
   hook_event_id INTEGER NOT NULL DEFAULT 0,
+  idempotency_key TEXT NOT NULL DEFAULT '',
   version TEXT NOT NULL,
   requested_by TEXT NOT NULL,
   selector TEXT NOT NULL,
@@ -207,12 +213,64 @@ CREATE INDEX IF NOT EXISTS idx_push_host_checks_checked_at ON push_host_checks(c
 	_, _ = s.db.Exec(`ALTER TABLE push_hosts ADD COLUMN last_check_error TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE push_hosts ADD COLUMN last_check_latency_ms INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE push_hosts ADD COLUMN next_check_at TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE push_server_bindings ADD COLUMN project_name TEXT NOT NULL DEFAULT ''`)
+	if err := s.migratePushBindingTargetTags(); err != nil {
+		return err
+	}
+	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_push_bindings_tenant_server ON push_server_bindings(tenant_id,server_id)`)
+	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_push_bindings_tenant_project_server ON push_server_bindings(tenant_id,project_name,server_id)`)
 	_, _ = s.db.Exec(`ALTER TABLE push_deployments ADD COLUMN task_id INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE push_deployments ADD COLUMN task_name TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE push_deployments ADD COLUMN hook_event_id INTEGER NOT NULL DEFAULT 0`)
+	_, _ = s.db.Exec(`ALTER TABLE push_deployments ADD COLUMN idempotency_key TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_push_deployments_hook_event ON push_deployments(hook_event_id) WHERE hook_event_id>0`)
+	_, _ = s.db.Exec(`DROP INDEX IF EXISTS idx_push_deployments_idempotency`)
+	_, _ = s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_push_deployments_idempotency ON push_deployments(tenant_id,project_id,idempotency_key) WHERE idempotency_key<>''`)
 	_, _ = s.db.Exec(`UPDATE push_hosts SET next_check_at=? WHERE health_check_enabled=1 AND next_check_at=''`, time.Now().Format(timeLayout))
 	return nil
+}
+
+func (s *Store) migratePushBindingTargetTags() error {
+	var tableSQL string
+	if err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='push_server_bindings'`).Scan(&tableSQL); err != nil {
+		return err
+	}
+	if !strings.Contains(tableSQL, "UNIQUE(host_id, server_id, labels)") {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	statements := []string{
+		`ALTER TABLE push_server_bindings RENAME TO push_server_bindings_legacy`,
+		`CREATE TABLE push_server_bindings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id INTEGER NOT NULL,
+  host_id INTEGER NOT NULL,
+  project_name TEXT NOT NULL DEFAULT '',
+  server_id TEXT NOT NULL,
+  labels TEXT NOT NULL DEFAULT 'test',
+  content_tags TEXT NOT NULL DEFAULT '',
+  remote_root TEXT NOT NULL,
+  os TEXT NOT NULL DEFAULT 'linux',
+  arch TEXT NOT NULL DEFAULT 'amd64',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(host_id, project_name, server_id, labels),
+  FOREIGN KEY(host_id) REFERENCES push_hosts(id) ON DELETE CASCADE
+)`,
+		`INSERT INTO push_server_bindings(id,tenant_id,host_id,project_name,server_id,labels,content_tags,remote_root,os,arch,created_at,updated_at)
+SELECT id,tenant_id,host_id,project_name,server_id,labels,content_tags,remote_root,os,arch,created_at,updated_at FROM push_server_bindings_legacy`,
+		`DROP TABLE push_server_bindings_legacy`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.Exec(statement); err != nil {
+			return fmt.Errorf("migrate push target tags: %w", err)
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) CreatePushHost(host PushHost, encryptedPrivateKey string) (*PushHost, error) {
@@ -461,17 +519,18 @@ func (s *Store) CreatePushServerBinding(b PushServerBinding) (*PushServerBinding
 		return nil, sql.ErrNoRows
 	}
 	now := time.Now().Format(timeLayout)
-	res, err := s.db.Exec(`INSERT INTO push_server_bindings(tenant_id,host_id,server_id,labels,content_tags,remote_root,os,arch,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, b.TenantID, b.HostID, b.ServerID, normaliseLabels(b.Labels), normaliseLabels(b.ContentTags), b.RemoteRoot, b.OS, b.Arch, now, now)
+	res, err := s.db.Exec(`INSERT INTO push_server_bindings(tenant_id,host_id,project_name,server_id,labels,content_tags,remote_root,os,arch,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, b.TenantID, b.HostID, strings.TrimSpace(b.ProjectName), b.ServerID, normaliseLabels(b.Labels), normaliseLabels(b.ContentTags), b.RemoteRoot, b.OS, b.Arch, now, now)
 	if err != nil {
 		return nil, err
 	}
 	b.ID, _ = res.LastInsertId()
 	b.CreatedAt, b.UpdatedAt = now, now
+	b.TargetTag = pushTargetTag(b.ProjectName, b.ServerID)
 	return &b, nil
 }
 
 func (s *Store) ListPushServerBindings(tenantID, hostID int64) ([]PushServerBinding, error) {
-	rows, err := s.db.Query(`SELECT b.id,b.tenant_id,b.host_id,h.name,b.server_id,b.labels,b.content_tags,b.remote_root,b.os,b.arch,b.created_at,b.updated_at FROM push_server_bindings b JOIN push_hosts h ON h.id=b.host_id WHERE b.tenant_id=? AND b.host_id=? ORDER BY b.server_id`, tenantID, hostID)
+	rows, err := s.db.Query(`SELECT b.id,b.tenant_id,b.host_id,h.name,b.project_name,b.server_id,b.labels,b.content_tags,b.remote_root,b.os,b.arch,b.created_at,b.updated_at FROM push_server_bindings b JOIN push_hosts h ON h.id=b.host_id WHERE b.tenant_id=? AND b.host_id=? ORDER BY b.project_name,b.server_id`, tenantID, hostID)
 	if err != nil {
 		return nil, err
 	}
@@ -479,16 +538,17 @@ func (s *Store) ListPushServerBindings(tenantID, hostID int64) ([]PushServerBind
 	var out []PushServerBinding
 	for rows.Next() {
 		var b PushServerBinding
-		if err := rows.Scan(&b.ID, &b.TenantID, &b.HostID, &b.HostName, &b.ServerID, &b.Labels, &b.ContentTags, &b.RemoteRoot, &b.OS, &b.Arch, &b.CreatedAt, &b.UpdatedAt); err != nil {
+		if err := rows.Scan(&b.ID, &b.TenantID, &b.HostID, &b.HostName, &b.ProjectName, &b.ServerID, &b.Labels, &b.ContentTags, &b.RemoteRoot, &b.OS, &b.Arch, &b.CreatedAt, &b.UpdatedAt); err != nil {
 			return nil, err
 		}
+		b.TargetTag = pushTargetTag(b.ProjectName, b.ServerID)
 		out = append(out, b)
 	}
 	return out, rows.Err()
 }
 
-func (s *Store) ListPushBindingsForSelector(tenantID int64, serverIDs, labels []string, all bool) ([]PushServerBinding, error) {
-	rows, err := s.db.Query(`SELECT b.id,b.tenant_id,b.host_id,h.name,b.server_id,b.labels,b.content_tags,b.remote_root,b.os,b.arch,b.created_at,b.updated_at FROM push_server_bindings b JOIN push_hosts h ON h.id=b.host_id WHERE b.tenant_id=? ORDER BY h.name,b.server_id`, tenantID)
+func (s *Store) ListPushBindingsForSelector(tenantID int64, projectName string, serverIDs, labels []string, all bool) ([]PushServerBinding, error) {
+	rows, err := s.db.Query(`SELECT b.id,b.tenant_id,b.host_id,h.name,b.project_name,b.server_id,b.labels,b.content_tags,b.remote_root,b.os,b.arch,b.created_at,b.updated_at FROM push_server_bindings b JOIN push_hosts h ON h.id=b.host_id WHERE b.tenant_id=? ORDER BY h.name,b.project_name,b.server_id`, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -500,13 +560,17 @@ func (s *Store) ListPushBindingsForSelector(tenantID int64, serverIDs, labels []
 	}
 	for rows.Next() {
 		var b PushServerBinding
-		if err := rows.Scan(&b.ID, &b.TenantID, &b.HostID, &b.HostName, &b.ServerID, &b.Labels, &b.ContentTags, &b.RemoteRoot, &b.OS, &b.Arch, &b.CreatedAt, &b.UpdatedAt); err != nil {
+		if err := rows.Scan(&b.ID, &b.TenantID, &b.HostID, &b.HostName, &b.ProjectName, &b.ServerID, &b.Labels, &b.ContentTags, &b.RemoteRoot, &b.OS, &b.Arch, &b.CreatedAt, &b.UpdatedAt); err != nil {
 			return nil, err
+		}
+		if b.ProjectName != "" && projectName != "" && b.ProjectName != projectName {
+			continue
 		}
 		if len(serverSet) > 0 && !serverSet[b.ServerID] {
 			continue
 		}
 		if labelsMatch(splitLabels(b.Labels), labels, all) {
+			b.TargetTag = pushTargetTag(b.ProjectName, b.ServerID)
 			out = append(out, b)
 		}
 	}
@@ -526,7 +590,7 @@ func (s *Store) UpdatePushServerBinding(b PushServerBinding) error {
 	if b.Arch == "" {
 		b.Arch = "amd64"
 	}
-	res, err := s.db.Exec(`UPDATE push_server_bindings SET server_id=?,labels=?,content_tags=?,remote_root=?,os=?,arch=?,updated_at=? WHERE tenant_id=? AND host_id=? AND id=?`, b.ServerID, normaliseLabels(b.Labels), normaliseLabels(b.ContentTags), b.RemoteRoot, b.OS, b.Arch, time.Now().Format(timeLayout), b.TenantID, b.HostID, b.ID)
+	res, err := s.db.Exec(`UPDATE push_server_bindings SET project_name=?,server_id=?,labels=?,content_tags=?,remote_root=?,os=?,arch=?,updated_at=? WHERE tenant_id=? AND host_id=? AND id=?`, strings.TrimSpace(b.ProjectName), b.ServerID, normaliseLabels(b.Labels), normaliseLabels(b.ContentTags), b.RemoteRoot, b.OS, b.Arch, time.Now().Format(timeLayout), b.TenantID, b.HostID, b.ID)
 	if err != nil {
 		return err
 	}
@@ -552,14 +616,31 @@ func (s *Store) CreatePushDeployment(d PushDeployment, targets []PushServerBindi
 	if len(targets) == 0 {
 		return nil, fmt.Errorf("no targets matched selector")
 	}
+	if d.IdempotencyKey != "" {
+		existing, err := s.GetPushDeploymentByIdempotencyKey(d.TenantID, d.ProjectID, d.IdempotencyKey)
+		if err == nil {
+			existing.Replayed = true
+			return existing, nil
+		}
+		if err != sql.ErrNoRows {
+			return nil, err
+		}
+	}
 	now := time.Now().Format(timeLayout)
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	res, err := tx.Exec(`INSERT INTO push_deployments(tenant_id,project_id,task_id,task_name,hook_event_id,version,requested_by,selector,status,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, d.TenantID, d.ProjectID, d.TaskID, d.TaskName, d.HookEventID, d.Version, d.RequestedBy, d.Selector, "queued", now)
+	res, err := tx.Exec(`INSERT INTO push_deployments(tenant_id,project_id,task_id,task_name,hook_event_id,idempotency_key,version,requested_by,selector,status,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, d.TenantID, d.ProjectID, d.TaskID, d.TaskName, d.HookEventID, d.IdempotencyKey, d.Version, d.RequestedBy, d.Selector, "queued", now)
 	if err != nil {
+		if d.IdempotencyKey != "" {
+			_ = tx.Rollback()
+			if existing, lookupErr := s.GetPushDeploymentByIdempotencyKey(d.TenantID, d.ProjectID, d.IdempotencyKey); lookupErr == nil {
+				existing.Replayed = true
+				return existing, nil
+			}
+		}
 		return nil, err
 	}
 	d.ID, _ = res.LastInsertId()
@@ -584,7 +665,7 @@ func (s *Store) ListPushDeployments(tenantID, projectID int64, limit int) ([]Pus
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	rows, err := s.db.Query(`SELECT id,tenant_id,project_id,task_id,task_name,hook_event_id,version,requested_by,selector,status,created_at,started_at,completed_at FROM push_deployments WHERE tenant_id=? AND project_id=? AND created_at>=? ORDER BY id DESC LIMIT ?`, tenantID, projectID, time.Now().Add(-LogRetention).Format(timeLayout), limit)
+	rows, err := s.db.Query(`SELECT id,tenant_id,project_id,task_id,task_name,hook_event_id,idempotency_key,version,requested_by,selector,status,created_at,started_at,completed_at FROM push_deployments WHERE tenant_id=? AND project_id=? AND created_at>=? ORDER BY id DESC LIMIT ?`, tenantID, projectID, time.Now().Add(-LogRetention).Format(timeLayout), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -592,7 +673,7 @@ func (s *Store) ListPushDeployments(tenantID, projectID int64, limit int) ([]Pus
 	out := make([]PushDeployment, 0)
 	for rows.Next() {
 		var d PushDeployment
-		if err := rows.Scan(&d.ID, &d.TenantID, &d.ProjectID, &d.TaskID, &d.TaskName, &d.HookEventID, &d.Version, &d.RequestedBy, &d.Selector, &d.Status, &d.CreatedAt, &d.StartedAt, &d.CompletedAt); err != nil {
+		if err := rows.Scan(&d.ID, &d.TenantID, &d.ProjectID, &d.TaskID, &d.TaskName, &d.HookEventID, &d.IdempotencyKey, &d.Version, &d.RequestedBy, &d.Selector, &d.Status, &d.CreatedAt, &d.StartedAt, &d.CompletedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, d)
@@ -601,7 +682,7 @@ func (s *Store) ListPushDeployments(tenantID, projectID int64, limit int) ([]Pus
 }
 func (s *Store) GetPushDeployment(tenantID, projectID, id int64) (*PushDeployment, error) {
 	var d PushDeployment
-	err := s.db.QueryRow(`SELECT id,tenant_id,project_id,task_id,task_name,hook_event_id,version,requested_by,selector,status,created_at,started_at,completed_at FROM push_deployments WHERE tenant_id=? AND project_id=? AND id=? AND created_at>=?`, tenantID, projectID, id, time.Now().Add(-LogRetention).Format(timeLayout)).Scan(&d.ID, &d.TenantID, &d.ProjectID, &d.TaskID, &d.TaskName, &d.HookEventID, &d.Version, &d.RequestedBy, &d.Selector, &d.Status, &d.CreatedAt, &d.StartedAt, &d.CompletedAt)
+	err := s.db.QueryRow(`SELECT id,tenant_id,project_id,task_id,task_name,hook_event_id,idempotency_key,version,requested_by,selector,status,created_at,started_at,completed_at FROM push_deployments WHERE tenant_id=? AND project_id=? AND id=? AND created_at>=?`, tenantID, projectID, id, time.Now().Add(-LogRetention).Format(timeLayout)).Scan(&d.ID, &d.TenantID, &d.ProjectID, &d.TaskID, &d.TaskName, &d.HookEventID, &d.IdempotencyKey, &d.Version, &d.RequestedBy, &d.Selector, &d.Status, &d.CreatedAt, &d.StartedAt, &d.CompletedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -626,6 +707,13 @@ func (s *Store) GetPushDeploymentByHookEvent(eventID int64) (*PushDeployment, er
 	}
 	return s.GetPushDeployment(tenantID, projectID, id)
 }
+func (s *Store) GetPushDeploymentByIdempotencyKey(tenantID, projectID int64, key string) (*PushDeployment, error) {
+	var id int64
+	if err := s.db.QueryRow(`SELECT id FROM push_deployments WHERE tenant_id=? AND project_id=? AND idempotency_key=?`, tenantID, projectID, key).Scan(&id); err != nil {
+		return nil, err
+	}
+	return s.GetPushDeployment(tenantID, projectID, id)
+}
 func (s *Store) GetPushDeploymentByID(id int64) (*PushDeployment, error) {
 	var tenantID, projectID int64
 	if err := s.db.QueryRow(`SELECT tenant_id,project_id FROM push_deployments WHERE id=?`, id).Scan(&tenantID, &projectID); err != nil {
@@ -635,8 +723,16 @@ func (s *Store) GetPushDeploymentByID(id int64) (*PushDeployment, error) {
 }
 func (s *Store) GetPushBinding(tenantID, id int64) (*PushServerBinding, error) {
 	var b PushServerBinding
-	err := s.db.QueryRow(`SELECT b.id,b.tenant_id,b.host_id,h.name,b.server_id,b.labels,b.content_tags,b.remote_root,b.os,b.arch,b.created_at,b.updated_at FROM push_server_bindings b JOIN push_hosts h ON h.id=b.host_id WHERE b.tenant_id=? AND b.id=?`, tenantID, id).Scan(&b.ID, &b.TenantID, &b.HostID, &b.HostName, &b.ServerID, &b.Labels, &b.ContentTags, &b.RemoteRoot, &b.OS, &b.Arch, &b.CreatedAt, &b.UpdatedAt)
+	err := s.db.QueryRow(`SELECT b.id,b.tenant_id,b.host_id,h.name,b.project_name,b.server_id,b.labels,b.content_tags,b.remote_root,b.os,b.arch,b.created_at,b.updated_at FROM push_server_bindings b JOIN push_hosts h ON h.id=b.host_id WHERE b.tenant_id=? AND b.id=?`, tenantID, id).Scan(&b.ID, &b.TenantID, &b.HostID, &b.HostName, &b.ProjectName, &b.ServerID, &b.Labels, &b.ContentTags, &b.RemoteRoot, &b.OS, &b.Arch, &b.CreatedAt, &b.UpdatedAt)
+	b.TargetTag = pushTargetTag(b.ProjectName, b.ServerID)
 	return &b, err
+}
+
+func pushTargetTag(projectName, serverID string) string {
+	if strings.TrimSpace(projectName) == "" {
+		return strings.TrimSpace(serverID)
+	}
+	return strings.TrimSpace(projectName) + "|" + strings.TrimSpace(serverID)
 }
 func (s *Store) MarkPushDeploymentRunning(id int64) error {
 	_, err := s.db.Exec(`UPDATE push_deployments SET status='running',started_at=? WHERE id=? AND status='queued'`, time.Now().Format(timeLayout), id)

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"time"
 )
 
 type loginReq struct {
@@ -29,6 +28,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			errJSON(w, http.StatusTooManyRequests, "too many login attempts; try again later")
 			return
 		}
+		if !s.loginProtectionEnabled() {
+			errJSON(w, http.StatusUnauthorized, "invalid username or password")
+			return
+		}
 		errJSON(w, http.StatusUnauthorized, fmt.Sprintf("invalid username or password; %d attempt(s) remaining before this IP is temporarily blocked", remaining))
 		return
 	}
@@ -45,15 +48,20 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, http.StatusInternalServerError, "tenant error")
 		return
 	}
-	sess := session{UserID: uid, Username: req.Username, IsAdmin: admin, TenantID: tid, TenantSlug: t.Slug}
-	tok, err := s.jwt.sign(sess, 7*24*time.Hour)
+	authVersion, err := s.Store.UserAuthVersion(uid)
+	if err != nil {
+		errJSON(w, http.StatusInternalServerError, "authentication state error")
+		return
+	}
+	sess := session{UserID: uid, Username: req.Username, IsAdmin: admin, AuthVersion: authVersion, TenantID: tid, TenantSlug: t.Slug}
+	tok, err := s.jwt.sign(sess, persistentSessionTTL)
 	if err != nil {
 		errJSON(w, http.StatusInternalServerError, "token error")
 		return
 	}
 	s.setJWTCookie(w, tok)
 	// 兼容依赖 cookie jar 的测试
-	if sid, err := s.sessions.create(uid, req.Username, admin, tid, t.Slug); err == nil {
+	if sid, err := s.sessions.create(uid, req.Username, admin, authVersion, tid, t.Slug); err == nil {
 		s.setSessionCookie(w, sid)
 	}
 	s.reloadServerYAML(tid)

@@ -26,6 +26,13 @@ type User struct {
 	CreatedAt string `json:"created_at"`
 }
 
+// UserAuthVersion returns version used to revoke browser sessions after a password change.
+func (s *Store) UserAuthVersion(userID int64) (int64, error) {
+	var version int64
+	err := s.db.QueryRow(`SELECT COALESCE(auth_version, 1) FROM users WHERE id = ?`, userID).Scan(&version)
+	return version, err
+}
+
 // ListUsers 列出用户（不含密码）。
 func (s *Store) ListUsers(tenantID int64) ([]User, error) {
 	rows, err := s.db.Query(
@@ -119,7 +126,7 @@ func (s *Store) UpdateUserPassword(id int64, password string) error {
 	if err != nil {
 		return err
 	}
-	res, err := s.db.Exec(`UPDATE users SET password_hash = ? WHERE id = ?`, string(hash), id)
+	res, err := s.db.Exec(`UPDATE users SET password_hash = ?, auth_version = COALESCE(auth_version, 1) + 1 WHERE id = ?`, string(hash), id)
 	if err != nil {
 		return err
 	}

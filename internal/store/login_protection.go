@@ -2,6 +2,8 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -15,12 +17,19 @@ type LoginIPPolicy struct {
 }
 
 type LoginIPBan struct {
-	IP            string `json:"ip"`
-	Failures      int    `json:"failures"`
-	BanCount      int    `json:"ban_count"`
-	WindowStarted string `json:"window_started"`
-	BannedUntil   string `json:"banned_until"`
-	LastFailure   string `json:"last_failure"`
+	IP               string   `json:"ip"`
+	Username         string   `json:"username"`
+	Failures         int      `json:"failures"`
+	AttemptCount     int      `json:"attempt_count"`
+	BanCount         int      `json:"ban_count"`
+	WindowStarted    string   `json:"window_started"`
+	BannedUntil      string   `json:"banned_until"`
+	LastFailure      string   `json:"last_failure"`
+	LastAttemptTimes []string `json:"last_attempt_times"`
+}
+
+func containsDuplicateColumn(err error) bool {
+	return strings.Contains(strings.ToLower(err.Error()), "duplicate column name")
 }
 
 func (s *Store) migrateLoginProtection() error {
@@ -31,10 +40,51 @@ CREATE TABLE IF NOT EXISTS login_ip_bans (
   ban_count INTEGER NOT NULL DEFAULT 0,
   window_started TEXT NOT NULL,
   banned_until TEXT NOT NULL DEFAULT '',
-  last_failure TEXT NOT NULL
+  last_failure TEXT NOT NULL,
+  username TEXT NOT NULL DEFAULT '',
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  last_attempts TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS idx_login_ip_bans_until ON login_ip_bans(banned_until);
+CREATE TABLE IF NOT EXISTS login_protection_settings (
+  singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+  enabled INTEGER NOT NULL DEFAULT 0
+);
+INSERT OR IGNORE INTO login_protection_settings(singleton, enabled) VALUES(1, 0);
 `)
+	if err != nil {
+		return err
+	}
+	for _, migration := range []string{
+		"ALTER TABLE login_ip_bans ADD COLUMN username TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE login_ip_bans ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE login_ip_bans ADD COLUMN last_attempts TEXT NOT NULL DEFAULT '[]'",
+	} {
+		if _, err := s.db.Exec(migration); err != nil && !containsDuplicateColumn(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+// LoginProtectionEnabled returns whether failed credentials may temporarily
+// block a source IP. It defaults to off so an operator can observe attacks
+// before enabling enforcement.
+func (s *Store) LoginProtectionEnabled() (bool, error) {
+	var enabled int
+	if err := s.db.QueryRow(`SELECT enabled FROM login_protection_settings WHERE singleton = 1`).Scan(&enabled); err != nil {
+		return false, err
+	}
+	return enabled != 0, nil
+}
+
+// SetLoginProtectionEnabled persists the administrator's enforcement switch.
+func (s *Store) SetLoginProtectionEnabled(enabled bool) error {
+	value := 0
+	if enabled {
+		value = 1
+	}
+	_, err := s.db.Exec(`INSERT INTO login_protection_settings(singleton, enabled) VALUES(1, ?) ON CONFLICT(singleton) DO UPDATE SET enabled = excluded.enabled`, value)
 	return err
 }
 
@@ -54,19 +104,19 @@ func (s *Store) LoginIPBlocked(ip string, now time.Time) (time.Duration, bool, e
 	return time.Until(t).Round(time.Second), true, nil
 }
 
-// RecordLoginIPFailure advances the counter atomically and returns the current
-// ban. A repeat offender receives an exponential ban capped by MaxBan.
-func (s *Store) RecordLoginIPFailure(ip string, now time.Time, policy LoginIPPolicy) (LoginIPBan, error) {
+// RecordLoginIPFailure advances the per-IP counters atomically. A non-positive
+// FailureLimit records attempts only; it never creates a ban.
+func (s *Store) RecordLoginIPFailure(ip, username string, now time.Time, policy LoginIPPolicy) (LoginIPBan, error) {
 	out := LoginIPBan{IP: ip}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return out, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	var windowStarted, bannedUntil string
-	err = tx.QueryRow(`SELECT failures,ban_count,window_started,banned_until,last_failure FROM login_ip_bans WHERE ip=?`, ip).Scan(&out.Failures, &out.BanCount, &windowStarted, &bannedUntil, &out.LastFailure)
+	var windowStarted, bannedUntil, lastAttempts string
+	err = tx.QueryRow(`SELECT username,failures,attempt_count,ban_count,window_started,banned_until,last_failure,last_attempts FROM login_ip_bans WHERE ip=?`, ip).Scan(&out.Username, &out.Failures, &out.AttemptCount, &out.BanCount, &windowStarted, &bannedUntil, &out.LastFailure, &lastAttempts)
 	if err == sql.ErrNoRows {
-		out.Failures, out.BanCount = 0, 0
+		out.Username, out.Failures, out.AttemptCount, out.BanCount = username, 0, 0, 0
 		windowStarted = now.UTC().Format(time.RFC3339Nano)
 	} else if err != nil {
 		return out, err
@@ -77,7 +127,14 @@ func (s *Store) RecordLoginIPFailure(ip string, now time.Time, policy LoginIPPol
 		windowStarted = now.UTC().Format(time.RFC3339Nano)
 	}
 	out.Failures++
-	if out.Failures >= policy.FailureLimit {
+	out.AttemptCount++
+	out.Username = username
+	_ = json.Unmarshal([]byte(lastAttempts), &out.LastAttemptTimes)
+	out.LastAttemptTimes = append(out.LastAttemptTimes, now.UTC().Format(time.RFC3339Nano))
+	if len(out.LastAttemptTimes) > 3 {
+		out.LastAttemptTimes = out.LastAttemptTimes[len(out.LastAttemptTimes)-3:]
+	}
+	if policy.FailureLimit > 0 && out.Failures >= policy.FailureLimit {
 		out.BanCount++
 		ban := policy.BaseBan
 		for i := 1; i < out.BanCount && ban < policy.MaxBan; i++ {
@@ -91,7 +148,8 @@ func (s *Store) RecordLoginIPFailure(ip string, now time.Time, policy LoginIPPol
 		windowStarted = now.UTC().Format(time.RFC3339Nano)
 	}
 	out.WindowStarted, out.BannedUntil, out.LastFailure = windowStarted, bannedUntil, now.UTC().Format(time.RFC3339Nano)
-	_, err = tx.Exec(`INSERT INTO login_ip_bans(ip,failures,ban_count,window_started,banned_until,last_failure) VALUES(?,?,?,?,?,?) ON CONFLICT(ip) DO UPDATE SET failures=excluded.failures,ban_count=excluded.ban_count,window_started=excluded.window_started,banned_until=excluded.banned_until,last_failure=excluded.last_failure`, out.IP, out.Failures, out.BanCount, out.WindowStarted, out.BannedUntil, out.LastFailure)
+	encodedAttempts, _ := json.Marshal(out.LastAttemptTimes)
+	_, err = tx.Exec(`INSERT INTO login_ip_bans(ip,username,failures,attempt_count,ban_count,window_started,banned_until,last_failure,last_attempts) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(ip) DO UPDATE SET username=excluded.username,failures=excluded.failures,attempt_count=excluded.attempt_count,ban_count=excluded.ban_count,window_started=excluded.window_started,banned_until=excluded.banned_until,last_failure=excluded.last_failure,last_attempts=excluded.last_attempts`, out.IP, out.Username, out.Failures, out.AttemptCount, out.BanCount, out.WindowStarted, out.BannedUntil, out.LastFailure, string(encodedAttempts))
 	if err != nil {
 		return LoginIPBan{}, err
 	}
@@ -99,6 +157,12 @@ func (s *Store) RecordLoginIPFailure(ip string, now time.Time, policy LoginIPPol
 }
 
 func (s *Store) ClearLoginIPFailures(ip string) error {
+	_, err := s.db.Exec(`UPDATE login_ip_bans SET failures=0,banned_until='' WHERE ip=?`, ip)
+	return err
+}
+
+// DeleteLoginIPHistory removes an attacker record after administrator review.
+func (s *Store) DeleteLoginIPHistory(ip string) error {
 	_, err := s.db.Exec(`DELETE FROM login_ip_bans WHERE ip=?`, ip)
 	return err
 }
@@ -107,7 +171,7 @@ func (s *Store) ListLoginIPBans(now time.Time, limit int) ([]LoginIPBan, error) 
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	rows, err := s.db.Query(`SELECT ip,failures,ban_count,window_started,banned_until,last_failure FROM login_ip_bans WHERE banned_until > ? ORDER BY banned_until DESC LIMIT ?`, now.UTC().Format(time.RFC3339Nano), limit)
+	rows, err := s.db.Query(`SELECT ip,username,failures,attempt_count,ban_count,window_started,banned_until,last_failure,last_attempts FROM login_ip_bans WHERE last_failure >= ? ORDER BY last_failure DESC LIMIT ?`, now.Add(-LogRetention).UTC().Format(time.RFC3339Nano), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -115,9 +179,11 @@ func (s *Store) ListLoginIPBans(now time.Time, limit int) ([]LoginIPBan, error) 
 	var out []LoginIPBan
 	for rows.Next() {
 		var b LoginIPBan
-		if err := rows.Scan(&b.IP, &b.Failures, &b.BanCount, &b.WindowStarted, &b.BannedUntil, &b.LastFailure); err != nil {
+		var lastAttempts string
+		if err := rows.Scan(&b.IP, &b.Username, &b.Failures, &b.AttemptCount, &b.BanCount, &b.WindowStarted, &b.BannedUntil, &b.LastFailure, &lastAttempts); err != nil {
 			return nil, err
 		}
+		_ = json.Unmarshal([]byte(lastAttempts), &b.LastAttemptTimes)
 		out = append(out, b)
 	}
 	return out, rows.Err()

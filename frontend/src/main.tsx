@@ -5,6 +5,7 @@ import {
   Project,
   PushDeployment,
   PushDeploymentTask,
+  LoginAttack,
   values,
   Version,
 } from "./api";
@@ -25,7 +26,7 @@ type Tab =
   | "team"
   | "deploy"
   | "diff";
-type GlobalView = "workspace" | "dashboard" | "guide" | "agent";
+type GlobalView = "workspace" | "dashboard" | "guide" | "agent" | "security";
 const projectTabs: readonly [Tab, string][] = [
   ["versions", "版本管理"],
   ["cluster", "集群节点"],
@@ -107,6 +108,8 @@ function App() {
           <GuidePanel />
         ) : view === "agent" ? (
           <AgentPanel />
+        ) : view === "security" ? (
+          <LoginSecurity />
         ) : (
           <>
             <header className="workspace-header">
@@ -343,6 +346,11 @@ function Sidebar({
             <span>Agent 与节点</span>
           </button>
         ) : null}
+        {isAdmin ? (
+          <button type="button" className={`sidebar-nav-item ${view === "security" ? "active" : ""}`} onClick={() => onView("security")} data-testid="nav-login-security">
+            <svg className="nav-svg" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3 4 6v5c0 5.1 3.4 9.8 8 11 4.6-1.2 8-5.9 8-11V6l-8-3Z"/><path d="M9 12l2 2 4-4"/></svg><span>登录安全</span>
+          </button>
+        ) : null}
       </nav>
       <div className="sidebar-footer">
         <span className="user-label" data-testid="whoami">
@@ -351,6 +359,22 @@ function Sidebar({
       </div>
     </aside>
   );
+}
+
+function LoginSecurity() {
+  const [attacks, setAttacks] = useState<LoginAttack[]>([]);
+  const [error, setError] = useState("");
+  const load = async () => {
+    try { setAttacks(await api<LoginAttack[]>("/security/login-ip-bans")); setError(""); }
+    catch (reason) { setError((reason as Error).message); }
+  };
+  useEffect(() => { void load(); }, []);
+  const clear = async (ip: string) => { await api(`/security/login-ip-bans/${encodeURIComponent(ip)}`, { method: "DELETE" }); await load(); };
+  return <section className="global-panel login-security-panel" data-testid="login-security-panel">
+    <header className="page-header"><div><h1>登录安全</h1><p className="subtitle">近 30 天攻击来源。每个 IP 仅保留累计次数与最后 3 次失败时间。</p></div><button className="btn btn-secondary btn-sm" onClick={() => void load()}>刷新</button></header>
+    {error ? <p className="err">{error}</p> : null}
+    <div className="card"><div className="table-wrap"><table className="data-table login-attack-table"><thead><tr><th>攻击来源</th><th>目标账号</th><th>累计失败</th><th>封禁</th><th>最后 3 次尝试</th><th>操作</th></tr></thead><tbody>{attacks.length ? attacks.map((attack) => <tr key={attack.ip}><td><code>{attack.ip}</code></td><td>{attack.username || "未知"}</td><td><strong>{attack.attempt_count}</strong><small>当前窗口 {attack.failures}</small></td><td>{attack.banned_until ? <span className="badge badge-warn">至 {attack.banned_until}</span> : <span className="badge badge-ok">未封禁</span>}</td><td>{attack.last_attempt_times.map((time) => <small key={time}>{time}</small>)}</td><td><button className="btn btn-danger btn-sm" onClick={() => void clear(attack.ip)}>清除</button></td></tr>) : <tr><td colSpan={6} className="table-empty">暂无失败尝试</td></tr>}</tbody></table></div></div>
+  </section>;
 }
 
 function Workspace({

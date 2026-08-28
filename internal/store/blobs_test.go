@@ -111,6 +111,36 @@ func TestBlobDeleteFileDecrementsRef(t *testing.T) {
 	}
 }
 
+func TestIngestBlobRepairsMissingBlobFile(t *testing.T) {
+	dir := t.TempDir()
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	payload := []byte("repair-missing-blob\n")
+	hash, err := st.ingestBlob(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := st.blobPath(hash)
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := st.ingestBlobFromReader(strings.NewReader(string(payload))); err != nil {
+		t.Fatal(err)
+	}
+	repaired, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(repaired) != string(payload) {
+		t.Fatalf("repaired blob=%q", repaired)
+	}
+}
+
 func TestBlobMigrationAdoptsExistingFiles(t *testing.T) {
 	dir := t.TempDir()
 	userdata := filepath.Join(dir, "userdata", "default", "projects", "legacy", "1.0.0")

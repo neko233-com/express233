@@ -26,6 +26,10 @@ type createVersionReq struct {
 	VCS  store.VCSProvenance `json:"vcs"`
 }
 
+type projectVersionRetentionReq struct {
+	MaxPublishedVersions int `json:"max_published_versions"`
+}
+
 func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 	tid, ok := s.tenantFromSession(r)
 	if !ok {
@@ -204,6 +208,20 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		metrics.publishTotal.Add(1)
+		maxPublishedVersions, err := s.Store.ProjectMaxPublishedVersions(tid, pid)
+		if err != nil {
+			errJSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		removed, err := s.Store.PrunePublishedVersions(tid, pid, pname, maxPublishedVersions)
+		if err != nil {
+			s.auditSession(r, "version.retention.prune_failed", fmt.Sprintf("project_id=%d error=%v", pid, err))
+			errJSON(w, http.StatusInternalServerError, "version is published but old artifact cleanup failed; verify storage before retrying")
+			return
+		}
+		if len(removed) > 0 {
+			s.auditSession(r, "version.retention.prune", fmt.Sprintf("project_id=%d retained=%d removed=%s", pid, maxPublishedVersions, strings.Join(removed, ",")))
+		}
 	}
 	session, _ := s.currentSession(r)
 	hooks, err := s.Store.QueueProjectReleaseHooks(tid, pid, ver, session.Username, "version_publish", time.Now())
@@ -229,6 +247,42 @@ func (s *Server) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 	v, _ = s.Store.GetVersion(pid, ver)
 	_ = pname
 	writeJSON(w, http.StatusOK, v)
+}
+
+// handlePutProjectVersionRetention updates a project-wide published artifact limit.
+// A value of zero retains every version; a positive value removes older releases.
+func (s *Server) handlePutProjectVersionRetention(w http.ResponseWriter, r *http.Request) {
+	pid, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	pc, err := s.projectByID(r, pid)
+	if err != nil {
+		errJSON(w, http.StatusNotFound, "project not found")
+		return
+	}
+	if !store.CanWriteProject(pc.ProjectRole) {
+		errJSON(w, http.StatusForbidden, "project admin required")
+		return
+	}
+	var req projectVersionRetentionReq
+	if err := readJSON(r, &req); err != nil {
+		errJSON(w, http.StatusBadRequest, "invalid version retention settings")
+		return
+	}
+	if err := s.Store.SetProjectMaxPublishedVersions(pc.TenantID, pid, req.MaxPublishedVersions); err != nil {
+		errJSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	removed, err := s.Store.PrunePublishedVersions(pc.TenantID, pid, pc.ProjectName, req.MaxPublishedVersions)
+	if err != nil {
+		errJSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.auditSession(r, "project.version_retention.update", fmt.Sprintf("project_id=%d retained=%d removed=%s", pid, req.MaxPublishedVersions, strings.Join(removed, ",")))
+	project, err := s.Store.GetProjectByName(pc.TenantID, pc.ProjectName)
+	if err != nil {
+		errJSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, project)
 }
 
 func (s *Server) handleDeleteVersion(w http.ResponseWriter, r *http.Request) {

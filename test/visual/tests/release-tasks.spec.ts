@@ -29,7 +29,8 @@ test("SSH 资源与可重复发布任务分离，执行日志只读保留", asyn
     if (!bindingResponse.ok) throw new Error(await bindingResponse.text());
   }, { hostName });
 
-  await page.getByTestId("nav-agent").click();
+  await page.getByTestId("nav-release").click();
+  await page.getByTestId("release-tab-ssh").click();
   await expect(page.getByTestId("ssh-resource-list")).toContainText(hostName);
   await page.getByTestId("project-list").getByText(projectName, { exact: true }).click();
   await page.getByRole("button", { name: "发布任务" }).click();
@@ -46,11 +47,11 @@ test("SSH 资源与可重复发布任务分离，执行日志只读保留", asyn
   await expect(page.locator("#ptab-pushlogs")).toContainText("不可删除 · 保留 30 天");
   await expect(page.getByTestId("app-shell")).toContainText("逻辑服重复发布");
 
-  await page.getByRole("button", { name: "发布任务" }).click();
+  await page.getByTestId("release-tab-tasks").click();
   let repeatedRow = page.getByTestId("release-task-list").getByRole("row").filter({ hasText: "逻辑服重复发布" });
   await expect(repeatedRow).toContainText("1");
 
-  await page.getByRole("button", { name: "自动 Hook" }).click();
+  await page.getByTestId("release-tab-hooks").click();
   await expect(page.getByTestId("release-hook-editor")).toBeVisible();
   await page.locator("#releaseHookName").fill("虚构逻辑服自动发布");
   await page.locator("#releaseHookTask").selectOption({ label: "逻辑服重复发布" });
@@ -70,11 +71,11 @@ test("SSH 资源与可重复发布任务分离，执行日志只读保留", asyn
   await page.locator(".modal-card").getByRole("button", { name: "确认" }).click();
   await expect(page.getByTestId("release-hook-list")).not.toContainText("虚构逻辑服自动发布");
 
-  await page.getByRole("button", { name: "发布任务" }).click();
+  await page.getByTestId("release-tab-tasks").click();
   repeatedRow = page.getByTestId("release-task-list").getByRole("row").filter({ hasText: "逻辑服重复发布" });
   await repeatedRow.getByRole("button", { name: "删除" }).click();
   await page.locator(".modal-card").getByRole("button", { name: "确认" }).click();
   await expect(page.getByTestId("release-task-list")).not.toContainText("逻辑服重复发布");
-  await page.getByRole("button", { name: "发布日志" }).click();
+  await page.getByTestId("release-tab-logs").click();
   await expect(page.locator("#ptab-pushlogs")).toContainText("逻辑服重复发布");
 });

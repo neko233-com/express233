@@ -53,6 +53,11 @@ func (s *Store) ingestBlob(data []byte) (hash string, err error) {
 	case err != nil:
 		return "", err
 	default:
+		// 数据库记录可能因人工恢复、磁盘故障或旧版本清理缺陷而残留，
+		// 但实体文件已经丢失。当前上传携带完整内容，可安全自愈后再增加引用。
+		if err := s.writeBlobFile(blobPath, data); err != nil {
+			return "", err
+		}
 		if _, err := tx.Exec(`UPDATE blobs SET ref_count = ref_count + 1 WHERE hash = ?`, hash); err != nil {
 			return "", err
 		}
@@ -97,6 +102,9 @@ func (s *Store) ingestBlobFromReader(r io.Reader) (hash string, err error) {
 	case err != nil:
 		return "", err
 	default:
+		if err := s.writeBlobFile(blobPath, data); err != nil {
+			return "", err
+		}
 		if _, err := tx.Exec(`UPDATE blobs SET ref_count = ref_count + 1 WHERE hash = ?`, hash); err != nil {
 			return "", err
 		}

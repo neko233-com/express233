@@ -172,7 +172,7 @@ express233-cli deploy --project mygame --server-id game-logic-042 --dest /opt/ga
 ```bash
 export EXPRESS233_SERVER=http://10.0.0.1:23380
 export EXPRESS233_USERNAME=root
-export EXPRESS233_PASSWORD=root
+export EXPRESS233_PASSWORD='<account-password>'
 express233-cli deploy --project mygame --server-id game-logic-042 --version 1.0.0 --dest /opt/game/042
 ```
 
@@ -263,7 +263,7 @@ replacements:
 
 ```bash
 docker compose up --build
-# http://localhost:23380  root/root
+# http://localhost:23380
 ```
 
 ## Cloudflare
@@ -275,7 +275,7 @@ Cloudflare Workers / Pages 不能直接运行 `express233-server` Go 二进制�
 管理端受保护 API 现在支持两种方式：
 
 - `POST /api/login` 获取 Cookie / JWT
-- 直接用 HTTP Basic Auth，例如 `root/root`
+- 直接用 HTTP Basic Auth
 
 多版本、整包上传、`server_id` 注册与替换预览、diff、发布、拉取的完整 curl 演示见 [docs/HTTP_AUTOMATION_DEMO.md](docs/HTTP_AUTOMATION_DEMO.md)。
 
@@ -290,7 +290,7 @@ make test
 make build
 make smoke      # 本地冒烟（同 CI）
 make lint       # golangci-lint v2（.golangci.yml version: "2"）
-make run-server # :23380 root/root
+make run-server # :23380
 ```
 
 `run-server` 会设置 `EXPRESS233_WEB_DIR=internal/api/web`：开发时修改 `html`/`css`/`js` 后刷新浏览器即可，无需重启 Go 进程。
@@ -331,7 +331,7 @@ make run-server # :23380 root/root
 - 校验夹具：`testdata/validation-tree/`（双服、树形配置、拉取替换与 post-hook 集成测试）
 - [docs/DEPLOY.md](docs/DEPLOY.md) — Helm / K8s / CLI 配置
 - [docs/CLOUDFLARE.md](docs/CLOUDFLARE.md) — Cloudflare Worker / Pages 入口适配
-- [docs/HTTP_AUTOMATION_DEMO.md](docs/HTTP_AUTOMATION_DEMO.md) — root/root + Basic Auth 自动化演示（多版本 / 模板替换 / 整包上传）
+- [docs/HTTP_AUTOMATION_DEMO.md](docs/HTTP_AUTOMATION_DEMO.md) — Basic Auth 自动化演示（多版本 / 模板替换 / 整包上传）
 - [docs/openapi.yaml](docs/openapi.yaml) — OpenAPI 3（运行时 `/api/openapi.yaml`）
 - [scripts/deploy-on-host.sh](scripts/deploy-on-host.sh)
 - 在线 Swagger：`http://<central>/docs/`

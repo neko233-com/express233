@@ -69,7 +69,7 @@ func TestPublishedVersionQueuesAndCoalescesReleaseHook(t *testing.T) {
 	if deployments[0].HookEventID != events[0].ID {
 		t.Fatalf("deployment idempotency key=%d event=%d", deployments[0].HookEventID, events[0].ID)
 	}
-	targets, _ := st.ListPushBindingsForSelector(1, []string{"fictional-21"}, []string{"test"}, true)
+	targets, _ := st.ListPushBindingsForSelector(1, project.Name, []string{"fictional-21"}, []string{"test"}, true)
 	if _, err := st.CreatePushDeployment(store.PushDeployment{TenantID: 1, ProjectID: project.ID, TaskID: task.ID, TaskName: task.Name, HookEventID: events[0].ID, Version: "3.0.0", RequestedBy: "root", Selector: `{}`}, targets); err == nil {
 		t.Fatal("duplicate deployment accepted for the same hook event")
 	}

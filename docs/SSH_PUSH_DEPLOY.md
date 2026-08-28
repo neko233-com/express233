@@ -1,6 +1,6 @@
 # SSH 批量推送部署
 
-推送部署由管理 API 建立目标机和 `server_id` 绑定，再按标签顺序串行执行。每台目标机必须预先安装 `express233-cli` 与仓库中的 `scripts/safe-deploy.sh`（置于 `PATH`）；脚本会执行拉取到临时目录、停止旧进程、备份、保留 `logs/` 与 `run/`、替换、启动及可选健康检查的安全流程。缺少启动脚本、启动失败或健康检查失败都会自动恢复并启动上一个备份，默认保留最近 5 份（`EXPRESS233_BACKUP_KEEP` 可调）。
+推送部署由管理 API 建立目标机和 `project|server_id` 唯一绑定，再按标签顺序串行执行。每台目标机必须预先安装 `express233-cli` 与仓库中的 `scripts/safe-deploy.sh`（置于 `PATH`）；脚本先拉取、校验内容指纹并准备回滚包，再取得逐目标锁，之后才发送 SIGTERM。旧进程正常退出后快速换包、启动并执行健康门禁。缺少启动脚本、启动失败、健康检查失败或 SSH 会话中断时，脚本会尝试恢复并启动上一个备份。默认保留最近 5 份（`EXPRESS233_BACKUP_KEEP` 可调）。
 
 ## 安全要求
 
@@ -13,7 +13,9 @@
 
 ## API
 
-管理员在全局 Agent / SSH 资源页使用 `/api/push/hosts` 创建、维护 SSH 目标，并通过 `/api/push/hosts/{hostID}/servers` 绑定一个或多个 `server_id`。项目发布页不再管理机器，而是通过 `/api/projects/{id}/push-tasks` 保存版本策略、`server_ids`、`tags` 与 `tag_match` (`all` 或 `any`)。调用 `/api/projects/{id}/push-tasks/{taskID}/run` 可重复预演或正式执行；每次执行都会将任务名称、实际版本和筛选条件快照到发布日志。
+管理员在全局 Agent / SSH 资源页使用 `/api/push/hosts` 创建、维护 SSH 目标，并通过 `/api/push/hosts/{hostID}/servers` 绑定一个或多个 `project|server_id`。项目发布页不再管理机器，而是通过 `/api/projects/{id}/push-tasks` 保存版本策略、`server_ids`、`tags` 与 `tag_match` (`all` 或 `any`)。调用 `/api/projects/{id}/push-tasks/{taskID}/run` 可重复预演或正式执行；每次执行都会将任务名称、实际版本和筛选条件快照到发布日志。客户端应为一次执行生成 `Idempotency-Key`：网络重试复用原键会返回原执行，用户主动再次发布则生成新键。
+
+远端同一内容指纹已经运行且健康时直接成功返回，不重启进程。默认优雅退出等待 180 秒，每 200ms 检查一次；超时会在换包前中止，不发送 SIGKILL。仅在明确设置 `EXPRESS233_FORCE_KILL_AFTER_TIMEOUT=1` 时允许强杀。
 
 凭据字段只接受一次，所有读取接口都不会返回 SSH 密码或私钥。部署日志会记录目标和命令输出，但不会记录凭据。发布日志、逐目标输出、SSH 检查、上传、拉取、审计与安全记录均按 30 天滑动窗口清理；发布日志不可手工删除，删除任务定义不会影响历史执行快照。
 
@@ -34,3 +36,5 @@
 - Prometheus 指标为 `express233_ssh_check_total` 与 `express233_ssh_check_errors_total`。
 
 已登录 Agent 可通过 `GET /api/agent/capabilities` 自发现发布、配置替换、拉取、SSH 与数据大盘操作；完整请求结构见 `/api/openapi.yaml`。
+
+用户仓库如何接收幂等键、执行 ID 与 `project|serverId`，以及如何实现最短停机，见 [发布脚本契约](DEPLOYMENT_SCRIPT_CONTRACT.md)。

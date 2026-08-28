@@ -71,10 +71,15 @@ func (s *Server) dispatchReleaseHook(run store.ReleaseHookRun, now time.Time) {
 		fail(fmt.Errorf("triggered version is not published"))
 		return
 	}
+	projectName, err := s.Store.ProjectNameInTenant(run.Hook.TenantID, run.Hook.ProjectID)
+	if err != nil {
+		fail(err)
+		return
+	}
 	deployment, err := s.Store.GetPushDeploymentByHookEvent(run.EventID)
 	created := false
 	if err == sql.ErrNoRows {
-		targets, targetErr := s.Store.ListPushBindingsForSelector(run.Hook.TenantID, task.ServerIDs, task.Tags, task.TagMatch == "all")
+		targets, targetErr := s.Store.ListPushBindingsForSelector(run.Hook.TenantID, projectName, task.ServerIDs, task.Tags, task.TagMatch == "all")
 		if targetErr != nil {
 			fail(targetErr)
 			return
@@ -94,11 +99,6 @@ func (s *Server) dispatchReleaseHook(run store.ReleaseHookRun, now time.Time) {
 	if created {
 		metrics.hookDispatches.Add(1)
 		_ = s.Store.RecordAudit(run.RequestedBy, "release.hook.dispatched", fmt.Sprintf("project_id=%d hook_id=%d task_id=%d version=%s triggers=%d deployment_id=%d", run.Hook.ProjectID, run.Hook.ID, task.ID, run.Version, run.EventCount, deployment.ID), "")
-	}
-	projectName, err := s.Store.ProjectNameInTenant(run.Hook.TenantID, run.Hook.ProjectID)
-	if err != nil {
-		fail(err)
-		return
 	}
 	// Hook deployments are globally serialized. This extends the existing
 	// per-task serial target policy and prevents two due hooks from restarting

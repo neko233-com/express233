@@ -41,8 +41,8 @@
 
 ```
 ┌─────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-│  1. Pull    │───▶│  2. Stop     │───▶│  3. Backup   │───▶│  4. Swap     │───▶│  5. Start    │
-│  to .tmp/   │    │  old server  │    │  (optional)  │    │  files       │    │  new server  │
+│  1. Stage   │───▶│  2. Backup   │───▶│  3. Stop     │───▶│  4. Swap     │───▶│  5. Start    │
+│ pull+digest │    │ before stop  │    │ TERM + wait  │    │  files       │    │ health gate  │
 └─────────────┘    └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘
 ```
 
@@ -52,26 +52,27 @@
 express233 pull --server-id game-logic-01 --dest /opt/game-servers/.tmp/game-logic-01 --skip-hook
 ```
 
-拉到 `.tmp/` 而不是最终目录，确保不影响正在运行的服务。
+拉到每次执行独立的 `.tmp/{server_id}/{run_id}/`，计算内容指纹，不影响正在运行的服务。取得 `.locks/{server_id}.lock` 后会再次比较当前健康版本；内容一致则幂等成功，不重启。
 
-**Step 2 — 停止旧服务**
-
-```bash
-PID=$(cat /opt/game-servers/game-logic-01/run/server.pid)
-kill -TERM "$PID"
-# 等待退出（默认 90s，可用 --stop-timeout-seconds 调整）
-for i in $(seq 1 90); do kill -0 "$PID" 2>/dev/null || break; sleep 1; done
-# 仍未退出必须终止发布并保留 PID 文件；SIGKILL 只允许人工明确授权的应急操作。
-kill -0 "$PID" 2>/dev/null && exit 1
-```
-
-**Step 3 — 备份（可选）**
+**Step 2 — 停服前备份**
 
 ```bash
 tar -czf /opt/game-servers/.backup/game-logic-01/$(date +%Y%m%d_%H%M%S).tar.gz \
   --exclude=logs --exclude=run \
   -C /opt/game-servers game-logic-01
 ```
+
+压缩在服务仍运行时完成，不计入停机窗口。
+
+**Step 3 — 优雅停止旧服务**
+
+```bash
+PID=$(cat /opt/game-servers/game-logic-01/run/server.pid)
+kill -TERM "$PID"
+# 默认最多等待 180 秒，每 200ms 检查一次正常退出
+```
+
+默认等待 180 秒，超时后在换包前失败，不发送 SIGKILL，旧目录保持不变。仅显式设置 `EXPRESS233_FORCE_KILL_AFTER_TIMEOUT=1` 才允许强杀。游戏服应捕获 SIGTERM、保存在线玩家与脏数据、完成 MySQL 最终 Flush、关闭组件后正常退出。
 
 **Step 4 — 替换文件**
 
@@ -108,7 +109,7 @@ bash scripts/safe-deploy.sh --server-id game-logic-01 --dry-run         # 预览
 bash scripts/safe-deploy.sh --server-id game-logic-01 --stop-timeout-seconds 90
 ```
 
-中央控制台的 SSH 推送始终启用 `--backup`。缺少 `scripts/restart.sh`、启动失败或可选的 `scripts/healthcheck.sh` 返回失败时，脚本会自动停止失败进程、恢复旧文件并重新执行旧版 `scripts/restart.sh`；备份默认保留最近 5 份，可通过 `EXPRESS233_BACKUP_KEEP` 调整。
+中央控制台的 SSH 推送始终启用 `--backup`。缺少 `scripts/restart.sh`、启动失败、可选的 `scripts/healthcheck.sh` 返回失败或停机窗口内收到 HUP/INT/TERM 时，脚本会自动停止失败进程、恢复旧文件并重新执行旧版 `scripts/restart.sh`；备份默认保留最近 5 份，可通过 `EXPRESS233_BACKUP_KEEP` 调整。
 
 ### 批量（同机多服）
 

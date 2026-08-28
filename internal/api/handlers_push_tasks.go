@@ -19,8 +19,9 @@ type pushTaskRequest struct {
 }
 
 type runPushTaskRequest struct {
-	Version string `json:"version"`
-	DryRun  bool   `json:"dry_run"`
+	Version        string `json:"version"`
+	DryRun         bool   `json:"dry_run"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
 }
 
 func pushTaskID(r *http.Request) int64 {
@@ -155,14 +156,22 @@ func (s *Server) handleRunPushTask(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if err := applyDeploymentIdempotencyKey(r, &request.IdempotencyKey); err != nil {
+		errJSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	version := task.Version
 	if strings.TrimSpace(request.Version) != "" {
 		version = request.Version
 	}
-	deployment, err := s.createPushDeployment(r, project, createPushDeploymentRequest{Version: version, ServerIDs: task.ServerIDs, Tags: task.Tags, TagMatch: task.TagMatch, DryRun: request.DryRun}, task.ID, task.Name)
+	deployment, err := s.createPushDeployment(r, project, createPushDeploymentRequest{Version: version, ServerIDs: task.ServerIDs, Tags: task.Tags, TagMatch: task.TagMatch, DryRun: request.DryRun, IdempotencyKey: request.IdempotencyKey}, task.ID, task.Name)
 	if err != nil {
 		errJSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, deployment)
+	status := http.StatusCreated
+	if deployment.Replayed {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, deployment)
 }

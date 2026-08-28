@@ -2,7 +2,7 @@
 
 以下示例演示完整自动化运维链路：
 
-1. 用 `root/root` 直接走 HTTP Basic Auth
+1. 用已配置的管理员账号走 HTTP Basic Auth
 2. 注册 `server_id` 与替换规则
 3. 创建项目与两个版本
 4. 上传整个版本目录（`tar.gz`）
@@ -15,7 +15,7 @@
 
 ```bash
 export EXPRESS233_SERVER=http://127.0.0.1:23380
-export EXPRESS233_BASIC_AUTH='root:root'
+export EXPRESS233_BASIC_AUTH='<username>:<password>'
 ```
 
 ## 2. 注册 server_id 与替换模板

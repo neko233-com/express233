@@ -65,6 +65,18 @@ func TestDefaultAdminAndProjectLifecycle(t *testing.T) {
 	_ = filepath.Join(dir, "projects", p.Name, v.Version)
 }
 
+func TestCreateProjectRejectsReservedTargetTagSeparator(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	if _, err := st.CreateProject(1, st.TestRootUserID(), "game|server"); err == nil || !strings.Contains(err.Error(), "cannot contain |") {
+		t.Fatalf("expected reserved separator error, got %v", err)
+	}
+}
+
 func (st *Store) mustRootToken(t *testing.T) string {
 	t.Helper()
 	users, err := st.ListUsers(1)

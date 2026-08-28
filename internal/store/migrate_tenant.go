@@ -26,6 +26,7 @@ CREATE TABLE projects_v2 (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tenant_id INTEGER NOT NULL,
   name TEXT NOT NULL,
+  max_published_versions INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   UNIQUE(tenant_id, name),
   FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
@@ -34,8 +35,8 @@ CREATE TABLE projects_v2 (
 			return err
 		}
 		_, _ = s.db.Exec(`
-INSERT INTO projects_v2(id, tenant_id, name, created_at)
-SELECT id, COALESCE(tenant_id, 0), name, created_at FROM projects`)
+INSERT INTO projects_v2(id, tenant_id, name, max_published_versions, created_at)
+SELECT id, COALESCE(tenant_id, 0), name, COALESCE(max_published_versions, 0), created_at FROM projects`)
 		_, _ = s.db.Exec(`DROP TABLE projects`)
 		_, _ = s.db.Exec(`ALTER TABLE projects_v2 RENAME TO projects`)
 	}

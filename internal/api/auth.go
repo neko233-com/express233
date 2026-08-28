@@ -10,12 +10,13 @@ import (
 )
 
 type session struct {
-	UserID     int64
-	Username   string
-	IsAdmin    bool
-	TenantID   int64
-	TenantSlug string
-	Expires    time.Time
+	UserID      int64
+	Username    string
+	IsAdmin     bool
+	AuthVersion int64
+	TenantID    int64
+	TenantSlug  string
+	Expires     time.Time
 }
 
 type sessionStore struct {
@@ -27,7 +28,7 @@ func newSessionStore() *sessionStore {
 	return &sessionStore{data: make(map[string]session)}
 }
 
-func (ss *sessionStore) create(userID int64, username string, isAdmin bool, tenantID int64, tenantSlug string) (string, error) {
+func (ss *sessionStore) create(userID int64, username string, isAdmin bool, authVersion, tenantID int64, tenantSlug string) (string, error) {
 	b := make([]byte, 24)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
@@ -35,12 +36,13 @@ func (ss *sessionStore) create(userID int64, username string, isAdmin bool, tena
 	id := hex.EncodeToString(b)
 	ss.mu.Lock()
 	ss.data[id] = session{
-		UserID:     userID,
-		Username:   username,
-		IsAdmin:    isAdmin,
-		TenantID:   tenantID,
-		TenantSlug: tenantSlug,
-		Expires:    time.Now().Add(24 * time.Hour),
+		UserID:      userID,
+		Username:    username,
+		IsAdmin:     isAdmin,
+		AuthVersion: authVersion,
+		TenantID:    tenantID,
+		TenantSlug:  tenantSlug,
+		Expires:     time.Now().Add(24 * time.Hour),
 	}
 	ss.mu.Unlock()
 	return id, nil
@@ -65,7 +67,15 @@ func (ss *sessionStore) delete(id string) {
 const sessionCookie = "express233_session"
 
 func (s *Server) currentSession(r *http.Request) (session, bool) {
-	return s.sessionFromRequest(r)
+	sess, ok := s.sessionFromRequest(r)
+	if !ok {
+		return session{}, false
+	}
+	version, err := s.Store.UserAuthVersion(sess.UserID)
+	if err != nil || version != sess.AuthVersion {
+		return session{}, false
+	}
+	return sess, true
 }
 
 func (s *Server) basicAuthSession(r *http.Request) (session, bool) {
@@ -73,8 +83,10 @@ func (s *Server) basicAuthSession(r *http.Request) (session, bool) {
 	if !ok || user == "" {
 		return session{}, false
 	}
-	if _, blocked, _ := s.Store.LoginIPBlocked(clientIP(r), time.Now()); blocked {
-		return session{}, false
+	if ip, reliable := loginProtectionIP(r); s.loginProtectionEnabled() && reliable {
+		if _, blocked, _ := s.Store.LoginIPBlocked(ip, time.Now()); blocked {
+			return session{}, false
+		}
 	}
 	uid, admin, err := s.Store.Authenticate(user, pass)
 	if err != nil {
@@ -94,13 +106,18 @@ func (s *Server) basicAuthSession(r *http.Request) (session, bool) {
 	if t != nil {
 		tenantSlug = t.Slug
 	}
+	authVersion, err := s.Store.UserAuthVersion(uid)
+	if err != nil {
+		return session{}, false
+	}
 	return session{
-		UserID:     uid,
-		Username:   user,
-		IsAdmin:    admin,
-		TenantID:   tid,
-		TenantSlug: tenantSlug,
-		Expires:    time.Now().Add(time.Hour),
+		UserID:      uid,
+		Username:    user,
+		IsAdmin:     admin,
+		AuthVersion: authVersion,
+		TenantID:    tid,
+		TenantSlug:  tenantSlug,
+		Expires:     time.Now().Add(time.Hour),
 	}, true
 }
 

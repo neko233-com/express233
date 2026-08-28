@@ -4,7 +4,7 @@ info:
   description: |
     游戏服务器集群推/拉一体交付控制平面 API。
 
-    - **管理端**：Cookie 会话（`POST /api/login`）或 HTTP Basic Auth（初始化可用 `root/root`）
+    - **管理端**：Cookie 会话（`POST /api/login`）或 HTTP Basic Auth
     - **节点端**：拉取 Token（下载使用 `token` 查询参数；Agent 心跳使用 `X-Express233-Token` 请求头）或 HTTP Basic Auth
   version: 1.0.0
 servers:
@@ -762,6 +762,7 @@ paths:
       security: [{ cookieAuth: [] }, { basicAuth: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: Idempotency-Key, in: header, required: false, description: 网络重试复用同一键；人工再次执行应生成新键, schema: { type: string, minLength: 8, maxLength: 128 } }
       requestBody:
         content:
           application/json:
@@ -773,7 +774,9 @@ paths:
                 tags: { type: array, items: { type: string } }
                 tag_match: { type: string, enum: [all, any], default: all }
                 dry_run: { type: boolean, default: false }
+                idempotency_key: { type: string, minLength: 8, maxLength: 128 }
       responses:
+        "200": { description: 相同幂等键已存在，返回原执行且不重复发布 }
         "201": { description: 已创建发布任务 }
 
   /api/projects/{id}/push-tasks:
@@ -843,6 +846,7 @@ paths:
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
         - { name: taskID, in: path, required: true, schema: { type: integer } }
+        - { name: Idempotency-Key, in: header, required: false, description: 网络重试复用同一键；人工再次执行应生成新键, schema: { type: string, minLength: 8, maxLength: 128 } }
       requestBody:
         content:
           application/json:
@@ -851,7 +855,13 @@ paths:
               properties:
                 version: { type: string, description: 可选的单次版本覆盖 }
                 dry_run: { type: boolean, default: false }
+                idempotency_key: { type: string, minLength: 8, maxLength: 128 }
       responses:
+        "200":
+          description: 相同幂等键已存在，返回原执行且不重复发布
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PushDeployment" }
         "201":
           content:
             application/json:
@@ -1262,6 +1272,8 @@ components:
         task_id: { type: integer }
         task_name: { type: string }
         hook_event_id: { type: integer, description: Hook 派发幂等键；非 Hook 发布为 0 }
+        idempotency_key: { type: string, description: 手工/API 执行的请求幂等键 }
+        replayed: { type: boolean, description: 本次响应是否复用了原执行 }
         version: { type: string }
         selector: { type: string, description: 执行时 server_ids、tags、tag_match 的 JSON 快照 }
         status: { type: string, enum: [queued, running, success, failed] }

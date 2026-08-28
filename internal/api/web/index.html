@@ -30,15 +30,14 @@
       <h2 class="login-title">账号密码登录</h2>
       <label class="field">
         <span>用户名</span>
-        <input id="user" class="input" autocomplete="username" value="root" placeholder="root" />
+        <input id="user" class="input" autocomplete="username" />
       </label>
       <label class="field">
         <span>密码</span>
-        <input id="pass" class="input" type="password" autocomplete="current-password" value="root" placeholder="••••••" />
+        <input id="pass" class="input" type="password" autocomplete="current-password" placeholder="••••••" />
       </label>
       <button id="btnLogin" type="button" class="btn btn-primary btn-block login-submit" data-testid="login-submit">登录</button>
       <p id="loginErr" class="err"></p>
-      <p class="login-hint">默认账号 root / root</p>
     </div>
   </div>
 
@@ -70,24 +69,24 @@
       <nav class="sidebar-nav">
         <div class="section-label">导航</div>
         <button type="button" class="sidebar-nav-item active" data-global="workspace">
-          <svg class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-          <span>工作区</span>
+          <svg class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg>
+          <span>项目工作区</span>
         </button>
         <button type="button" class="sidebar-nav-item" data-global="dashboard" data-testid="nav-dashboard">
           <svg class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V9M10 19V5M16 19v-7M22 19V2"/><path d="M2 19h22"/></svg>
-          <span>数据大盘</span>
+          <span>交付总览</span>
         </button>
         <button type="button" class="sidebar-nav-item" data-global="guide" data-testid="nav-guide">
           <svg class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>
           <span>文档目录</span>
         </button>
-        <button type="button" class="sidebar-nav-item admin-only hidden" data-global="agent" data-testid="nav-agent">
-          <svg class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4M8 15h.01M16 15h.01M8 18h8"/></svg>
-          <span>Agent 与节点</span>
+        <button type="button" class="sidebar-nav-item" data-global="release" data-testid="nav-release">
+          <svg class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 1l4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+          <span>远程发布</span>
         </button>
         <button type="button" class="sidebar-nav-item" data-global="server">
           <svg class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
-          <span>server.yaml</span>
+          <span>高级配置</span>
         </button>
         <button type="button" class="sidebar-nav-item" data-global="storage" data-testid="nav-storage">
           <svg class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/></svg>
@@ -115,19 +114,50 @@
         <button type="button" id="btnStartOnboarding" class="btn btn-ghost btn-sm">引导</button>
         <button type="button" id="btnLogout" class="btn btn-ghost btn-sm">退出</button>
       </div>
+
     </aside>
 
     <main class="main">
+      <div id="navigationBackBar" class="navigation-back-bar hidden" aria-live="polite">
+        <button type="button" id="btnNavigateBack" class="btn btn-ghost btn-sm" data-testid="navigate-back" aria-label="返回上一步">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
+          <span id="navigationBackLabel">上一步</span>
+        </button>
+        <span id="navigationCurrent" class="navigation-current"></span>
+      </div>
+      <div id="globalRelease" class="global-panel hidden" data-testid="release-panel">
+        <header class="page-header release-header">
+          <div><h1>远程交付</h1><p class="subtitle">项目版本、发布任务、执行日志与全局 SSH 机器在同一工作区完成。</p></div>
+          <div id="releaseProjectContext" class="toolbar compact"><button type="button" id="btnReturnProject" class="btn btn-ghost btn-sm" data-testid="return-project-workspace">返回项目工作区</button><select id="releaseProject" class="input" aria-label="发布项目"><option value="">选择项目</option></select><button type="button" id="btnReleaseReload" class="btn btn-secondary btn-sm">刷新</button></div>
+        </header>
+        <nav class="release-tabs" aria-label="远程交付功能">
+          <button type="button" class="release-tab active" data-release-section="tasks" data-testid="release-tab-tasks">发布任务</button>
+          <button type="button" class="release-tab" data-release-section="logs" data-testid="release-tab-logs">发布日志</button>
+          <button type="button" class="release-tab" data-release-section="hooks" data-testid="release-tab-hooks">自动 Hook</button>
+          <button type="button" class="release-tab admin-only hidden" data-release-section="ssh" data-testid="release-tab-ssh">SSH 机器</button>
+        </nav>
+        <div id="releaseProjectEmpty" class="card empty-state"><h3>先选择发布项目</h3><p>选择项目后立即配置、编辑、删除或一键执行整个集群的发布任务。</p><div id="releaseProjectCards" class="release-project-cards"></div></div>
+        <div id="releaseProjectContent" class="hidden">
+          <div id="ptab-push" class="card">
+            <div class="card-title-row"><div><h3 class="card-title">可重复发布任务</h3><p class="hint">留空服务器 ID 即整个集群；任务引用全局 SSH 节点与 server_id 绑定。</p></div><span id="pushLatestHint" class="badge badge-ok">最新已发布版本：—</span></div>
+            <div class="release-safety-strip" aria-label="安全发布顺序"><span><b>1</b>远端预拉取与校验</span><i>→</i><span><b>2</b>逐目标加锁</span><i>→</i><span><b>3</b>SIGTERM 等待正常退出</span><i>→</i><span><b>4</b>换包、启动、健康门禁</span></div>
+            <p class="release-contract-note">控制台提供执行 ID、Idempotency-Key 与 <code>project|serverId</code>；游戏服发布脚本负责 PID / systemd、优雅退出和健康条件。</p>
+            <div class="release-task-editor project-write" data-testid="release-task-editor"><input id="pushTaskName" class="input" maxlength="100" placeholder="任务名称，例如全服发布" /><select id="pushTaskVersion" class="input" aria-label="发布版本"></select><input id="pushTaskServerIDs" class="input" placeholder="服务器 ID，留空=整个集群" /><input id="pushTaskTags" class="input" value="test" placeholder="标签，默认 test" /><select id="pushTaskTagMatch" class="input"><option value="all">标签同时满足</option><option value="any">任一标签匹配</option></select><button type="button" id="btnSavePushTask" class="btn btn-secondary btn-sm">保存任务</button><button type="button" id="btnSaveAndRunPushTask" class="btn btn-primary btn-sm">保存并发布整个集群</button><button type="button" id="btnCancelPushTask" class="btn btn-ghost btn-sm hidden">取消编辑</button></div>
+            <div id="pushTaskList" class="table-wrap" data-testid="release-task-list"></div>
+          </div>
+          <div id="ptab-pushlogs" class="card">
+            <div class="card-title-row"><div><h3 class="card-title">发布日志</h3><p class="hint">每次执行保留逐服务器输出；不可删除 · 保留 30 天。</p></div><button type="button" id="btnReloadPushLogs" class="btn btn-secondary btn-sm">刷新</button></div>
+            <div id="pushLogList" class="table-wrap"></div>
+          </div>
+        </div>
+      </div>
       <div id="emptyProject" class="empty-state">
         <div class="empty-icon" aria-hidden="true">
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
         </div>
         <h2>选择项目</h2>
         <p>在左侧选择或创建项目，管理版本包与 server_id 配置替换。</p>
-        <div class="empty-actions">
-          <button type="button" id="btnDemoProject" class="btn btn-secondary">添加演示项目</button>
-          <button type="button" id="btnEmptyStartOnboarding" class="btn btn-primary">新手引导</button>
-        </div>
+        <div class="empty-actions"><button type="button" id="btnDemoProject" class="btn btn-secondary">添加演示项目</button></div>
       </div>
 
       <div id="globalDashboard" class="global-panel dashboard-panel hidden" data-testid="dashboard-panel">
@@ -228,37 +258,21 @@
         </div>
       </div>
 
-      <div id="globalAgent" class="global-panel agent-panel hidden admin-only" data-testid="agent-panel">
+      <div id="globalAgent" class="release-subpanel agent-panel hidden admin-only" data-testid="agent-panel">
         <header class="page-header agent-header">
           <div>
-            <div class="eyebrow"><span class="status-orb"></span>CONTROL PLANE</div>
-            <h1>Agent 与 SSH 节点</h1>
-            <p class="subtitle">统一验证 Agent HTTP API、加密凭据、节点存活和定时检查记录</p>
+            <h2>SSH 机器</h2>
+            <p class="subtitle">全局机器资产与发布目标绑定；项目只消费目标标签，不管理凭据。</p>
           </div>
           <div class="toolbar compact">
-            <a class="btn btn-secondary btn-sm" href="/docs/" target="_blank" rel="noopener">
-              <svg class="btn-svg" aria-hidden="true" viewBox="0 0 24 24"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>OpenAPI
-            </a>
-            <button type="button" id="btnAgentReload" class="btn btn-primary btn-sm">
-              <svg class="btn-svg" aria-hidden="true" viewBox="0 0 24 24"><path d="M20 6v5h-5M4 18v-5h5"/><path d="M18.5 9a7 7 0 0 0-12-2M5.5 15a7 7 0 0 0 12 2"/></svg>刷新状态
-            </button>
+            <button type="button" id="btnAgentReload" class="btn btn-secondary btn-sm">刷新</button>
+            <button type="button" id="btnShowPushHostEditor" class="btn btn-primary btn-sm">新增机器</button>
           </div>
         </header>
         <div id="agentSummary" class="agent-summary" data-testid="agent-summary"></div>
-        <section class="card agent-host-card">
-          <div class="card-title-row">
-            <div><h3 class="card-title">SSH 节点存活</h3><p class="hint">定时任务串行执行；一次连接失败后不重试，等待下一周期。</p></div>
-            <span class="security-pill"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg>凭据加密且不可回读</span>
-          </div>
-          <div id="agentHostList" class="table-wrap" data-testid="agent-host-list"></div>
-          <div id="agentCheckHistory" class="agent-history hidden" data-testid="agent-check-history"></div>
-        </section>
-        <section id="pushHostManager" class="card agent-resource-card">
-          <div class="card-title-row">
-            <div><h3 class="card-title">SSH 资源管理</h3><p class="hint">集中维护节点、加密凭据和 server_id 绑定；项目发布任务只引用绑定，不再管理机器。</p></div>
-            <span class="security-pill"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg>凭据保存后不可查看</span>
-          </div>
-          <div class="toolbar wrap">
+        <section id="pushHostManager" class="ssh-workspace">
+          <div id="pushHostEditor" class="card push-resource-editor hidden">
+            <div class="card-title-row"><div><h3 class="card-title">新增 SSH 机器</h3><p class="hint">凭据加密且不可回读；Host key 建议固定。</p></div><button type="button" id="btnClosePushHostEditor" class="btn btn-ghost btn-sm">关闭</button></div>
             <input id="pushHostName" class="input" placeholder="资源名，例如 logic-a-test" />
             <input id="pushHostAddress" class="input" placeholder="主机 / IP" />
             <input id="pushHostPort" class="input" value="22" type="number" placeholder="端口" />
@@ -268,38 +282,41 @@
             <input id="pushHostKey" class="input" placeholder="Host public key（可留空 TOFU）" />
             <label class="check-label health-toggle"><input id="pushHostHealthEnabled" type="checkbox" checked />定时存活检查</label>
             <select id="pushHostHealthInterval" class="input" aria-label="存活检查间隔"><option value="300">每 5 分钟</option><option value="900">每 15 分钟</option><option value="1800">每 30 分钟</option><option value="3600" selected>每 1 小时</option><option value="21600">每 6 小时</option><option value="86400">每 24 小时</option></select>
-            <button type="button" id="btnPushAddHost" class="btn btn-secondary btn-sm"><svg class="btn-svg" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>新增 SSH 资源</button>
+            <button type="button" id="btnPushAddHost" class="btn btn-primary btn-sm">保存机器</button>
           </div>
-          <div id="pushHostList" class="table-wrap" data-testid="ssh-resource-list"></div>
-          <div id="pushBindingEditor" class="toolbar wrap hidden">
-            <input id="pushBindingServerID" class="input" placeholder="server_id" />
-            <input id="pushBindingLabels" class="input" value="test" placeholder="发布标签，如 test,canary" />
-            <input id="pushBindingContentTags" class="input" placeholder="内容标签（可空）" />
-            <input id="pushBindingRoot" class="input" value="/opt/game-servers" placeholder="远端根目录" />
-            <button type="button" id="btnPushAddBinding" class="btn btn-secondary btn-sm">绑定服务器</button>
+          <div class="ssh-main">
+            <div class="ssh-filterbar"><input id="sshSearch" type="search" class="search-input" placeholder="搜索名称、地址或目标标签" /><select id="sshStatusFilter" class="input input-sm"><option value="">全部状态</option><option value="success">在线</option><option value="failed">异常</option><option value="unknown">未检查</option></select><select id="sshProjectFilter" class="input input-sm"><option value="">全部项目</option></select></div>
+            <div id="agentHostList" data-testid="agent-host-list"><div id="pushHostList" class="table-wrap" data-testid="ssh-resource-list"></div></div>
+            <div id="agentCheckHistory" class="agent-history hidden" data-testid="agent-check-history"></div>
+            <details class="agent-capability-details" open><summary>Agent API 能力</summary><div id="agentCapabilities" class="agent-capabilities" data-testid="agent-capabilities"></div></details>
           </div>
-          <div id="pushBindingList" class="table-wrap"></div>
-        </section>
-        <section class="card agent-api-card">
-          <div class="card-title-row">
-            <div><h3 class="card-title">Agent HTTP API</h3><p class="hint">以下清单来自运行中服务，可供自动化 Agent 自发现；请求模型以 OpenAPI 为准。</p></div>
-            <code class="api-origin">/api/agent/capabilities</code>
-          </div>
-          <div id="agentCapabilities" class="agent-capabilities" data-testid="agent-capabilities"></div>
+          <aside id="sshBindingDrawer" class="ssh-binding-drawer hidden">
+            <div class="drawer-head"><div><h3 id="sshDrawerTitle">机器绑定</h3><p class="hint">目标标签全局唯一：project|serverId</p></div><button type="button" id="btnCloseBindingDrawer" class="btn btn-ghost btn-sm" aria-label="关闭绑定面板">×</button></div>
+            <div id="pushBindingEditor" class="binding-form">
+              <label>项目<select id="pushBindingProject" class="input"><option value="">选择项目</option></select></label>
+              <label>Server ID<input id="pushBindingServerID" class="input" placeholder="例如 111" /></label>
+              <label class="binding-target-field">目标标签（唯一）<code id="pushBindingTargetTag">选择项目与 Server ID</code></label>
+              <label>发布标签<input id="pushBindingLabels" class="input" value="prod" placeholder="如 prod,stable" /></label>
+              <label>内容标签<input id="pushBindingContentTags" class="input" placeholder="可空" /></label>
+              <label>远端根目录<input id="pushBindingRoot" class="input" value="/opt/game-servers" placeholder="远端根目录" /></label>
+              <button type="button" id="btnPushAddBinding" class="btn btn-primary btn-sm">添加绑定 / 保存修改</button>
+            </div>
+            <div id="pushBindingList" class="binding-list"></div>
+            <p class="drawer-rule">项目名称不能包含 <code>|</code>。</p>
+          </aside>
         </section>
       </div>
 
       <div id="globalServer" class="global-panel hidden">
         <header class="page-header">
-          <h1>server.yaml</h1>
+          <h1>系统配置</h1>
           <p class="subtitle">replacements 键 = 配置文件 basename（无视目录树）</p>
         </header>
         <div class="card">
           <textarea id="serverYaml" rows="22" class="code-editor" data-testid="server-yaml-editor"></textarea>
           <div class="toolbar">
             <button type="button" id="btnSaveYaml" class="btn btn-primary">保存</button>
-            <input id="previewServerId" list="serverIdList" placeholder="server_id" class="input" />
-            <datalist id="serverIdList"></datalist>
+            <div class="server-id-combobox"><input id="previewServerId" placeholder="搜索 server_id" class="input server-id-input" autocomplete="off" /><div class="server-id-options hidden"></div></div>
             <input id="previewProject" placeholder="project" class="input" />
             <input id="previewVersion" placeholder="version" class="input" />
             <button type="button" id="btnPreview" class="btn btn-secondary">预览 diff</button>
@@ -343,6 +360,8 @@
           <nav class="seg-tabs" id="settingsTabs">
             <button type="button" class="seg-tab active" data-stab="users">账号</button>
             <button type="button" class="seg-tab" data-stab="audit">审计</button>
+            <button type="button" class="seg-tab" data-stab="login-security">登录安全</button>
+            <button type="button" class="seg-tab" data-stab="onboarding">新手引导</button>
           </nav>
         </header>
         <div id="stab-users" class="card">
@@ -390,44 +409,75 @@
             </table>
           </div>
         </div>
+        <div id="stab-login-security" class="card hidden">
+          <div class="card-title-row">
+            <div>
+              <h3 class="card-title">登录安全</h3>
+              <p id="loginProtectionSummary" class="hint"></p>
+            </div>
+            <div class="toolbar compact">
+              <label class="switch" title="登录失败保护">
+                <input type="checkbox" id="loginProtectionEnabled" aria-label="启用登录失败保护" />
+                <span aria-hidden="true"></span>
+              </label>
+              <button type="button" id="btnReloadLoginProtection" class="btn btn-secondary btn-sm">刷新</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table login-attack-table" id="loginAttackTable">
+              <thead><tr><th>来源 IP</th><th>目标账号</th><th>累计失败</th><th>当前窗口</th><th>状态</th><th>最近 3 次失败</th><th></th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="stab-onboarding" class="card hidden">
+          <h3 class="card-title">新手引导</h3>
+          <p class="hint">演示项目仅用于熟悉版本、server_id 替换和发布流程；生产项目请从左侧项目栏创建。</p>
+          <div class="toolbar"><button type="button" id="btnSettingsDemoProject" class="btn btn-secondary">添加演示项目</button><button type="button" id="btnSettingsStartOnboarding" class="btn btn-primary">开始引导</button></div>
+        </div>
       </div>
 
       <div id="projectWorkspace" class="workspace hidden">
         <header class="workspace-header">
           <div class="workspace-title">
             <h1 id="curProject" data-testid="cur-project">—</h1>
+            <span id="projectRoleBadge" class="project-role">管理员</span>
             <button type="button" id="btnDelProject" class="btn btn-danger btn-sm hidden">删除项目</button>
           </div>
-          <nav class="project-tabs" role="tablist">
-            <button type="button" class="project-tab active" data-ptab="versions" title="版本">
-              <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2 4 6v12l8 4 8-4V6l-8-4Z"/><path d="m4 6 8 4 8-4M12 10v12"/></svg><span>版本</span>
+          <nav class="project-tabs project-flow-tabs" role="tablist" aria-label="项目交付流程">
+            <button type="button" class="project-tab active" data-ptab="versions" title="版本" aria-label="版本">
+              <span class="flow-step-number">1</span><span>Artifact 版本</span>
             </button>
-            <button type="button" class="project-tab" data-ptab="cluster" title="集群节点">
-              <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="18" height="7" rx="2"/><path d="M7 6.5h.01M7 17.5h.01M11 6.5h6M11 17.5h6"/></svg><span>集群节点</span>
+            <button type="button" class="project-tab" data-ptab="config" title="Server 配置">
+              <span class="flow-step-number">2</span><span>Server 配置</span>
             </button>
             <button type="button" class="project-tab" data-ptab="preview" title="拉取预览" aria-label="拉取预览">
-              <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M3 3h18v13H3z"/><path d="m8 21 4-5 4 5M8 8h8M8 12h5"/></svg><span>预览</span>
+              <span class="flow-step-number">3</span><span>合成预览</span>
             </button>
-            <button type="button" class="project-tab" data-ptab="team" title="团队">
-              <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24"><circle cx="9" cy="7" r="3"/><path d="M3 21v-2a6 6 0 0 1 12 0v2M16 3.3a3 3 0 0 1 0 5.4M21 21v-2a6 6 0 0 0-3.5-5.45"/></svg><span>团队</span>
-            </button>
-            <button type="button" class="project-tab" data-ptab="deploy" title="部署">
-              <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg><span>部署</span>
-            </button>
-            <button type="button" class="project-tab" data-ptab="push" title="发布任务">
-              <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M17 1l4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3"/></svg><span>发布任务</span>
-            </button>
-            <button type="button" class="project-tab" data-ptab="hooks" title="自动 Hook">
-              <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/><path d="M12 7v5l3 2"/></svg><span>自动 Hook</span>
-            </button>
-            <button type="button" class="project-tab" data-ptab="pushlogs" title="发布日志">
-              <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M4 3h16v18H4zM8 7h8M8 11h8M8 15h5"/></svg><span>发布日志</span>
-            </button>
-            <button type="button" class="project-tab" data-ptab="diff" title="差异">
-              <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M7 3H5a2 2 0 0 0-2 2v2m14-4h2a2 2 0 0 1 2 2v2M7 21H5a2 2 0 0 1-2-2v-2m18 0v2a2 2 0 0 1-2 2h-2M8 12h8M12 8v8"/></svg><span>差异</span>
+            <button type="button" class="project-tab" data-ptab="publish" title="发布">
+              <span class="flow-step-number">4</span><span>发布</span>
             </button>
           </nav>
+          <nav class="project-secondary-tabs" aria-label="项目辅助功能">
+            <button type="button" class="project-tab" data-ptab="diff">差异</button>
+            <button type="button" class="project-tab" data-ptab="cluster">集群节点</button>
+            <button type="button" class="project-tab" data-ptab="team">团队</button>
+            <button type="button" class="project-tab" data-ptab="deploy" aria-label="部署">部署脚本</button>
+            <button type="button" class="project-tab" data-ptab="hooks">自动 Hook</button>
+            <button type="button" class="project-action-tab" data-project-action="release" data-release-target="tasks">发布任务</button>
+            <button type="button" class="project-action-tab sr-only" data-project-action="release" data-release-target="logs">发布日志</button>
+          </nav>
         </header>
+
+        <div class="workflow-trail" aria-label="当前交付进度">
+          <button type="button" data-flow-target="versions" aria-label="打开 Artifact 步骤"><span class="trail-icon">1</span><span><strong id="flowVersion">选择 Artifact 版本</strong><small>共享模板</small></span></button>
+          <i aria-hidden="true">→</i>
+          <button type="button" data-flow-target="config"><span class="trail-icon">2</span><span><strong id="flowServers">配置 Server 覆盖</strong><small id="flowServerDetail">尚未配置</small></span></button>
+          <i aria-hidden="true">→</i>
+          <button type="button" data-flow-target="preview"><span class="trail-icon">3</span><span><strong id="flowPreview">合成预览待确认</strong><small>模板 + 覆盖</small></span></button>
+          <i aria-hidden="true">→</i>
+          <button type="button" data-flow-target="publish"><span class="trail-icon">4</span><span><strong id="flowPublish">尚未发布</strong><small>检查后交付</small></span></button>
+        </div>
 
         <div id="ptab-versions" class="ptab-panel">
           <div class="split-versions">
@@ -436,31 +486,29 @@
                 <span class="card-title">版本列表</span>
               </div>
               <div class="toolbar compact">
-                <input id="newVersion" placeholder="1.0.0" class="input" data-testid="new-version-input" />
+                <input id="newVersion" placeholder="0.0.1" class="input" data-testid="new-version-input" />
                 <button type="button" id="btnAddVersion" class="btn btn-primary btn-sm project-write" data-testid="add-version">新建</button>
               </div>
               <div class="version-search-wrap">
                 <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
                 <input id="versionSearch" type="search" placeholder="搜索版本…" class="search-input" data-testid="version-search" />
               </div>
-              <div class="version-divider"></div>
+              <p class="hint version-rule">推荐 <code>0.0.1</code>。正式发布只接受 <code>X.Y.Z</code>；server_id 差异写入 server.yaml。</p><div class="version-divider"></div>
               <ul id="versionList" class="version-list" data-testid="version-list"></ul>
             </div>
             <div id="versionDetail" class="card version-detail hidden" data-testid="version-detail">
-              <div class="meta-row">
-                <span class="badge" id="verStatus" data-testid="ver-status">—</span>
-                <span class="meta">创建 <span id="verCreated"></span></span>
-                <span class="meta">发布 <span id="verPublished">—</span></span>
+              <div class="version-detail-head">
+                <div><div class="version-title-line"><h2 id="verDetailTitle">—</h2><span class="badge" id="verStatus" data-testid="ver-status">—</span></div><div class="meta-row"><span class="meta">创建 <span id="verCreated"></span></span><span class="meta">发布 <span id="verPublished">—</span></span></div></div>
+                <div class="toolbar wrap project-write">
+                  <button type="button" id="btnValidate" class="btn btn-secondary btn-sm" data-testid="validate-version">发布前检查</button>
+                  <button type="button" id="btnSubmitReview" class="btn btn-secondary btn-sm hidden">提交审批</button>
+                  <button type="button" id="btnRejectReview" class="btn btn-secondary btn-sm hidden">驳回</button>
+                  <button type="button" id="btnPublish" class="btn btn-primary btn-sm project-write hidden" data-testid="publish-version">正式发布</button>
+                  <a id="btnDownloadVer" class="btn btn-secondary btn-sm hidden" href="#" target="_blank" data-testid="download-version">下载</a>
+                  <button type="button" id="btnDeleteVersion" class="btn btn-danger btn-sm project-write">删除版本</button>
+                </div>
               </div>
               <div id="verProvenance" class="hint provenance-summary" data-testid="version-provenance"></div>
-              <div class="toolbar wrap project-write">
-                <button type="button" id="btnValidate" class="btn btn-secondary btn-sm" data-testid="validate-version">发布前检查</button>
-                <button type="button" id="btnSubmitReview" class="btn btn-secondary btn-sm hidden">提交审批</button>
-                <button type="button" id="btnRejectReview" class="btn btn-secondary btn-sm hidden">驳回</button>
-                <button type="button" id="btnPublish" class="btn btn-primary btn-sm project-write hidden" data-testid="publish-version">正式发布</button>
-                <a id="btnDownloadVer" class="btn btn-secondary btn-sm hidden" href="#" target="_blank" data-testid="download-version">下载</a>
-                <button type="button" id="btnDeleteVersion" class="btn btn-danger btn-sm project-write">删除版本</button>
-              </div>
               <div id="validateResult" data-testid="validate-result"></div>
               <p class="hint">配置文件 basename 全局唯一；server.yaml 按文件名替换。已发布版本是不可变快照；修复请创建新版本，回滚请选择历史已发布版本。</p>
               <h3 class="card-title">文件</h3>
@@ -500,6 +548,29 @@
           </div>
         </div>
 
+        <div id="ptab-config" class="ptab-panel hidden" data-testid="server-config-panel">
+          <div class="server-config-layout">
+            <aside class="server-config-rail">
+              <div class="rail-title"><div><h2>Server 配置</h2><p>覆盖共享 Artifact 模板</p></div><button type="button" id="btnNewServerConfig" class="btn btn-primary btn-sm project-write">新建</button></div>
+              <input id="serverConfigSearch" type="search" class="search-input" placeholder="搜索 Server ID 或目标标签" />
+              <div id="serverConfigList" class="server-config-list" data-testid="server-config-list"></div>
+            </aside>
+            <section id="serverConfigDetail" class="server-config-detail">
+              <div id="serverConfigEmpty" class="empty-state compact"><h3>选择 Server 配置</h3><p>每个 Server ID 覆盖共享模板，形成唯一交付目标。</p></div>
+              <div id="serverConfigEditor" class="hidden">
+                <header class="config-editor-head"><div><h2>Server <span id="serverConfigTitle">—</span></h2><p>目标标签 <code id="serverConfigTarget">—</code></p></div><div class="toolbar compact"><button type="button" id="btnDuplicateServerConfig" class="btn btn-secondary btn-sm">复制配置</button><button type="button" id="btnDeleteServerConfig" class="btn btn-danger btn-sm project-write">删除</button></div></header>
+                <div class="source-equation"><span>Artifact 模板 <strong id="configSourceVersion">未选版本</strong></span><b>+</b><span>Server 覆盖 <strong id="configSourceServer">—</strong></span><b>=</b><span>最终交付内容</span></div>
+                <div class="config-file-workspace">
+                  <aside><div class="panel-label">模板配置文件</div><div id="serverReplacementFiles" class="replacement-file-list"></div></aside>
+                  <section><div class="config-pane-head"><span id="serverConfigFileTitle">全部覆盖</span><span id="serverConfigSaveState" class="save-state">已保存</span></div><textarea id="serverConfigJSON" class="code-editor server-config-json" spellcheck="false" aria-label="Server 覆盖 JSON"></textarea></section>
+                </div>
+                <details class="raw-yaml-details"><summary>高级：原始 server.yaml</summary><p>适合批量编辑；保存会校验全部 Server 配置。</p><button type="button" id="btnOpenRawYaml" class="btn btn-secondary btn-sm">打开高级配置</button></details>
+                <div class="config-editor-actions"><button type="button" id="btnSaveServerConfig" class="btn btn-primary project-write">保存配置并进入预览</button></div>
+              </div>
+            </section>
+          </div>
+        </div>
+
         <div id="ptab-cluster" class="ptab-panel hidden" data-testid="cluster-panel">
           <div class="cluster-summary" aria-label="交付节点摘要">
             <div><span>Push</span><strong id="clusterPushCount">0</strong></div>
@@ -514,10 +585,12 @@
         </div>
 
         <div id="ptab-preview" class="ptab-panel hidden">
-          <div class="card">
-            <div class="toolbar">
-              <input id="verPreviewServerId" list="serverIdList" placeholder="server_id" class="input" data-testid="preview-server-id" />
+          <div class="preview-context"><div><h2>合成预览</h2><p>确认 Artifact 模板应用 Server 覆盖后的最终内容。</p></div><code id="previewTargetTag">选择 Server ID</code></div>
+          <div class="card preview-card">
+            <div class="toolbar preview-toolbar">
+              <div class="server-id-combobox"><input id="verPreviewServerId" placeholder="搜索 server_id" class="input server-id-input" autocomplete="off" data-testid="preview-server-id" /><div class="server-id-options hidden"></div></div>
               <button type="button" id="btnVerPreview" class="btn btn-primary btn-sm" data-testid="preview-submit">刷新预览</button>
+              <button type="button" id="btnConfirmPreview" class="btn btn-secondary btn-sm" disabled>确认预览并进入发布</button>
             </div>
             <div id="verPreviewTable" class="diff-workspace" data-testid="preview-table">
               <aside class="diff-tree-panel">
@@ -535,6 +608,18 @@
                 </div>
               </section>
             </div>
+          </div>
+        </div>
+
+        <div id="ptab-publish" class="ptab-panel hidden" data-testid="publish-flow-panel">
+          <div class="publish-flow-layout">
+            <section class="publish-checklist">
+              <header><h2>发布</h2><p>按顺序确认模板、Server 配置与合成结果。</p></header>
+              <div class="publish-check-row"><span>1</span><div><strong id="publishVersionCheck">未选择 Artifact 版本</strong><small>正式版本必须为 X.Y.Z</small></div><button type="button" data-flow-target="versions" class="btn btn-ghost btn-sm">检查</button></div>
+              <div class="publish-check-row"><span>2</span><div><strong id="publishConfigCheck">未选择 Server 配置</strong><small>目标标签 project|serverId</small></div><button type="button" data-flow-target="config" class="btn btn-ghost btn-sm">检查</button></div>
+              <div class="publish-check-row"><span>3</span><div><strong id="publishPreviewCheck">预览尚未确认</strong><small>检查替换后配置全文</small></div><button type="button" data-flow-target="preview" class="btn btn-ghost btn-sm">检查</button></div>
+            </section>
+            <aside class="publish-action-panel"><h3>生成不可变版本</h3><p>发布后 Artifact 不可修改。需要修复时创建新版本。</p><div class="publish-summary"><span>项目<strong id="publishProjectName">—</strong></span><span>版本<strong id="publishVersionName">—</strong></span><span>目标<strong id="publishTargetName">—</strong></span></div><button type="button" id="btnFlowValidate" class="btn btn-secondary">发布前检查</button><button type="button" id="btnFlowPublish" class="btn btn-primary" disabled>正式发布</button><button type="button" data-project-action="release" data-release-target="tasks" class="btn btn-ghost">发布任务</button></aside>
           </div>
         </div>
 
@@ -556,7 +641,7 @@
           <div class="card">
             <h3 class="card-title">一键部署脚本</h3>
             <div class="toolbar">
-              <input id="deployServerId" list="serverIdList" placeholder="server_id" class="input" />
+              <div class="server-id-combobox"><input id="deployServerId" placeholder="搜索 server_id" class="input server-id-input" autocomplete="off" /><div class="server-id-options hidden"></div></div>
               <input id="deployToken" placeholder="pull token" class="input" style="min-width:200px" />
               <input id="deployTempDir" placeholder="临时目录 (默认 /tmp/express233-staging)" class="input" style="min-width:200px" />
             </div>
@@ -573,36 +658,10 @@
           </div>
         </div>
 
-        <div id="ptab-push" class="ptab-panel hidden">
-          <div class="card">
-            <div class="card-title-row">
-              <div><h3 class="card-title">可重复发布任务</h3><p class="hint">保存版本策略与目标筛选，可反复预演或执行；每次运行都会形成不可变日志快照。</p></div>
-              <span id="pushLatestHint" class="badge badge-ok">最新已发布版本：—</span>
-            </div>
-            <div class="release-task-editor project-write" data-testid="release-task-editor">
-              <input id="pushTaskName" class="input" maxlength="100" placeholder="任务名称，例如 逻辑服灰度发布" />
-              <select id="pushTaskVersion" class="input" aria-label="发布版本"></select>
-              <input id="pushTaskServerIDs" class="input" placeholder="服务器 ID，逗号分隔（可空）" />
-              <input id="pushTaskTags" class="input" value="test" placeholder="标签，默认 test" />
-              <select id="pushTaskTagMatch" class="input"><option value="all">标签同时满足</option><option value="any">任一标签匹配</option></select>
-              <button type="button" id="btnSavePushTask" class="btn btn-primary btn-sm">保存任务</button>
-              <button type="button" id="btnCancelPushTask" class="btn btn-ghost btn-sm hidden">取消编辑</button>
-            </div>
-            <div id="pushTaskList" class="table-wrap" data-testid="release-task-list"></div>
-          </div>
-        </div>
-
-        <div id="ptab-pushlogs" class="ptab-panel hidden">
-          <div class="card">
-            <div class="card-title-row"><div><h3 class="card-title">发布日志</h3><p class="hint">每次任务执行均保留任务与筛选快照，以及逐服务器 CLI / post-hook 输出；日志只读。</p></div><div class="toolbar compact"><span class="badge badge-draft">不可删除 · 保留 30 天</span><button type="button" id="btnReloadPushLogs" class="btn btn-secondary btn-sm">刷新</button></div></div>
-            <div id="pushLogList" class="table-wrap"></div>
-          </div>
-        </div>
-
         <div id="ptab-hooks" class="ptab-panel hidden">
           <div class="card">
             <div class="card-title-row">
-              <div><h3 class="card-title">版本发布自动 Hook</h3><p class="hint">Gitea / GitHub CI 发布新版本后自动触发发布任务。采用持久化尾随防抖：窗口内每次触发都会重置倒计时，多次触发最终只派发一次最新版本。</p></div>
+              <div><h3 class="card-title">自动发布</h3><p class="hint">先在“发布到远程”保存发布任务；这里选中任务并保存。以后 Gitea / GitHub 发布新版本时，系统会自动执行。等待 30 秒是合并连续发布，只执行最后一个版本。</p></div>
               <span class="badge badge-ok">默认等待 30 秒</span>
             </div>
             <div class="hook-editor project-write" data-testid="release-hook-editor">
@@ -628,7 +687,7 @@
               <select id="diffFromVer" class="input"><option value="">from 版本</option></select>
               <span class="diff-arrow">&rarr;</span>
               <select id="diffToVer" class="input"><option value="">to 版本</option></select>
-              <input id="diffServerId" list="serverIdList" placeholder="server_id" class="input" />
+              <div class="server-id-combobox"><input id="diffServerId" placeholder="搜索 server_id" class="input server-id-input" autocomplete="off" /><div class="server-id-options hidden"></div></div>
               <button type="button" id="btnVersionDiff" class="btn btn-primary btn-sm">生成 diff</button>
             </div>
             <div id="versionDiffOut" class="diff-workspace"></div>

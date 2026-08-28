@@ -14,13 +14,18 @@ import (
 
 const jwtCookie = "express233_jwt"
 
+// persistentSessionTTL keeps an authenticated browser signed in until explicit
+// logout, expiry, or a password change invalidates its auth version.
+const persistentSessionTTL = 365 * 24 * time.Hour
+
 type jwtClaims struct {
-	UserID     int64  `json:"uid"`
-	Username   string `json:"usr"`
-	IsAdmin    bool   `json:"adm"`
-	TenantID   int64  `json:"tid"`
-	TenantSlug string `json:"tsl"`
-	Exp        int64  `json:"exp"`
+	UserID      int64  `json:"uid"`
+	Username    string `json:"usr"`
+	IsAdmin     bool   `json:"adm"`
+	AuthVersion int64  `json:"av"`
+	TenantID    int64  `json:"tid"`
+	TenantSlug  string `json:"tsl"`
+	Exp         int64  `json:"exp"`
 }
 
 type jwtAuth struct {
@@ -40,12 +45,13 @@ func (j *jwtAuth) sign(sess session, ttl time.Duration) (string, error) {
 		return "", errors.New("jwt not configured")
 	}
 	c := jwtClaims{
-		UserID:     sess.UserID,
-		Username:   sess.Username,
-		IsAdmin:    sess.IsAdmin,
-		TenantID:   sess.TenantID,
-		TenantSlug: sess.TenantSlug,
-		Exp:        time.Now().Add(ttl).Unix(),
+		UserID:      sess.UserID,
+		Username:    sess.Username,
+		IsAdmin:     sess.IsAdmin,
+		AuthVersion: sess.AuthVersion,
+		TenantID:    sess.TenantID,
+		TenantSlug:  sess.TenantSlug,
+		Exp:         time.Now().Add(ttl).Unix(),
 	}
 	return j.encode(c)
 }
@@ -93,12 +99,13 @@ func (j *jwtAuth) encode(c jwtClaims) (string, error) {
 
 func (c jwtClaims) session() session {
 	return session{
-		UserID:     c.UserID,
-		Username:   c.Username,
-		IsAdmin:    c.IsAdmin,
-		TenantID:   c.TenantID,
-		TenantSlug: c.TenantSlug,
-		Expires:    time.Unix(c.Exp, 0),
+		UserID:      c.UserID,
+		Username:    c.Username,
+		IsAdmin:     c.IsAdmin,
+		AuthVersion: c.AuthVersion,
+		TenantID:    c.TenantID,
+		TenantSlug:  c.TenantSlug,
+		Expires:     time.Unix(c.Exp, 0),
 	}
 }
 
@@ -117,7 +124,7 @@ func (s *Server) setJWTCookie(w http.ResponseWriter, token string) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   86400 * 7,
+		MaxAge:   int(persistentSessionTTL.Seconds()),
 	})
 }
 

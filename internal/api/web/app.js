@@ -56,11 +56,19 @@ let state = {
   pendingInviteToken: null,
   globalView: "workspace",
   projectTab: "versions",
+  releaseSection: "tasks",
+  serverEntries: [],
+  serverConfigFilter: "",
+  selectedServerID: null,
+  previewConfirmed: false,
 };
 
 let fileTree = null;
+let serverIDs = [];
 let fileTreeModulePromise = null;
 let filePreviewRequestID = 0;
+const navigationHistory = [];
+let navigationRestoring = false;
 const collapsedFileTreeFolders = {
   version: new Set(),
   diff: new WeakMap(),
@@ -148,6 +156,7 @@ function showApp(username) {
   if (state.isAdmin || state.role === "operator") {
     document.querySelectorAll(".operator-only").forEach((el) => el.classList.remove("hidden"));
   }
+  navigationHistory.length = 0;
   setGlobalView("workspace");
   loadProjects();
   loadServerYaml();
@@ -157,6 +166,92 @@ function showApp(username) {
   } catch (showAppErr) {
     console.error("show app failed:", showAppErr);
     throw showAppErr;
+  }
+}
+
+function navigationSnapshot() {
+  return {
+    globalView: state.globalView,
+    projectTab: state.projectTab,
+    releaseSection: state.releaseSection,
+    projectId: state.projectId,
+  };
+}
+
+function navigationKey(item) {
+  return [item.globalView, item.projectTab, item.releaseSection, item.projectId || ""].join(":");
+}
+
+function navigationLabel(item) {
+  const project = state.projects.find((entry) => entry.id === item.projectId)?.name || (item.projectId === state.projectId ? state.projectName : null);
+  if (item.globalView === "workspace") {
+    const tabs = { versions: "Artifact 版本", config: "Server 配置", preview: "合成预览", publish: "发布", diff: "差异", cluster: "集群节点", team: "团队", deploy: "部署脚本" };
+    return project ? `项目工作区 · ${tabs[item.projectTab] || "项目"}` : "项目工作区";
+  }
+  if (item.globalView === "release") {
+    const sections = { tasks: "发布任务", logs: "发布日志", hooks: "自动 Hook", ssh: "SSH 机器" };
+    return `远程交付 · ${sections[item.releaseSection] || "发布任务"}`;
+  }
+  return { dashboard: "交付总览", guide: "文档目录", server: "高级配置", storage: "存储空间", settings: "系统设置" }[item.globalView] || "上一步";
+}
+
+function updateNavigationBackUI() {
+  const bar = document.getElementById("navigationBackBar");
+  const button = document.getElementById("btnNavigateBack");
+  const current = document.getElementById("navigationCurrent");
+  const previous = navigationHistory[navigationHistory.length - 1];
+  if (!bar || !button) return;
+  bar.classList.toggle("hidden", !previous);
+  document.getElementById("navigationBackLabel").textContent = previous ? `返回 ${navigationLabel(previous)}` : "上一步";
+  current.textContent = navigationLabel(navigationSnapshot());
+  button.disabled = !previous;
+}
+
+function rememberNavigation() {
+  if (navigationRestoring) return;
+  const current = navigationSnapshot();
+  const previous = navigationHistory[navigationHistory.length - 1];
+  if (!previous || navigationKey(previous) !== navigationKey(current)) navigationHistory.push(current);
+  if (navigationHistory.length > 50) navigationHistory.shift();
+}
+
+function navigateGlobalView(view) {
+  if (view === state.globalView) return;
+  rememberNavigation();
+  setGlobalView(view);
+}
+
+function navigateProjectTab(tab) {
+  if (state.globalView === "workspace" && state.projectTab === tab) return;
+  rememberNavigation();
+  setGlobalView("workspace");
+  setProjectTab(tab);
+}
+
+function navigateReleaseSection(section = "tasks") {
+  if (state.globalView === "release" && state.releaseSection === section) return;
+  rememberNavigation();
+  setGlobalView("release");
+  setReleaseSection(section);
+}
+
+async function navigateBack() {
+  const target = navigationHistory.pop();
+  if (!target) return;
+  navigationRestoring = true;
+  try {
+    if (target.projectId && target.projectId !== state.projectId) {
+      const project = state.projects.find((entry) => entry.id === target.projectId);
+      if (project) await selectProject(project, { remember: false });
+    }
+    state.projectTab = target.projectTab || "versions";
+    state.releaseSection = target.releaseSection || "tasks";
+    setGlobalView(target.globalView || "workspace");
+    if (target.globalView === "workspace") setProjectTab(state.projectTab);
+    if (target.globalView === "release") setReleaseSection(state.releaseSection);
+  } finally {
+    navigationRestoring = false;
+    updateNavigationBackUI();
   }
 }
 
@@ -170,22 +265,32 @@ function setGlobalView(view) {
   document.getElementById("globalSettings").classList.toggle("hidden", view !== "settings");
   document.getElementById("globalDashboard").classList.toggle("hidden", view !== "dashboard");
   document.getElementById("globalGuide").classList.toggle("hidden", view !== "guide");
-  document.getElementById("globalAgent").classList.toggle("hidden", view !== "agent");
+  document.getElementById("globalRelease").classList.toggle("hidden", view !== "release");
   const inProject = view === "workspace" && state.projectId;
   document.getElementById("projectWorkspace").classList.toggle("hidden", !inProject);
   document.getElementById("emptyProject").classList.toggle("hidden", inProject || view !== "workspace");
   if (view === "settings" && state.isAdmin) {
     loadUsers();
     loadAuditLogs();
+    loadLoginProtection();
     if (state.isRoot) loadSystemUpdateStatus();
   }
   if (view === "storage") loadStorageOverview();
   if (view === "dashboard") loadDashboard();
   if (view === "guide") loadGuideDirectory();
-  if (view === "agent" && state.isAdmin) loadAgentWorkspace();
+  if (view === "release") {
+    loadReleaseWorkspace();
+    setReleaseSection(state.releaseSection || "tasks");
+  }
+  updateNavigationBackUI();
 }
 
 function setProjectTab(tab) {
+  if (tab === "hooks") {
+    setGlobalView("release");
+    setReleaseSection("hooks");
+    return;
+  }
   state.projectTab = tab;
   if (tab !== "pushlogs" && pushLogRefreshTimer) {
     window.clearTimeout(pushLogRefreshTimer);
@@ -198,15 +303,73 @@ function setProjectTab(tab) {
   document.querySelectorAll(".project-tab").forEach((b) => {
     b.classList.toggle("active", b.dataset.ptab === tab);
   });
-  ["versions", "cluster", "preview", "team", "deploy", "push", "hooks", "pushlogs", "diff"].forEach((t) => {
+  ["versions", "config", "preview", "publish", "cluster", "team", "deploy", "hooks", "diff"].forEach((t) => {
     const el = document.getElementById("ptab-" + t);
     if (el) el.classList.toggle("hidden", t !== tab);
   });
   if (tab === "deploy") generateDeployScript();
-  if (tab === "push") loadPushTasks();
+  if (tab === "config") loadServerConfigs();
   if (tab === "cluster") loadDeliveryNodes();
   if (tab === "hooks") loadReleaseHooks();
-  if (tab === "pushlogs") loadPushLogs();
+  updateWorkflowUI();
+  updateNavigationBackUI();
+}
+
+function setReleaseSection(section) {
+  if (section === "ssh" && !state.isAdmin) section = "tasks";
+  if (section !== "hooks" && releaseHookRefreshTimer) {
+    window.clearTimeout(releaseHookRefreshTimer);
+    releaseHookRefreshTimer = null;
+  }
+  state.releaseSection = section;
+  document.querySelectorAll("[data-release-section]").forEach((button) => button.classList.toggle("active", button.dataset.releaseSection === section));
+  document.getElementById("releaseProjectContext")?.classList.toggle("hidden", section === "ssh");
+  document.getElementById("globalAgent")?.classList.toggle("hidden", section !== "ssh");
+  const ready = !!state.projectId;
+  document.getElementById("releaseProjectEmpty")?.classList.toggle("hidden", section === "ssh" || ready);
+  document.getElementById("releaseProjectContent")?.classList.toggle("hidden", section === "ssh" || !ready);
+  document.getElementById("ptab-push")?.classList.toggle("hidden", section !== "tasks");
+  document.getElementById("ptab-pushlogs")?.classList.toggle("hidden", section !== "logs");
+  document.getElementById("ptab-hooks")?.classList.toggle("hidden", section !== "hooks" || !ready);
+  if (section === "ssh" && state.isAdmin) loadAgentWorkspace();
+  if (section === "hooks") loadReleaseHooks();
+  updateNavigationBackUI();
+}
+
+function targetTag(serverID = state.selectedServerID) {
+  return state.projectName && serverID ? `${state.projectName}|${serverID}` : "—";
+}
+
+function updateWorkflowUI() {
+  const version = state.version || "选择 Artifact 版本";
+  const selectedServer = state.selectedServerID;
+  const count = (state.serverEntries || []).length;
+  const flowVersion = document.getElementById("flowVersion");
+  const flowServers = document.getElementById("flowServers");
+  const flowServerDetail = document.getElementById("flowServerDetail");
+  const flowPreview = document.getElementById("flowPreview");
+  const flowPublish = document.getElementById("flowPublish");
+  if (flowVersion) flowVersion.textContent = state.version ? `Version ${version} 已选择` : version;
+  if (flowServers) flowServers.textContent = selectedServer ? `Server ${selectedServer} 已配置` : `${count} 个 Server 配置`;
+  if (flowServerDetail) flowServerDetail.textContent = selectedServer ? targetTag(selectedServer) : (count ? "请选择交付目标" : "尚未配置");
+  if (flowPreview) flowPreview.textContent = state.previewConfirmed ? "合成预览已确认" : "合成预览待确认";
+  if (flowPublish) flowPublish.textContent = state.versionStatus === "published" ? `Version ${version} 已发布` : "尚未发布";
+  const previewTag = document.getElementById("previewTargetTag");
+  if (previewTag) previewTag.textContent = selectedServer ? targetTag(selectedServer) : "选择 Server ID";
+  const publishProject = document.getElementById("publishProjectName");
+  const publishVersion = document.getElementById("publishVersionName");
+  const publishTarget = document.getElementById("publishTargetName");
+  if (publishProject) publishProject.textContent = state.projectName || "—";
+  if (publishVersion) publishVersion.textContent = state.version || "—";
+  if (publishTarget) publishTarget.textContent = selectedServer ? targetTag(selectedServer) : "—";
+  const versionCheck = document.getElementById("publishVersionCheck");
+  const configCheck = document.getElementById("publishConfigCheck");
+  const previewCheck = document.getElementById("publishPreviewCheck");
+  if (versionCheck) versionCheck.textContent = state.version ? `Artifact ${state.version} 已选择` : "未选择 Artifact 版本";
+  if (configCheck) configCheck.textContent = selectedServer ? `Server ${selectedServer} 已配置` : "未选择 Server 配置";
+  if (previewCheck) previewCheck.textContent = state.previewConfirmed ? "预览已确认" : "预览尚未确认";
+  const flowPublishButton = document.getElementById("btnFlowPublish");
+  if (flowPublishButton) flowPublishButton.disabled = !(state.version && selectedServer && state.previewConfirmed) || state.versionStatus === "published";
 }
 
 function setVersionStatusBadge(status) {
@@ -240,9 +403,167 @@ async function init() {
 async function loadServerIDs() {
   try {
     const d = await api("/api/server-ids");
-    const dl = document.getElementById("serverIdList");
-    if (dl) dl.innerHTML = (d.server_ids || []).map((id) => `<option value="${escapeHtml(id)}">`).join("");
+    serverIDs = d.server_ids || [];
+    document.querySelectorAll(".server-id-input").forEach(setupServerIDCombobox);
   } catch (_) {}
+}
+
+async function loadServerConfigs() {
+  const list = document.getElementById("serverConfigList");
+  if (!list) return;
+  if (!state.isAdmin) {
+    list.innerHTML = '<div class="agent-empty">Server 配置由系统管理员维护。</div>';
+    return;
+  }
+  try {
+    const payload = await api("/api/servers");
+    state.serverEntries = payload.servers || [];
+    renderServerConfigList();
+    if (state.selectedServerID) {
+      const current = state.serverEntries.find((item) => item.server_id === state.selectedServerID);
+      if (current) selectServerConfig(current);
+      else state.selectedServerID = null;
+    }
+    updateWorkflowUI();
+  } catch (error) {
+    list.innerHTML = `<div class="agent-error">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderServerConfigList() {
+  const list = document.getElementById("serverConfigList");
+  if (!list) return;
+  const query = state.serverConfigFilter;
+  const rows = (state.serverEntries || []).filter((item) => {
+    const haystack = `${item.server_id} ${targetTag(item.server_id)}`.toLowerCase();
+    return !query || haystack.includes(query);
+  });
+  if (!rows.length) {
+    list.innerHTML = `<div class="agent-empty">${query ? "没有匹配配置" : "还没有 Server 配置"}</div>`;
+    return;
+  }
+  list.innerHTML = rows.map((item) => {
+    const replacementCount = Object.keys(item.entry?.replacements || {}).length;
+    return `<button type="button" class="server-config-row ${item.server_id === state.selectedServerID ? "active" : ""}" data-server-config="${escapeAttr(item.server_id)}"><span><strong>${escapeHtml(item.server_id)}</strong><code>${escapeHtml(targetTag(item.server_id))}</code></span><small>${replacementCount} 个模板文件</small></button>`;
+  }).join("");
+  list.querySelectorAll("[data-server-config]").forEach((button) => {
+    button.onclick = () => selectServerConfig(state.serverEntries.find((item) => item.server_id === button.dataset.serverConfig));
+  });
+}
+
+function selectServerConfig(item) {
+  if (!item) return;
+  state.selectedServerID = item.server_id;
+  state.previewConfirmed = false;
+  document.getElementById("serverConfigEmpty")?.classList.add("hidden");
+  document.getElementById("serverConfigEditor")?.classList.remove("hidden");
+  document.getElementById("serverConfigTitle").textContent = item.server_id;
+  document.getElementById("serverConfigTarget").textContent = targetTag(item.server_id);
+  document.getElementById("configSourceVersion").textContent = state.version || "未选版本";
+  document.getElementById("configSourceServer").textContent = item.server_id;
+  const editor = document.getElementById("serverConfigJSON");
+  editor.value = JSON.stringify(item.entry || { replacements: {} }, null, 2);
+  document.getElementById("serverConfigSaveState").textContent = "已保存";
+  const files = Object.entries(item.entry?.replacements || {});
+  document.getElementById("serverReplacementFiles").innerHTML = files.length ? files.map(([name, values], index) => `<button type="button" class="replacement-file-row ${index === 0 ? "active" : ""}"><strong>${escapeHtml(name)}</strong><small>${Object.keys(values || {}).length} 个覆盖项</small></button>`).join("") : '<div class="agent-empty">尚无覆盖项，在右侧 JSON 中添加 replacements。</div>';
+  const previewInput = document.getElementById("verPreviewServerId");
+  if (previewInput) previewInput.value = item.server_id;
+  renderServerConfigList();
+  updateWorkflowUI();
+}
+
+async function createServerConfig(copyFrom = null) {
+  const serverID = await showPrompt({ title: copyFrom ? "复制 Server 配置" : "新建 Server 配置", message: "输入 Server ID；目标标签将自动生成 project|serverId。", value: copyFrom ? `${copyFrom.server_id}-copy` : "" });
+  if (serverID == null) return;
+  const clean = serverID.trim();
+  if (!clean || clean.includes("|")) return showToast("Server ID 不能为空且不能包含 |", "warn");
+  if (state.serverEntries.some((item) => item.server_id === clean)) return showToast("Server ID 已存在", "warn");
+  const entry = copyFrom ? copyFrom.entry : { replacements: {}, post_hook: "", post_hook_env: {} };
+  try {
+    const created = await api(`/api/servers/${encodeURIComponent(clean)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(entry) });
+    state.selectedServerID = created.server_id;
+    await loadServerIDs();
+    await loadServerConfigs();
+    showToast(copyFrom ? "配置已复制" : "Server 配置已创建");
+  } catch (error) { showToast(error.message, "err"); }
+}
+
+async function saveServerConfig() {
+  if (!state.selectedServerID) return;
+  let entry;
+  try { entry = JSON.parse(document.getElementById("serverConfigJSON").value); }
+  catch (error) { showToast(`JSON 格式错误：${error.message}`, "err"); return; }
+  try {
+    await api(`/api/servers/${encodeURIComponent(state.selectedServerID)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(entry) });
+    document.getElementById("serverConfigSaveState").textContent = "已保存";
+    await loadServerIDs();
+    await loadServerConfigs();
+    navigateProjectTab("preview");
+    scheduleDeployPreview();
+    showToast("Server 配置已保存");
+  } catch (error) { showToast(error.message, "err"); }
+}
+
+async function deleteServerConfig() {
+  if (!state.selectedServerID) return;
+  if (!await showConfirm({ title: "删除 Server 配置", message: `删除 ${targetTag()}？SSH 绑定不会自动删除。`, danger: true })) return;
+  try {
+    await api(`/api/servers/${encodeURIComponent(state.selectedServerID)}`, { method: "DELETE" });
+    state.selectedServerID = null;
+    document.getElementById("serverConfigEditor")?.classList.add("hidden");
+    document.getElementById("serverConfigEmpty")?.classList.remove("hidden");
+    await loadServerIDs();
+    await loadServerConfigs();
+    showToast("Server 配置已删除");
+  } catch (error) { showToast(error.message, "err"); }
+}
+
+function setupServerIDCombobox(input) {
+  if (input.dataset.serverIdReady) return;
+  input.dataset.serverIdReady = "1";
+  const box = input.closest(".server-id-combobox");
+  const options = box?.querySelector(".server-id-options");
+  if (!options) return;
+  let active = -1;
+  const render = () => {
+    const q = input.value.trim().toLowerCase();
+    const rows = serverIDs.filter((id) => id.toLowerCase().includes(q)).slice(0, 50);
+    active = -1;
+    options.innerHTML = rows.map((id) => {
+      const at = id.toLowerCase().indexOf(q);
+      const label = !q ? escapeHtml(id) : `${escapeHtml(id.slice(0, at))}<mark>${escapeHtml(id.slice(at, at + q.length))}</mark>${escapeHtml(id.slice(at + q.length))}`;
+      return `<button type="button" class="server-id-option" data-server-id="${escapeAttr(id)}">${label}</button>`;
+    }).join("") || '<div class="server-id-empty">无匹配 server_id</div>';
+    options.classList.toggle("hidden", !rows.length && !q);
+    options.querySelectorAll("[data-server-id]").forEach((button) => button.onclick = () => { input.value = button.dataset.serverId; input.dispatchEvent(new Event("input", { bubbles: true })); options.classList.add("hidden"); input.focus(); });
+  };
+  input.onfocus = render;
+  input.addEventListener("input", render);
+  input.addEventListener("keydown", (event) => {
+    const rows = [...options.querySelectorAll("[data-server-id]")];
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); active = Math.max(0, Math.min(rows.length - 1, active + (event.key === "ArrowDown" ? 1 : -1))); rows.forEach((r, i) => r.classList.toggle("active", i === active)); rows[active]?.focus(); }
+    if (event.key === "Escape") options.classList.add("hidden");
+  });
+  document.addEventListener("click", (event) => { if (!box.contains(event.target)) options.classList.add("hidden"); });
+}
+
+async function loadReleaseWorkspace() {
+  const select = document.getElementById("releaseProject");
+  if (!select) return;
+  const selected = String(state.projectId || "");
+  select.innerHTML = '<option value="">选择项目</option>' + state.projects.map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join("");
+  select.value = selected;
+  const ready = !!state.projectId;
+  const cards = document.getElementById("releaseProjectCards");
+  if (cards) {
+    cards.innerHTML = state.projects.map((p) => `<button type="button" class="btn btn-secondary" data-release-project="${p.id}">${escapeHtml(p.name)}</button>`).join("") || '<span class="hint">暂无可访问项目</span>';
+    cards.querySelectorAll("[data-release-project]").forEach((button) => button.onclick = async () => {
+      document.getElementById("releaseProject").value = button.dataset.releaseProject;
+      document.getElementById("releaseProject").dispatchEvent(new Event("change"));
+    });
+  }
+  setReleaseSection(state.releaseSection || "tasks");
+  if (ready) { await loadPushTasks(); await loadPushLogs(); }
 }
 
 function updateDeployCmd() {
@@ -468,12 +789,44 @@ document.getElementById("btnLogout").onclick = async () => {
 
 document.querySelectorAll(".sidebar-nav-item[data-global]").forEach((btn) => {
   btn.onclick = () => {
-    setGlobalView(btn.dataset.global);
+    navigateGlobalView(btn.dataset.global);
   };
 });
 
+document.getElementById("btnNavigateBack")?.addEventListener("click", navigateBack);
+document.getElementById("btnReturnProject")?.addEventListener("click", () => navigateGlobalView("workspace"));
+
+document.getElementById("releaseProject")?.addEventListener("change", async (event) => {
+  const project = state.projects.find((item) => item.id === Number(event.target.value));
+  if (!project) return loadReleaseWorkspace();
+  if (project.id !== state.projectId) rememberNavigation();
+  state.projectId = project.id;
+  state.projectName = project.name;
+  state.versions = (await api(`/api/projects/${project.id}/versions`)) || [];
+  await loadReleaseWorkspace();
+});
+document.getElementById("btnReleaseReload")?.addEventListener("click", loadReleaseWorkspace);
+
+const releaseHookPanel = document.getElementById("ptab-hooks");
+if (releaseHookPanel) document.getElementById("globalRelease")?.appendChild(releaseHookPanel);
+const agentPanel = document.getElementById("globalAgent");
+if (agentPanel) document.getElementById("globalRelease")?.appendChild(agentPanel);
+
 document.querySelectorAll(".project-tab").forEach((btn) => {
-  btn.onclick = () => setProjectTab(btn.dataset.ptab);
+  btn.onclick = () => btn.dataset.ptab === "hooks" ? navigateReleaseSection("hooks") : navigateProjectTab(btn.dataset.ptab);
+});
+
+document.querySelectorAll("[data-flow-target]").forEach((btn) => {
+  btn.addEventListener("click", () => navigateProjectTab(btn.dataset.flowTarget));
+});
+
+document.querySelectorAll("[data-project-action='release']").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    navigateReleaseSection(btn.dataset.releaseTarget || "tasks");
+  });
+});
+document.querySelectorAll("[data-release-section]").forEach((button) => {
+  button.addEventListener("click", () => navigateReleaseSection(button.dataset.releaseSection));
 });
 
 document.getElementById("btnPushAddHost")?.addEventListener("click", async () => {
@@ -487,20 +840,48 @@ document.getElementById("btnPushAddHost")?.addEventListener("click", async () =>
       health_check_interval_seconds: Number(document.getElementById("pushHostHealthInterval").value || 3600),
     }) });
     ["pushHostName", "pushHostAddress", "pushHostUser", "pushHostCredential", "pushHostKey"].forEach((id) => { document.getElementById(id).value = ""; });
+    document.getElementById("pushHostEditor")?.classList.add("hidden");
     await loadAgentWorkspace(); showToast("SSH 资源已保存，凭据不可回读");
   } catch (e) { showToast(e.message, "err"); }
 });
 document.getElementById("btnPushAddBinding")?.addEventListener("click", async () => {
   if (!selectedPushHostID) return showToast("请先选择 SSH 配置", "err");
+  const projectName = document.getElementById("pushBindingProject").value;
+  if (!projectName) return showToast("请选择项目", "warn");
   try {
-    await api(`/api/push/hosts/${selectedPushHostID}/servers`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-      server_id: document.getElementById("pushBindingServerID").value.trim(), labels: document.getElementById("pushBindingLabels").value.trim(),
+    await api(`/api/push/hosts/${selectedPushHostID}/servers${editingPushBindingID ? `/${editingPushBindingID}` : ""}`, { method: editingPushBindingID ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+      project_name: projectName, server_id: document.getElementById("pushBindingServerID").value.trim(), labels: document.getElementById("pushBindingLabels").value.trim(),
       content_tags: document.getElementById("pushBindingContentTags").value.trim(), remote_root: document.getElementById("pushBindingRoot").value.trim(), os: "linux", arch: "amd64",
     }) });
-    pushBindings = await api(`/api/push/hosts/${selectedPushHostID}/servers`); renderPushBindings(); showToast("服务器绑定已保存");
+    editingPushBindingID = null;
+    pushBindings = await api(`/api/push/hosts/${selectedPushHostID}/servers`);
+    const selectedHost = pushHosts.find((host) => host.id === selectedPushHostID);
+    if (selectedHost) selectedHost.bindings = pushBindings;
+    renderPushBindings();
+    renderPushHosts();
+    showToast("服务器绑定已保存");
   } catch (e) { showToast(e.message, "err"); }
 });
+
+function updatePushBindingTargetTag() {
+  const projectName = document.getElementById("pushBindingProject")?.value || "";
+  const serverID = document.getElementById("pushBindingServerID")?.value.trim() || "";
+  const output = document.getElementById("pushBindingTargetTag");
+  if (output) output.textContent = projectName && serverID ? `${projectName}|${serverID}` : "选择项目与 Server ID";
+}
+
+document.getElementById("pushBindingProject")?.addEventListener("change", updatePushBindingTargetTag);
+document.getElementById("pushBindingServerID")?.addEventListener("input", updatePushBindingTargetTag);
+document.getElementById("btnShowPushHostEditor")?.addEventListener("click", () => document.getElementById("pushHostEditor")?.classList.remove("hidden"));
+document.getElementById("btnClosePushHostEditor")?.addEventListener("click", () => document.getElementById("pushHostEditor")?.classList.add("hidden"));
+document.getElementById("btnCloseBindingDrawer")?.addEventListener("click", () => document.getElementById("sshBindingDrawer")?.classList.add("hidden"));
+["sshSearch", "sshStatusFilter", "sshProjectFilter"].forEach((id) => document.getElementById(id)?.addEventListener("input", renderPushHosts));
 document.getElementById("btnSavePushTask")?.addEventListener("click", savePushTask);
+document.getElementById("btnSaveAndRunPushTask")?.addEventListener("click", async () => {
+  document.getElementById("pushTaskServerIDs").value = "";
+  const task = await savePushTask();
+  if (task) await runPushTask(task.id, false);
+});
 document.getElementById("btnCancelPushTask")?.addEventListener("click", resetPushTaskEditor);
 document.getElementById("btnSaveReleaseHook")?.addEventListener("click", saveReleaseHook);
 document.getElementById("btnCancelReleaseHook")?.addEventListener("click", resetReleaseHookEditor);
@@ -514,6 +895,9 @@ document.querySelectorAll("#settingsTabs .seg-tab").forEach((btn) => {
     btn.classList.add("active");
     document.getElementById("stab-users").classList.toggle("hidden", btn.dataset.stab !== "users");
     document.getElementById("stab-audit").classList.toggle("hidden", btn.dataset.stab !== "audit");
+    document.getElementById("stab-login-security").classList.toggle("hidden", btn.dataset.stab !== "login-security");
+    document.getElementById("stab-onboarding").classList.toggle("hidden", btn.dataset.stab !== "onboarding");
+    if (btn.dataset.stab === "login-security") loadLoginProtection();
   };
 });
 
@@ -530,6 +914,20 @@ document.getElementById("versionSearch")?.addEventListener("input", (e) => {
 document.getElementById("fileSearch")?.addEventListener("input", (e) => {
   state.fileFilter = e.target.value.trim().toLowerCase();
   renderFileList();
+});
+
+document.getElementById("serverConfigSearch")?.addEventListener("input", (event) => {
+  state.serverConfigFilter = event.target.value.trim().toLowerCase();
+  renderServerConfigList();
+});
+document.getElementById("btnNewServerConfig")?.addEventListener("click", () => createServerConfig());
+document.getElementById("btnDuplicateServerConfig")?.addEventListener("click", () => createServerConfig(state.serverEntries.find((item) => item.server_id === state.selectedServerID)));
+document.getElementById("btnSaveServerConfig")?.addEventListener("click", saveServerConfig);
+document.getElementById("btnDeleteServerConfig")?.addEventListener("click", deleteServerConfig);
+document.getElementById("btnOpenRawYaml")?.addEventListener("click", () => navigateGlobalView("server"));
+document.getElementById("serverConfigJSON")?.addEventListener("input", () => {
+  const stateLabel = document.getElementById("serverConfigSaveState");
+  if (stateLabel) stateLabel.textContent = "未保存";
 });
 
 function renderProjectList() {
@@ -596,12 +994,21 @@ async function loadProjectTeam() {
   }
 }
 
-async function selectProject(p) {
+async function selectProject(p, { remember = true } = {}) {
+  const projectChanged = state.projectId !== p.id;
+  if (remember && (projectChanged || state.globalView !== "workspace")) rememberNavigation();
   state.projectId = p.id;
   state.projectName = p.name;
   state.projectRole = p.my_role || (state.isAdmin ? "admin" : "viewer");
   state.version = null;
+  state.versionStatus = null;
+  if (projectChanged) {
+    state.selectedServerID = null;
+    state.previewConfirmed = false;
+  }
   document.getElementById("curProject").textContent = p.name;
+  const roleBadge = document.getElementById("projectRoleBadge");
+  if (roleBadge) roleBadge.textContent = state.projectRole === "admin" ? "管理员" : "只读成员";
   document.getElementById("btnDelProject")?.classList.toggle("hidden", !canWriteProject());
   updateProjectWriteUI();
   loadProjectTeam();
@@ -610,12 +1017,14 @@ async function selectProject(p) {
   await loadProjects();
   state.versions = (await api(`/api/projects/${p.id}/versions`)) || [];
   renderVersionList();
+  if (state.isAdmin) await loadServerConfigs();
   if (state.projectTab === "cluster") await loadDeliveryNodes();
   // Populate diff dropdowns
   populateDiffDropdowns(state.versions);
   // Generate deploy script when switching to deploy tab
   generateDeployScript();
   document.getElementById("versionDetail").classList.add("hidden");
+  updateWorkflowUI();
   return state.versions;
 }
 
@@ -644,6 +1053,15 @@ function populateDiffDropdowns(versions) {
   const fromSel = document.getElementById("diffFromVer");
   const toSel = document.getElementById("diffToVer");
   if (!fromSel || !toSel) return;
+  const output = document.getElementById("versionDiffOut");
+  if ((versions || []).length < 2) {
+    fromSel.disabled = true;
+    toSel.disabled = true;
+    if (output) output.innerHTML = '<div class="empty-state compact"><h3>还不能对比版本</h3><p>至少需要两个版本。请先发布第一个版本，再发布一个新版本后回来对比。</p></div>';
+    return;
+  }
+  fromSel.disabled = false;
+  toSel.disabled = false;
   const opts = versions.map((v) => `<option value="${escapeHtml(v.version)}">${escapeHtml(v.version)} (${v.status})</option>`).join("");
   fromSel.innerHTML = `<option value="">from 版本</option>` + opts;
   toSel.innerHTML = `<option value="">to 版本</option>` + opts;
@@ -664,7 +1082,10 @@ function updateReviewButtons(status) {
 async function selectVersion(v) {
   state.version = v.version;
   state.versionStatus = v.status;
+  state.previewConfirmed = false;
   document.getElementById("versionDetail").classList.remove("hidden");
+  const detailTitle = document.getElementById("verDetailTitle");
+  if (detailTitle) detailTitle.textContent = v.version;
   setVersionStatusBadge(v.status);
   document.getElementById("verCreated").textContent = v.created_at;
   document.getElementById("verPublished").textContent = v.published_at || "—";
@@ -702,6 +1123,7 @@ async function selectVersion(v) {
   renderFileDiffWorkspace([], document.getElementById("verPreviewTable"), { empty: "选择 server_id" });
   updateDeployCmd();
   tryAutoPreviewOnVersionSelect();
+  updateWorkflowUI();
   return rows.map((r) => r.path);
 }
 
@@ -752,6 +1174,7 @@ function renderFileList() {
 let pushHosts = [];
 let pushBindings = [];
 let selectedPushHostID = null;
+let editingPushBindingID = null;
 let pushTasks = [];
 let editingPushTaskID = null;
 let pushLogRefreshTimer = null;
@@ -850,10 +1273,11 @@ async function savePushTask() {
   };
   try {
     const path = editingPushTaskID ? `/api/projects/${state.projectId}/push-tasks/${editingPushTaskID}` : `/api/projects/${state.projectId}/push-tasks`;
-    await api(path, { method: editingPushTaskID ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    const task = await api(path, { method: editingPushTaskID ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     showToast(editingPushTaskID ? "发布任务已更新" : "发布任务已保存");
     resetPushTaskEditor();
     await loadPushTasks();
+    return task;
   } catch (e) { showToast(e.message, "err"); }
 }
 
@@ -864,8 +1288,8 @@ function renderPushTasks() {
     box.innerHTML = '<div class="empty-state compact"><h3>还没有发布任务</h3><p>先保存一个任务；SSH 节点与 server_id 绑定在全局 Agent 页面维护。</p></div>';
     return;
   }
-  box.innerHTML = `<table class="data-table release-task-table"><thead><tr><th>任务</th><th>版本策略</th><th>目标筛选</th><th>执行</th><th>最近运行</th><th>操作</th></tr></thead><tbody>${pushTasks.map((task) => `<tr><td><strong>${escapeHtml(task.name)}</strong><small>#${task.id}</small></td><td>${task.version ? `<code>${escapeHtml(task.version)}</code>` : '<span class="badge badge-ok">每次取最新已发布</span>'}</td><td><small>server_id：${escapeHtml((task.server_ids || []).join(", ") || "全部")}</small><small>标签（${task.tag_match === "any" ? "任一" : "全部"}）：${escapeHtml((task.tags || []).join(", ") || "test")}</small></td><td><strong>${task.run_count || 0}</strong><small>次</small></td><td><small>${escapeHtml(task.last_run_at || "尚未执行")}</small></td><td class="release-task-actions"><button type="button" class="btn btn-secondary btn-sm" data-run-push-task="${task.id}" data-dry-run="true">预演</button><button type="button" class="btn btn-primary btn-sm" data-run-push-task="${task.id}">执行</button><button type="button" class="btn btn-ghost btn-sm" data-edit-push-task="${task.id}">编辑</button><button type="button" class="btn btn-danger btn-sm" data-delete-push-task="${task.id}">删除</button></td></tr>`).join("")}</tbody></table>`;
-  box.querySelectorAll("[data-run-push-task]").forEach((button) => button.onclick = () => runPushTask(Number(button.dataset.runPushTask), button.dataset.dryRun === "true"));
+  box.innerHTML = `<table class="data-table release-task-table"><thead><tr><th>任务</th><th>版本策略</th><th>目标筛选</th><th>执行</th><th>最近运行</th><th>操作</th></tr></thead><tbody>${pushTasks.map((task) => `<tr><td><strong>${escapeHtml(task.name)}</strong><small>#${task.id}</small></td><td>${task.version ? `<code>${escapeHtml(task.version)}</code>` : '<span class="badge badge-ok">每次取最新已发布</span>'}</td><td><small>server_id：${escapeHtml((task.server_ids || []).join(", ") || "全部")}</small><small>标签（${task.tag_match === "any" ? "任一" : "全部"}）：${escapeHtml((task.tags || []).join(", ") || "test")}</small></td><td><strong>${task.run_count || 0}</strong><small>次</small></td><td><small>${escapeHtml(task.last_run_at || "尚未执行")}</small></td><td class="release-task-actions"><button type="button" class="btn btn-secondary btn-sm" data-run-push-task="${task.id}" data-dry-run="true">预演</button><button type="button" class="btn btn-primary btn-sm" data-run-push-task="${task.id}">发布</button><button type="button" class="btn btn-ghost btn-sm" data-edit-push-task="${task.id}">编辑</button><button type="button" class="btn btn-danger btn-sm" data-delete-push-task="${task.id}">删除</button></td></tr>`).join("")}</tbody></table>`;
+  box.querySelectorAll("[data-run-push-task]").forEach((button) => button.onclick = () => runPushTask(Number(button.dataset.runPushTask), button.dataset.dryRun === "true", button));
   box.querySelectorAll("[data-edit-push-task]").forEach((button) => button.onclick = () => editPushTask(Number(button.dataset.editPushTask)));
   box.querySelectorAll("[data-delete-push-task]").forEach((button) => button.onclick = () => deletePushTask(Number(button.dataset.deletePushTask)));
 }
@@ -883,13 +1307,36 @@ function editPushTask(taskID) {
   document.getElementById("btnCancelPushTask").classList.remove("hidden");
 }
 
-async function runPushTask(taskID, dryRun) {
+function newIdempotencyKey(taskID, dryRun) {
+  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `ui:${state.projectId}:${taskID}:${dryRun ? "preview" : "release"}:${suffix}`;
+}
+
+async function runPushTask(taskID, dryRun, triggerButton) {
+  const task = pushTasks.find((item) => item.id === taskID);
+  if (!task) return;
+  if (!dryRun) {
+    const version = task.version || latestPublishedVersion()?.version || "无可用版本";
+    const targets = (task.server_ids || []).join(", ") || "全部匹配服务器（串行）";
+    const confirmed = await showConfirm({ title: `发布 ${task.name}`, message: `版本：${version}\n目标：${targets}\n策略：先预拉取；SIGTERM 后等待正常退出；换包后必须通过启动与健康检查。`, confirmText: "确认发布", cancelText: "取消" });
+    if (!confirmed) return;
+  }
+  const storageKey = `express233:push:${state.projectId}:${taskID}:${dryRun ? "preview" : "release"}`;
+  const idempotencyKey = sessionStorage.getItem(storageKey) || newIdempotencyKey(taskID, dryRun);
+  sessionStorage.setItem(storageKey, idempotencyKey);
+  if (triggerButton) triggerButton.disabled = true;
   try {
-    await api(`/api/projects/${state.projectId}/push-tasks/${taskID}/run`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dry_run: dryRun }) });
-    showToast(dryRun ? "预演完成，已写入发布日志" : "发布任务已排队");
+    const deployment = await api(`/api/projects/${state.projectId}/push-tasks/${taskID}/run`, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey }, body: JSON.stringify({ dry_run: dryRun, idempotency_key: idempotencyKey }) });
+    sessionStorage.removeItem(storageKey);
+    showToast(deployment.replayed ? `已接续原执行 #${deployment.id}，未重复发布` : dryRun ? `预演 #${deployment.id} 完成` : `发布 #${deployment.id} 已进入串行队列`);
     await loadPushTasks();
-    setProjectTab("pushlogs");
-  } catch (e) { showToast(e.message, "err"); }
+    setGlobalView("release");
+    navigateReleaseSection("logs");
+  } catch (e) {
+    showToast(`${e.message}；重试将接续同一执行`, "err", 5200);
+  } finally {
+    if (triggerButton) triggerButton.disabled = false;
+  }
 }
 
 async function deletePushTask(taskID) {
@@ -932,7 +1379,7 @@ async function loadReleaseHooks() {
     renderReleaseHooks();
     renderReleaseHookEvents();
     if (releaseHookRefreshTimer) window.clearTimeout(releaseHookRefreshTimer);
-    if (state.projectTab === "hooks" && releaseHooks.some((hook) => hook.pending_events > 0 || hook.last_status === "running")) {
+    if (state.globalView === "release" && state.releaseSection === "hooks" && releaseHooks.some((hook) => hook.pending_events > 0 || hook.last_status === "running")) {
       releaseHookRefreshTimer = window.setTimeout(loadReleaseHooks, 2000);
     }
   } catch (error) { showToast(error.message, "err"); }
@@ -1016,11 +1463,37 @@ function renderReleaseHookEvents() {
 
 function renderPushHosts() {
   const hostList = document.getElementById("pushHostList");
-  const editor = document.getElementById("pushBindingEditor");
   if (!hostList) return;
-  hostList.innerHTML = `<table class="data-table"><thead><tr><th>配置</th><th>地址</th><th>认证</th><th>存活状态</th><th>Host key</th><th></th></tr></thead><tbody>${pushHosts.map((h) => `<tr class="${h.id === selectedPushHostID ? "selected-row" : ""}"><td>${escapeHtml(h.name)}</td><td>${escapeHtml(h.username)}@${escapeHtml(h.address)}:${h.port}</td><td>${escapeHtml(h.auth_mode || "private_key")}</td><td>${agentHealthBadge(h)} <span class="table-meta">${h.health_check_enabled ? formatAgentInterval(h.health_check_interval_seconds) : "已关闭"}</span></td><td><code>${escapeHtml(h.host_key_fingerprint || (h.host_key ? "已固定" : "首次连接自动记录"))}</code></td><td><button type="button" class="btn btn-ghost btn-sm" data-check-push-host="${h.id}">${agentIcon("activity")}检查</button><button type="button" class="btn btn-ghost btn-sm" data-push-host="${h.id}">绑定</button><button type="button" class="btn btn-danger btn-sm" data-del-push-host="${h.id}">删除</button></td></tr>`).join("")}</tbody></table>`;
-  hostList.querySelectorAll("[data-push-host]").forEach((btn) => btn.onclick = async () => { selectedPushHostID = Number(btn.dataset.pushHost); editor?.classList.remove("hidden"); pushBindings = await api(`/api/push/hosts/${selectedPushHostID}/servers`); renderPushBindings(); });
+  const query = document.getElementById("sshSearch")?.value.trim().toLowerCase() || "";
+  const statusFilter = document.getElementById("sshStatusFilter")?.value || "";
+  const projectFilter = document.getElementById("sshProjectFilter")?.value || "";
+  const rows = pushHosts.filter((host) => {
+    const tags = (host.bindings || []).map((binding) => binding.target_tag || `${binding.project_name || "未归属"}|${binding.server_id}`);
+    const matchesText = !query || `${host.name} ${host.address} ${tags.join(" ")}`.toLowerCase().includes(query);
+    const expectedStatus = statusFilter === "success" ? "ok" : statusFilter;
+    const matchesStatus = !statusFilter || (host.last_check_status || "unknown") === expectedStatus;
+    const matchesProject = !projectFilter || (host.bindings || []).some((binding) => binding.project_name === projectFilter);
+    return matchesText && matchesStatus && matchesProject;
+  });
+  if (!rows.length) { hostList.innerHTML = '<div class="agent-empty">没有匹配机器</div>'; return; }
+  hostList.innerHTML = `<table class="data-table ssh-machine-table"><thead><tr><th>机器</th><th>SSH 地址</th><th>健康状态</th><th>目标标签</th><th>最近检查</th><th>操作</th></tr></thead><tbody>${rows.map((h) => {
+    const tags = (h.bindings || []).map((binding) => `<code class="target-tag">${escapeHtml(binding.target_tag || `${binding.project_name || "未归属"}|${binding.server_id}`)}</code>`).join("") || '<span class="hint">未绑定目标</span>';
+    const checkMeta = `${formatAgentInterval(h.health_check_interval_seconds || 3600)} · ${h.last_check_latency_ms ? `${h.last_check_latency_ms} ms` : "—"}`;
+    return `<tr class="${h.id === selectedPushHostID ? "selected-row" : ""}"><td><strong>${escapeHtml(h.name)}</strong><small>${(h.bindings || []).length} 个目标</small></td><td><code>${escapeHtml(h.username)}@${escapeHtml(h.address)}:${h.port}</code><small>${escapeHtml(h.auth_mode || "private_key")}</small></td><td>${agentHealthBadge(h)}</td><td><div class="target-tag-list">${tags}</div></td><td>${escapeHtml(h.last_check_at || "尚未检查")}<small>${checkMeta}</small></td><td><button type="button" class="btn btn-ghost btn-sm" data-check-push-host="${h.id}">立即检查</button><button type="button" class="btn btn-ghost btn-sm" data-push-host="${h.id}">目标绑定</button><button type="button" class="btn btn-danger btn-sm" data-del-push-host="${h.id}">删除</button></td></tr>`;
+  }).join("")}</tbody></table>`;
+  hostList.querySelectorAll("[data-push-host]").forEach((btn) => btn.onclick = async () => {
+    selectedPushHostID = Number(btn.dataset.pushHost);
+    const host = pushHosts.find((item) => item.id === selectedPushHostID);
+    document.getElementById("sshDrawerTitle").textContent = host?.name || "机器绑定";
+    document.getElementById("sshBindingDrawer")?.classList.remove("hidden");
+    pushBindings = await api(`/api/push/hosts/${selectedPushHostID}/servers`);
+    editingPushBindingID = null;
+    renderPushBindings();
+    renderPushHosts();
+  });
   hostList.querySelectorAll("[data-check-push-host]").forEach((btn) => btn.onclick = () => runAgentHostCheck(Number(btn.dataset.checkPushHost), btn));
+  hostList.querySelectorAll("[data-agent-enabled]").forEach((input) => input.onchange = () => saveAgentHostHealth(Number(input.dataset.agentEnabled)));
+  hostList.querySelectorAll("[data-agent-interval]").forEach((select) => select.onchange = () => saveAgentHostHealth(Number(select.dataset.agentInterval)));
   hostList.querySelectorAll("[data-del-push-host]").forEach((btn) => btn.onclick = async () => { if (!await showConfirm({ title: "删除 SSH 资源", message: "会一并删除该资源下的服务器绑定。", danger: true })) return; await api(`/api/push/hosts/${btn.dataset.delPushHost}`, { method: "DELETE" }); selectedPushHostID = null; pushBindings = []; renderPushBindings(); await loadAgentWorkspace(); });
 }
 
@@ -1060,10 +1533,15 @@ async function loadAgentWorkspace() {
   if (summary) summary.innerHTML = '<div class="agent-loading">正在读取节点与 API 能力…</div>';
   try {
     const [capabilityPayload, hosts] = await Promise.all([api("/api/agent/capabilities"), api("/api/push/hosts")]);
-    pushHosts = hosts || [];
+    const bindingLists = await Promise.all((hosts || []).map((host) => api(`/api/push/hosts/${host.id}/servers`).catch(() => [])));
+    pushHosts = (hosts || []).map((host, index) => ({ ...host, bindings: bindingLists[index] || [] }));
+    const projectOptions = '<option value="">选择项目</option>' + (state.projects || []).map((project) => `<option value="${escapeAttr(project.name)}">${escapeHtml(project.name)}</option>`).join("");
+    const bindingProject = document.getElementById("pushBindingProject");
+    if (bindingProject) bindingProject.innerHTML = projectOptions;
+    const projectFilter = document.getElementById("sshProjectFilter");
+    if (projectFilter) projectFilter.innerHTML = '<option value="">全部项目</option>' + (state.projects || []).map((project) => `<option value="${escapeAttr(project.name)}">${escapeHtml(project.name)}</option>`).join("");
     renderAgentSummary(capabilityPayload, pushHosts);
     renderAgentCapabilities(capabilityPayload.capabilities || []);
-    renderAgentHosts(pushHosts);
     renderPushHosts();
   } catch (error) {
     if (summary) summary.innerHTML = `<div class="agent-error">${escapeHtml(error.message)}</div>`;
@@ -1085,6 +1563,7 @@ function renderAgentSummary(payload, hosts) {
 
 function renderAgentCapabilities(capabilities) {
   const box = document.getElementById("agentCapabilities");
+  if (!box) return;
   const groups = capabilities.reduce((result, item) => {
     (result[item.group] ||= []).push(item);
     return result;
@@ -1094,6 +1573,7 @@ function renderAgentCapabilities(capabilities) {
 
 function renderAgentHosts(hosts) {
   const box = document.getElementById("agentHostList");
+  if (!box) return;
   if (!hosts.length) {
     box.innerHTML = '<div class="agent-empty">还没有 SSH 节点。请在本页“SSH 资源管理”创建第一台节点。</div>';
     return;
@@ -1125,7 +1605,7 @@ async function runAgentHostCheck(hostID, button) {
   try {
     const result = await api(`/api/push/hosts/${hostID}/check`, { method: "POST" });
     showToast(result.status === "ok" ? `SSH 可连接，${result.latency_ms} ms` : `SSH 连接失败：${result.error}`, result.status === "ok" ? "ok" : "err");
-    if (state.globalView === "agent") { await loadAgentWorkspace(); await loadAgentHostHistory(hostID); }
+    if (state.globalView === "release" && state.releaseSection === "ssh") { await loadAgentWorkspace(); await loadAgentHostHistory(hostID); }
     else await loadAgentWorkspace();
   } catch (error) { showToast(error.message, "err"); }
   finally { if (button) { button.disabled = false; button.classList.remove("is-checking"); } }
@@ -1148,9 +1628,16 @@ document.getElementById("btnAgentReload")?.addEventListener("click", loadAgentWo
 function renderPushBindings() {
   const box = document.getElementById("pushBindingList");
   if (!box) return;
-  const rows = pushBindings.map((b) => `<tr><td>${escapeHtml(b.server_id)}</td><td>${escapeHtml(b.labels)}</td><td>${escapeHtml(b.content_tags || "全部")}</td><td><code>${escapeHtml(b.remote_root)}</code></td><td><button type="button" class="btn btn-danger btn-sm" data-del-push-binding="${b.id}">删除</button></td></tr>`).join("");
-  box.innerHTML = `<table class="data-table"><thead><tr><th>服务器 ID</th><th>发布标签</th><th>内容标签</th><th>远端根目录</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
-  box.querySelectorAll("[data-del-push-binding]").forEach((btn) => btn.onclick = async () => { await api(`/api/push/hosts/${selectedPushHostID}/servers/${btn.dataset.delPushBinding}`, { method: "DELETE" }); pushBindings = await api(`/api/push/hosts/${selectedPushHostID}/servers`); renderPushBindings(); });
+  box.innerHTML = pushBindings.length ? `<div class="binding-list-title">已绑定目标</div>${pushBindings.map((b) => `<article class="binding-card"><div class="binding-card-head"><code class="target-tag">${escapeHtml(b.target_tag || `${b.project_name || "未归属"}|${b.server_id}`)}</code><span><button type="button" class="btn btn-ghost btn-sm" data-edit-push-binding="${b.id}">编辑</button><button type="button" class="btn btn-danger btn-sm" data-del-push-binding="${b.id}">删除</button></span></div><label>远程根目录<code>${escapeHtml(b.remote_root)}</code></label><label>发布标签<span>${escapeHtml(b.labels)}</span></label><label>内容标签<span>${escapeHtml(b.content_tags || "全部")}</span></label></article>`).join("")}` : '<div class="agent-empty">尚未绑定项目目标</div>';
+  box.querySelectorAll("[data-del-push-binding]").forEach((btn) => btn.onclick = async () => {
+    await api(`/api/push/hosts/${selectedPushHostID}/servers/${btn.dataset.delPushBinding}`, { method: "DELETE" });
+    pushBindings = await api(`/api/push/hosts/${selectedPushHostID}/servers`);
+    const selectedHost = pushHosts.find((host) => host.id === selectedPushHostID);
+    if (selectedHost) selectedHost.bindings = pushBindings;
+    renderPushBindings();
+    renderPushHosts();
+  });
+  box.querySelectorAll("[data-edit-push-binding]").forEach((btn) => btn.onclick = () => { const b = pushBindings.find((x) => x.id === Number(btn.dataset.editPushBinding)); if (!b) return; editingPushBindingID = b.id; document.getElementById("pushBindingProject").value = b.project_name || ""; document.getElementById("pushBindingServerID").value = b.server_id; document.getElementById("pushBindingLabels").value = b.labels; document.getElementById("pushBindingContentTags").value = b.content_tags || ""; document.getElementById("pushBindingRoot").value = b.remote_root; updatePushBindingTargetTag(); });
 }
 
 async function loadPushLogs() {
@@ -1158,10 +1645,11 @@ async function loadPushLogs() {
   const box = document.getElementById("pushLogList");
   if (!box) return;
   const deployments = await api(`/api/projects/${state.projectId}/push-deployments`);
-  box.innerHTML = `<table class="data-table"><thead><tr><th>时间</th><th>任务快照</th><th>版本</th><th>筛选</th><th>状态</th><th>服务器日志</th></tr></thead><tbody>${deployments.map((d) => { const selector = parsePushSelector(d.selector); return `<tr><td>${escapeHtml(d.created_at)}</td><td><strong>${escapeHtml(d.task_name || "临时发布")}</strong><small>${d.task_id ? `任务 #${d.task_id}` : `执行 #${d.id}`}</small></td><td><code>${escapeHtml(d.version)}</code></td><td><small>server_id：${escapeHtml((selector.server_ids || []).join(", ") || "全部")}</small><small>标签：${escapeHtml((selector.tags || []).join(", ") || "test")}</small></td><td><span class="badge badge-${d.status === "success" ? "ok" : d.status === "failed" ? "warn" : "draft"}">${escapeHtml(d.status)}</span></td><td><button type="button" class="btn btn-ghost btn-sm" data-push-log="${d.id}">查看逐服输出</button></td></tr>`; }).join("")}</tbody></table>`;
+  const statusLabel = { queued: "等待串行执行", running: "发布中", success: "成功", failed: "失败" };
+  box.innerHTML = `<table class="data-table"><thead><tr><th>时间</th><th>任务快照</th><th>版本</th><th>筛选</th><th>状态</th><th>服务器日志</th></tr></thead><tbody>${deployments.map((d) => { const selector = parsePushSelector(d.selector); return `<tr><td>${escapeHtml(d.created_at)}</td><td><strong>${escapeHtml(d.task_name || "临时发布")}</strong><small>${d.task_id ? `任务 #${d.task_id}` : `执行 #${d.id}`}</small>${d.idempotency_key ? `<small>请求 ${escapeHtml(d.idempotency_key.slice(-12))}</small>` : ""}</td><td><code>${escapeHtml(d.version)}</code></td><td><small>server_id：${escapeHtml((selector.server_ids || []).join(", ") || "全部")}</small><small>标签：${escapeHtml((selector.tags || []).join(", ") || "test")}</small></td><td><span class="badge badge-${d.status === "success" ? "ok" : d.status === "failed" ? "warn" : "draft"}">${escapeHtml(statusLabel[d.status] || d.status)}</span></td><td><button type="button" class="btn btn-ghost btn-sm" data-push-log="${d.id}">查看逐服输出</button></td></tr>`; }).join("")}</tbody></table>`;
   box.querySelectorAll("[data-push-log]").forEach((btn) => btn.onclick = async () => { const d = await api(`/api/projects/${state.projectId}/push-deployments/${btn.dataset.pushLog}`); const lines = (d.targets || []).map((t) => `# ${t.host_name} / ${t.server_id} [${t.status}]\n${t.output || "等待执行"}`).join("\n\n"); showModal({ title: `${d.task_name || "临时发布"} · 执行 #${d.id}`, message: lines || "没有目标", confirmText: "关闭", cancelText: "关闭", mode: "confirm" }); });
   if (pushLogRefreshTimer) window.clearTimeout(pushLogRefreshTimer);
-  if (state.projectTab === "pushlogs" && deployments.some((item) => item.status === "queued" || item.status === "running")) {
+  if (state.globalView === "release" && deployments.some((item) => item.status === "queued" || item.status === "running")) {
     pushLogRefreshTimer = window.setTimeout(loadPushLogs, 3000);
   }
 }
@@ -1646,6 +2134,11 @@ let renderedPreviewIndex = 0;
 
 document.getElementById("verPreviewServerId")?.addEventListener("input", () => {
   const previewSid = document.getElementById("verPreviewServerId")?.value.trim() || "";
+  state.selectedServerID = previewSid || null;
+  state.previewConfirmed = false;
+  const confirmButton = document.getElementById("btnConfirmPreview");
+  if (confirmButton) confirmButton.disabled = true;
+  updateWorkflowUI();
   const deploySid = document.getElementById("deployServerId");
   if (deploySid && !deploySid.value.trim()) deploySid.value = previewSid;
   generateDeployScript();
@@ -1663,6 +2156,8 @@ async function runDeployPreviewAuto() {
   try {
     const d = await fetchDeployPreview(state.projectName, state.version, sid);
     renderPreviewReport(d, document.getElementById("verPreviewTable"));
+    const confirmButton = document.getElementById("btnConfirmPreview");
+    if (confirmButton) confirmButton.disabled = false;
   } catch (_) {}
 }
 
@@ -1891,10 +2386,30 @@ document.getElementById("btnVerPreview").onclick = async () => {
   try {
     const d = await fetchDeployPreview(state.projectName, state.version, sid);
     renderPreviewReport(d, document.getElementById("verPreviewTable"));
+    state.selectedServerID = sid;
+    state.previewConfirmed = false;
+    document.getElementById("btnConfirmPreview").disabled = false;
+    updateWorkflowUI();
   } catch (e) {
     showToast(e.message, "error");
   }
 };
+
+document.getElementById("btnConfirmPreview")?.addEventListener("click", () => {
+  state.previewConfirmed = true;
+  updateWorkflowUI();
+  navigateProjectTab("publish");
+  showToast("合成预览已确认");
+});
+
+document.getElementById("btnFlowValidate")?.addEventListener("click", () => {
+  if (!state.version) return navigateProjectTab("versions");
+  document.getElementById("btnValidate")?.click();
+});
+
+document.getElementById("btnFlowPublish")?.addEventListener("click", () => {
+  document.getElementById("btnPublish")?.click();
+});
 
 function tryAutoPreviewOnVersionSelect() {
   const sid = document.getElementById("verPreviewServerId")?.value.trim();
@@ -1912,6 +2427,10 @@ document.getElementById("btnDelProject").onclick = async () => {
 document.getElementById("btnAddProject").onclick = async () => {
   const name = document.getElementById("newProject").value.trim();
   if (!name) return;
+  if (name.includes("|")) {
+    showToast("项目名称不能包含 |，该字符用于 project|serverId 目标标签", "warn");
+    return;
+  }
   await api("/api/projects", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1924,6 +2443,9 @@ document.getElementById("btnAddProject").onclick = async () => {
 document.getElementById("btnAddVersion").onclick = async () => {
   const name = document.getElementById("newVersion").value.trim();
   if (!name || !state.projectId) return;
+  if (!/^\d+\.\d+\.\d+$/.test(name)) {
+    showToast("正式版本推荐使用 X.Y.Z（例如 0.0.1）；server_id 差异写 server.yaml", "warn");
+  }
   await api(`/api/projects/${state.projectId}/versions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -2130,11 +2652,15 @@ document.getElementById("btnApplyFileTags")?.addEventListener("click", async () 
 });
 
 document.getElementById("fileInput").onchange = async (e) => {
+  const uploadActions = [document.getElementById("btnValidate"), document.getElementById("btnPublish")].filter(Boolean);
+  const previousDisabled = uploadActions.map((button) => button.disabled);
+  uploadActions.forEach((button) => { button.disabled = true; });
   try {
     await uploadFiles(e.target.files);
   } catch (err) {
     showToast(err.message, "error");
   } finally {
+    uploadActions.forEach((button, index) => { button.disabled = previousDisabled[index]; });
     // Selecting the same local file for another version must fire change again.
     // File inputs cannot be assigned programmatically except to clear them.
     e.target.value = "";
@@ -2244,6 +2770,69 @@ async function loadAuditLogs() {
 }
 
 document.getElementById("btnReloadAudit")?.addEventListener("click", loadAuditLogs);
+
+function formatLoginAttemptTimes(times) {
+  if (!Array.isArray(times) || times.length === 0) return "-";
+  return times.map((time) => `<small>${escapeHtml(time)}</small>`).join("");
+}
+
+async function loadLoginProtection() {
+  if (!state.isAdmin) return;
+  try {
+    const [settings, attacks] = await Promise.all([
+      api("/api/security/login-protection"),
+      api("/api/security/login-ip-bans"),
+    ]);
+    const enabled = document.getElementById("loginProtectionEnabled");
+    if (enabled) enabled.checked = !!settings.enabled;
+    const summary = document.getElementById("loginProtectionSummary");
+    if (summary) summary.textContent = settings.enabled
+      ? `已启用：同一 IP 连续失败 ${settings.failure_limit} 次后暂停 ${settings.ban_seconds} 秒。`
+      : "仅记录失败来源，不阻止登录。";
+    const tbody = document.querySelector("#loginAttackTable tbody");
+    if (!tbody) return;
+    tbody.innerHTML = (attacks || []).map((attack) => {
+      const active = attack.banned_until && Date.parse(attack.banned_until) > Date.now();
+      return `<tr>
+        <td><code>${escapeHtml(attack.ip)}</code></td>
+        <td>${escapeHtml(attack.username || "-")}</td>
+        <td>${Number(attack.attempt_count || 0)}</td>
+        <td>${Number(attack.failures || 0)}</td>
+        <td>${active ? `<span class="badge badge-warn">暂停至 ${escapeHtml(attack.banned_until)}</span>` : "记录中"}</td>
+        <td>${formatLoginAttemptTimes(attack.last_attempt_times)}</td>
+        <td><button type="button" class="btn btn-ghost btn-sm" data-login-ip="${escapeAttr(attack.ip)}">清除</button></td>
+      </tr>`;
+    }).join("") || "<tr><td colspan=\"7\" class=\"empty\">暂无失败来源</td></tr>";
+    tbody.querySelectorAll("[data-login-ip]").forEach((button) => {
+      button.onclick = async () => {
+        const ip = button.dataset.loginIp;
+        if (!(await showConfirm({ title: "清除登录记录", message: `清除 ${ip} 的登录失败记录？`, confirmText: "清除", danger: true }))) return;
+        await api(`/api/security/login-ip-bans/${encodeURIComponent(ip)}`, { method: "DELETE" });
+        loadLoginProtection();
+      };
+    });
+  } catch (error) {
+    showToast(error.message, "error");
+  }
+}
+
+document.getElementById("loginProtectionEnabled")?.addEventListener("change", async (event) => {
+  const enabled = event.target;
+  try {
+    const settings = await api("/api/security/login-protection", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: enabled.checked }),
+    });
+    enabled.checked = !!settings.enabled;
+    await loadLoginProtection();
+  } catch (error) {
+    enabled.checked = !enabled.checked;
+    showToast(error.message, "error");
+  }
+});
+
+document.getElementById("btnReloadLoginProtection")?.addEventListener("click", loadLoginProtection);
 
 async function loadSystemUpdateStatus() {
   if (!state.isRoot) return;
@@ -2752,6 +3341,8 @@ document.getElementById("btnDemoProject")?.addEventListener("click", async () =>
 
 document.getElementById("btnStartOnboarding")?.addEventListener("click", () => startOnboarding({ force: true }));
 document.getElementById("btnEmptyStartOnboarding")?.addEventListener("click", () => startOnboarding({ force: true }));
+document.getElementById("btnSettingsStartOnboarding")?.addEventListener("click", () => startOnboarding({ force: true }));
+document.getElementById("btnSettingsDemoProject")?.addEventListener("click", () => document.getElementById("btnDemoProject")?.click());
 
 document.getElementById("btnCreateInvite")?.addEventListener("click", async () => {
   if (!state.projectId) return;

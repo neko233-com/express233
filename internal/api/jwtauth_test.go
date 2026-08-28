@@ -11,7 +11,7 @@ import (
 
 func TestJWTSignVerify(t *testing.T) {
 	j := newJWTAuth()
-	sess := session{UserID: 1, Username: "root", IsAdmin: true, TenantID: 1, TenantSlug: "default"}
+	sess := session{UserID: 1, Username: "root", IsAdmin: true, AuthVersion: 1, TenantID: 1, TenantSlug: "default"}
 	tok, err := j.sign(sess, time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -29,11 +29,36 @@ func TestJWTBearerAuth(t *testing.T) {
 	}
 	defer st.Close()
 	srv := New(st)
-	tok, _ := srv.jwt.sign(session{UserID: 1, Username: "root", IsAdmin: true, TenantID: 1, TenantSlug: "default"}, time.Hour)
+	tok, _ := srv.jwt.sign(session{UserID: 1, Username: "root", IsAdmin: true, AuthVersion: 1, TenantID: 1, TenantSlug: "default"}, time.Hour)
 	r, _ := http.NewRequest(http.MethodGet, "/api/me", nil)
 	r.Header.Set("Authorization", "Bearer "+tok)
 	if _, ok := srv.currentSession(r); !ok {
 		t.Fatal("expected bearer session")
+	}
+}
+
+func TestPasswordChangeRevokesJWT(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	srv := New(st)
+	tok, err := srv.jwt.sign(session{UserID: 1, Username: "root", IsAdmin: true, AuthVersion: 1, TenantID: 1, TenantSlug: "default"}, persistentSessionTTL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodGet, "/api/me", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	if _, ok := srv.currentSession(req); !ok {
+		t.Fatal("expected JWT before password change")
+	}
+	if err := st.UpdateUserPassword(1, "new-password"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := srv.currentSession(req); ok {
+		t.Fatal("JWT must be revoked after password change")
 	}
 }
 

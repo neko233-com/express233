@@ -67,10 +67,9 @@ func (s *Server) handleDeliveryNodeHeartbeat(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		metrics.agentHeartbeatErrors.Add(1)
 		if token != "" {
-			// An agent has no interactive CAPTCHA flow. Reuse the account/IP
-			// throttling store so a leaked or guessed pull token cannot be tried
-			// indefinitely against this otherwise public endpoint.
-			banned, retry, remaining := s.recordLoginFailure(r, "agent-token")
+			// Pull agents have no interactive user. Their credential protection is
+			// intentionally independent from the interactive-login observation switch.
+			banned, retry, remaining := s.recordAgentTokenFailure(r)
 			if banned {
 				w.Header().Set("Retry-After", strconv.Itoa(max(1, int(retry.Seconds()))))
 				errJSON(w, http.StatusTooManyRequests, "too many invalid agent credential attempts; try again later")
@@ -155,7 +154,7 @@ func (s *Server) handleListDeliveryNodes(w http.ResponseWriter, r *http.Request)
 		errJSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	bindings, err := s.Store.ListPushBindingsForSelector(pc.TenantID, nil, nil, true)
+	bindings, err := s.Store.ListPushBindingsForSelector(pc.TenantID, pc.ProjectName, nil, nil, true)
 	if err != nil {
 		errJSON(w, http.StatusInternalServerError, err.Error())
 		return

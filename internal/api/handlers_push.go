@@ -25,6 +25,7 @@ type pushHostRequest struct {
 	HealthCheckIntervalSeconds int    `json:"health_check_interval_seconds"`
 }
 type pushBindingRequest struct {
+	ProjectName string `json:"project_name"`
 	ServerID    string `json:"server_id"`
 	Labels      string `json:"labels"`
 	ContentTags string `json:"content_tags"`
@@ -33,11 +34,12 @@ type pushBindingRequest struct {
 	Arch        string `json:"arch"`
 }
 type createPushDeploymentRequest struct {
-	Version   string   `json:"version"`
-	ServerIDs []string `json:"server_ids"`
-	Tags      []string `json:"tags"`
-	TagMatch  string   `json:"tag_match"`
-	DryRun    bool     `json:"dry_run"`
+	Version        string   `json:"version"`
+	ServerIDs      []string `json:"server_ids"`
+	Tags           []string `json:"tags"`
+	TagMatch       string   `json:"tag_match"`
+	DryRun         bool     `json:"dry_run"`
+	IdempotencyKey string   `json:"idempotency_key,omitempty"`
 }
 
 func (s *Server) pushCipher() (*pushCredentialCipher, error) { return newPushCredentialCipher() }
@@ -186,7 +188,7 @@ func (s *Server) handleCreatePushBinding(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	tid, _ := s.tenantFromSession(r)
-	item, err := s.Store.CreatePushServerBinding(store.PushServerBinding{TenantID: tid, HostID: pushHostID(r), ServerID: req.ServerID, Labels: req.Labels, ContentTags: req.ContentTags, RemoteRoot: req.RemoteRoot, OS: req.OS, Arch: req.Arch})
+	item, err := s.Store.CreatePushServerBinding(store.PushServerBinding{TenantID: tid, HostID: pushHostID(r), ProjectName: req.ProjectName, ServerID: req.ServerID, Labels: req.Labels, ContentTags: req.ContentTags, RemoteRoot: req.RemoteRoot, OS: req.OS, Arch: req.Arch})
 	if err != nil {
 		errJSON(w, 400, err.Error())
 		return
@@ -205,7 +207,7 @@ func (s *Server) handleUpdatePushBinding(w http.ResponseWriter, r *http.Request)
 	}
 	tid, _ := s.tenantFromSession(r)
 	id, _ := strconv.ParseInt(chi.URLParam(r, "bindingID"), 10, 64)
-	if err := s.Store.UpdatePushServerBinding(store.PushServerBinding{ID: id, TenantID: tid, HostID: pushHostID(r), ServerID: req.ServerID, Labels: req.Labels, ContentTags: req.ContentTags, RemoteRoot: req.RemoteRoot, OS: req.OS, Arch: req.Arch}); err != nil {
+	if err := s.Store.UpdatePushServerBinding(store.PushServerBinding{ID: id, TenantID: tid, HostID: pushHostID(r), ProjectName: req.ProjectName, ServerID: req.ServerID, Labels: req.Labels, ContentTags: req.ContentTags, RemoteRoot: req.RemoteRoot, OS: req.OS, Arch: req.Arch}); err != nil {
 		errJSON(w, 400, err.Error())
 		return
 	}
@@ -233,12 +235,46 @@ func (s *Server) handleCreatePushDeployment(w http.ResponseWriter, r *http.Reque
 		errJSON(w, 400, "invalid body")
 		return
 	}
+	if err := applyDeploymentIdempotencyKey(r, &req.IdempotencyKey); err != nil {
+		errJSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	deployment, err := s.createPushDeployment(r, pc, req, 0, "")
 	if err != nil {
 		errJSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, deployment)
+	status := http.StatusCreated
+	if deployment.Replayed {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, deployment)
+}
+
+func applyDeploymentIdempotencyKey(r *http.Request, destination *string) error {
+	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	bodyKey := strings.TrimSpace(*destination)
+	if key != "" && bodyKey != "" && key != bodyKey {
+		return fmt.Errorf("Idempotency-Key header and body must match")
+	}
+	if key == "" {
+		key = bodyKey
+	}
+	if key == "" {
+		*destination = ""
+		return nil
+	}
+	if len(key) < 8 || len(key) > 128 {
+		return fmt.Errorf("idempotency key must be 8-128 characters")
+	}
+	for _, character := range key {
+		if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9') || strings.ContainsRune("-_.:", character) {
+			continue
+		}
+		return fmt.Errorf("idempotency key contains invalid characters")
+	}
+	*destination = key
+	return nil
 }
 
 func (s *Server) createPushDeployment(r *http.Request, pc projectCtx, req createPushDeploymentRequest, taskID int64, taskName string) (*store.PushDeployment, error) {
@@ -263,17 +299,20 @@ func (s *Server) createPushDeployment(r *http.Request, pc projectCtx, req create
 	if err != nil || v.Status != "published" {
 		return nil, fmt.Errorf("version must be published")
 	}
-	targets, err := s.Store.ListPushBindingsForSelector(pc.TenantID, req.ServerIDs, req.Tags, req.TagMatch == "all")
+	targets, err := s.Store.ListPushBindingsForSelector(pc.TenantID, pc.ProjectName, req.ServerIDs, req.Tags, req.TagMatch == "all")
 	if err != nil {
 		return nil, err
 	}
 	selector, _ := json.Marshal(req)
 	sess, _ := s.currentSession(r)
-	d, err := s.Store.CreatePushDeployment(store.PushDeployment{TenantID: pc.TenantID, ProjectID: pid, TaskID: taskID, TaskName: taskName, Version: req.Version, RequestedBy: sess.Username, Selector: string(selector)}, targets)
+	d, err := s.Store.CreatePushDeployment(store.PushDeployment{TenantID: pc.TenantID, ProjectID: pid, TaskID: taskID, TaskName: taskName, IdempotencyKey: req.IdempotencyKey, Version: req.Version, RequestedBy: sess.Username, Selector: string(selector)}, targets)
 	if err != nil {
 		return nil, err
 	}
-	s.auditSession(r, "push.deploy.create", fmt.Sprintf("project_id=%d task_id=%d task=%s version=%s targets=%d dry_run=%t", pid, taskID, taskName, req.Version, len(targets), req.DryRun))
+	s.auditSession(r, "push.deploy.create", fmt.Sprintf("project_id=%d task_id=%d task=%s version=%s targets=%d dry_run=%t replay=%t", pid, taskID, taskName, req.Version, len(targets), req.DryRun, d.Replayed))
+	if d.Replayed {
+		return d, nil
+	}
 	if req.DryRun {
 		s.completePushDryRun(d.ID)
 		d.Status = "success"
@@ -367,7 +406,7 @@ func (s *Server) runPushDeployment(id, tenantID int64, projectName string) {
 			_ = s.Store.MarkPushTarget(target.ID, "failed", err.Error())
 			continue
 		}
-		output, err := s.pushExecutor.Deploy(withPushCommand(withAPIStore(context.Background(), s.Store), pushCommand{CentralURL: centralURL, Project: projectName, Version: d.Version, ServerID: binding.ServerID, PullToken: user.Token}), *host, *binding, d.Version, nil)
+		output, err := s.pushExecutor.Deploy(withPushCommand(withAPIStore(context.Background(), s.Store), pushCommand{CentralURL: centralURL, Project: projectName, Version: d.Version, ServerID: binding.ServerID, PullToken: user.Token, DeploymentID: strconv.FormatInt(d.ID, 10), IdempotencyKey: d.IdempotencyKey, TargetTag: pushTargetTag(projectName, binding.ServerID)}), *host, *binding, d.Version, nil)
 		status := "success"
 		if err != nil {
 			status = "failed"
@@ -376,6 +415,9 @@ func (s *Server) runPushDeployment(id, tenantID int64, projectName string) {
 		_ = s.Store.MarkPushTarget(target.ID, status, output)
 	}
 	_ = s.Store.CompletePushDeployment(id)
+}
+func pushTargetTag(projectName, serverID string) string {
+	return strings.TrimSpace(projectName) + "|" + strings.TrimSpace(serverID)
 }
 func splitCSV(v string) []string {
 	var out []string

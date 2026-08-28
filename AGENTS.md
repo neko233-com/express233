@@ -146,7 +146,7 @@
 远程 SSH 服务器上**不能直接覆盖运行中的二进制**。正确流程：
 
 1. **Pull 到临时目录** `GAME_ROOT/.tmp/{server_id}/`（不影响正在运行的服务）
-2. **Stop 旧服务** 读取 `run/server.pid`，校验 PID 仍属于目标实例后发送 SIGTERM；超时必须终止发布，SIGKILL 仅允许人工明确授权的应急操作
+2. **Stop 旧服务** 读取 `run/server.pid`，校验 PID 仍属于目标实例后发送 SIGTERM，等待玩家数据与 MySQL Flush 完成并由进程自行退出；默认超时 180 秒，超时中止发布且不换包，SIGKILL 仅允许人工明确授权的应急操作
 3. **Swap 文件** rsync --exclude logs/ --exclude run/（保留日志和 PID）
 4. **Start 新服务** 执行 `scripts/restart.sh`
 
@@ -165,6 +165,7 @@
 ### 设计约束（改动时必须考虑）
 
 - `logs/` 和 `run/` 在部署替换时**不被删除**
+- 正常发布默认禁止 SIGKILL；仅人工明确授权的应急操作可启用强杀
 - 批量部署默认**串行**，避免同时停多个服
 - 部署脚本**幂等**，重复执行安全
 - 已发布版本可删除节省磁盘，丢失后重新 pull 同步

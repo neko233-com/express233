@@ -38,6 +38,7 @@ export type DashboardRecord = {
 };
 export type DashboardHealth = { pull_nodes: number; pull_online: number; pull_drift: number; ssh_hosts: number; ssh_healthy: number; ssh_failing: number; ssh_unknown: number; hooks_enabled: number; hooks_pending: number; hook_failures: number; latest_event_at?: string };
 export type DashboardSnapshot = { generated_at: string; days: number; summary: DashboardSummary; health: DashboardHealth; series: DashboardDay[]; recent: DashboardRecord[] };
+export type LoginAttack = { ip: string; username: string; failures: number; attempt_count: number; ban_count: number; banned_until?: string; last_failure: string; last_attempt_times: string[] };
 
 const tokenKey = "express233_jwt";
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {

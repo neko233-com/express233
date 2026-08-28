@@ -88,6 +88,8 @@ func (s *Server) Router() http.Handler {
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireAdmin)
 				r.Get("/audit-logs", s.handleListAuditLogs)
+				r.Get("/security/login-protection", s.handleGetLoginProtection)
+				r.Put("/security/login-protection", s.handlePutLoginProtection)
 				r.Get("/security/login-ip-bans", s.handleListLoginIPBans)
 				r.Delete("/security/login-ip-bans/{ip}", s.handleDeleteLoginIPBan)
 				r.Get("/tenants", s.handleListTenants)
@@ -141,6 +143,7 @@ func (s *Server) Router() http.Handler {
 				r.Post("/invites", s.handleCreateProjectInvite)
 				r.Get("/invites", s.handleListProjectInvites)
 				r.Delete("/members/{uid}", s.handleRemoveProjectMember)
+				r.Put("/version-retention", s.handlePutProjectVersionRetention)
 				r.Post("/versions", s.handleCreateVersion)
 				r.Post("/versions/{ver}/submit-review", s.handleSubmitReview)
 				r.Post("/versions/{ver}/publish", s.handlePublishVersion)
