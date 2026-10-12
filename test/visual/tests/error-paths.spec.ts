@@ -1,5 +1,8 @@
 import { test, expect } from "@playwright/test";
+import path from "path";
 import { loginAsRoot } from "./helpers";
+
+const fixture = path.join(__dirname, "../../../testdata/validation-tree/version/deploy/game.properties");
 
 // ─── helpers ───────────────────────────────────────────
 async function login(page) {
@@ -128,7 +131,6 @@ test.describe("拉取预览 — 正常流程", () => {
 
   test("已注册 server_id 预览成功显示替换结果", async ({ page }) => {
     // 上传 fixture 文件
-    const fixture = "D:\\Code\\neko233-Projects\\express233\\testdata\\validation-tree\\version\\deploy\\game.properties";
     await page.getByTestId("file-input").setInputFiles(fixture);
     await expect(page.getByTestId("file-list")).toContainText("game.properties", { timeout: 15_000 });
 
@@ -153,7 +155,6 @@ test.describe("发布前检查与发布", () => {
   });
 
   test("发布前检查通过才能发布", async ({ page }) => {
-    const fixture = "D:\\Code\\neko233-Projects\\express233\\testdata\\validation-tree\\version\\deploy\\game.properties";
     await page.getByTestId("file-input").setInputFiles(fixture);
     await expect(page.getByTestId("file-list")).toContainText("game.properties", { timeout: 15_000 });
 
@@ -162,7 +163,6 @@ test.describe("发布前检查与发布", () => {
   });
 
   test("发布后状态变为 published 且出现下载按钮", async ({ page }) => {
-    const fixture = "D:\\Code\\neko233-Projects\\express233\\testdata\\validation-tree\\version\\deploy\\game.properties";
     await page.getByTestId("file-input").setInputFiles(fixture);
     await expect(page.getByTestId("file-list")).toContainText("game.properties", { timeout: 15_000 });
 
