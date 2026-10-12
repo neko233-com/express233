@@ -2882,6 +2882,8 @@ document.getElementById("btnAddVersion").onclick = async () => {
   if (!/^\d+\.\d+\.\d+$/.test(name)) {
     showToast("正式版本推荐使用 X.Y.Z（例如 0.0.1）；server_id 差异写 server.yaml", "warn");
   }
+  state.versionFilter = "";
+  document.getElementById("versionSearch").value = "";
   button.disabled = true;
   try {
     await api(`/api/projects/${project.id}/versions`, {
@@ -2891,8 +2893,6 @@ document.getElementById("btnAddVersion").onclick = async () => {
     });
     if (state.projectId === project.id) {
       if (input.value.trim() === name) input.value = "";
-      state.versionFilter = "";
-      document.getElementById("versionSearch").value = "";
       await selectProject(project, { preferredVersion: name });
       navigateProjectTab("versions");
     }
