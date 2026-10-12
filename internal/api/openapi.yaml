@@ -773,6 +773,7 @@ paths:
                 server_ids: { type: array, items: { type: string } }
                 tags: { type: array, items: { type: string } }
                 tag_match: { type: string, enum: [all, any], default: all }
+                all_project_targets: { type: boolean, default: false, description: 为 true 时忽略标签并部署当前项目全部绑定目标；不能同时传 server_ids 或 tags }
                 dry_run: { type: boolean, default: false }
                 idempotency_key: { type: string, minLength: 8, maxLength: 128 }
       responses:
@@ -1235,8 +1236,9 @@ components:
             host_name: { type: string }
     PushServerBindingRequest:
       type: object
-      required: [server_id, remote_root]
+      required: [project_name, server_id, remote_root]
       properties:
+        project_name: { type: string, description: "Owning Express233 project; unscoped bindings are not deployable" }
         server_id: { type: string }
         labels: { type: string, default: test }
         content_tags: { type: string }
@@ -1250,7 +1252,7 @@ components:
       properties:
         name: { type: string, maxLength: 100 }
         version: { type: string, description: 为空表示每次执行时取最新已发布版本 }
-        server_ids: { type: array, items: { type: string } }
+        server_ids: { type: array, items: { type: string }, description: 为空表示执行时跟随当前项目的全部匹配目标 }
         tags: { type: array, items: { type: string }, default: [test] }
         tag_match: { type: string, enum: [all, any], default: all }
     PushDeploymentTask:
@@ -1483,6 +1485,7 @@ components:
         drift: { type: boolean }
         host_id: { type: integer, format: int64 }
         host_name: { type: string }
+        skip_backup: { type: boolean, description: Push 目标不保留旧发布目录 }
     Version:
       type: object
       properties:

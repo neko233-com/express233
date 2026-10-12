@@ -27,13 +27,20 @@ fi
 
 REQUIRED=(
   "golangci-lint"
+  "test (ubuntu-latest)"
+  "test (windows-latest)"
+  "test (macos-latest)"
   "build binaries"
+  "validate scripts"
 )
 
-mapfile -t rows < <(
-  gh api "/repos/${REPO}/commits/${SHA}/check-runs?per_page=100" \
+if ! check_rows=$(gh api "/repos/${REPO}/commits/${SHA}/check-runs?filter=latest&per_page=100" --paginate \
     --jq '.check_runs[] | [.name, .status, .conclusion] | @tsv'
-)
+); then
+  echo "Release blocked: could not read GitHub Checks for the target commit." >&2
+  exit 1
+fi
+mapfile -t rows <<<"$check_rows"
 
 missing=0
 failed=0

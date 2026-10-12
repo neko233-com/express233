@@ -105,3 +105,17 @@ func TestDisabledReleaseHookCancelsPendingAndProtectsTask(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestReleaseHookRejectsTaskFromAnotherProject(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	projectA, _ := st.CreateProject(1, 1, "hook-project-a")
+	projectB, _ := st.CreateProject(1, 1, "hook-project-b")
+	taskB, _ := st.CreatePushDeploymentTask(PushDeploymentTask{TenantID: 1, ProjectID: projectB.ID, Name: "project-b-task"})
+	if _, err := st.CreateReleaseHook(ReleaseHook{TenantID: 1, ProjectID: projectA.ID, TaskID: taskB.ID, Name: "wrong-project-hook", Enabled: true}); err == nil {
+		t.Fatal("cross-project release task was accepted by hook")
+	}
+}

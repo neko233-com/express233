@@ -5,9 +5,6 @@
 .playwright-cli/
 .tmp-*/
 /dist/
-.react-visual-data/
-frontend/node_modules/
-frontend/*.tsbuildinfo
 test/visual/node_modules/
 test/visual/test-results/
 test/visual/playwright-report/

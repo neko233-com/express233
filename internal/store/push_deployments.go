@@ -567,7 +567,10 @@ func (s *Store) ListPushBindingsForSelector(tenantID int64, projectName string, 
 		if err := rows.Scan(&b.ID, &b.TenantID, &b.HostID, &b.HostName, &b.ProjectName, &b.ServerID, &b.Labels, &b.ContentTags, &b.RemoteRoot, &b.SkipBackup, &b.OS, &b.Arch, &b.CreatedAt, &b.UpdatedAt); err != nil {
 			return nil, err
 		}
-		if b.ProjectName != "" && projectName != "" && b.ProjectName != projectName {
+		// Project deployments must never inherit legacy unscoped bindings. A task
+		// or hook belongs to one project, so its resolved targets must belong to
+		// that exact project as well.
+		if projectName != "" && b.ProjectName != projectName {
 			continue
 		}
 		if len(serverSet) > 0 && !serverSet[b.ServerID] {

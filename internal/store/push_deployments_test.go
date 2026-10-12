@@ -54,6 +54,28 @@ func TestPushBindingsAreScopedByProjectTargetTag(t *testing.T) {
 	}
 }
 
+func TestProjectSelectorRejectsUnscopedAndOtherProjectBindings(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	const tid int64 = 1
+	host, err := st.CreatePushHost(PushHost{TenantID: tid, Name: "project-scope", Address: "10.0.0.13", Username: "deploy", AuthMode: "agent"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, projectName := range []string{"", "game-a", "game-b"} {
+		if _, err := st.CreatePushServerBinding(PushServerBinding{TenantID: tid, HostID: host.ID, ProjectName: projectName, ServerID: "1001", Labels: "prod", RemoteRoot: "/opt/game"}); err != nil {
+			t.Fatalf("create project %q binding: %v", projectName, err)
+		}
+	}
+	targets, err := st.ListPushBindingsForSelector(tid, "game-a", nil, []string{"prod"}, true)
+	if err != nil || len(targets) != 1 || targets[0].ProjectName != "game-a" {
+		t.Fatalf("strict project selector: targets=%+v err=%v", targets, err)
+	}
+}
+
 func TestPushBindingPersistsSkipBackupPolicy(t *testing.T) {
 	st, err := Open(t.TempDir())
 	if err != nil {

@@ -31,7 +31,7 @@ test.describe("express233 控制台全流程", () => {
     await expect(page.getByTestId("preview-table")).toContainText("game.properties", { timeout: 10_000 });
     await expect(page.getByTestId("preview-rendered-body")).toContainText("9001", { timeout: 10_000 });
 
-    await page.getByRole("button", { name: "版本" }).click();
+    await page.getByRole("button", { name: "版本", exact: true }).click();
     await page.getByTestId("validate-version").click();
     const validate = page.getByTestId("validate-result");
     await expect(validate).toContainText("可以发布", { timeout: 10_000 });
@@ -76,6 +76,7 @@ test.describe("express233 控制台全流程", () => {
     await page.getByTestId("file-input").setInputFiles(fixture);
     await expect(page.getByTestId("file-list")).toContainText("linux-amd64", { timeout: 15_000 });
 
+    await page.locator("#versionAdvanced > summary").click();
     await page.getByTestId("tag-batch-paths").fill("game.properties");
     await page.getByTestId("tag-batch-tags").fill("linux");
     await page.getByTestId("tag-batch-mode").selectOption("add");

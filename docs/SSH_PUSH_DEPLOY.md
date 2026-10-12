@@ -13,7 +13,7 @@
 
 ## API
 
-管理员在全局 Agent / SSH 资源页使用 `/api/push/hosts` 创建、维护 SSH 目标，并通过 `/api/push/hosts/{hostID}/servers` 绑定一个或多个 `project|server_id`。项目发布页不再管理机器，而是通过 `/api/projects/{id}/push-tasks` 保存版本策略、`server_ids`、`tags` 与 `tag_match` (`all` 或 `any`)。调用 `/api/projects/{id}/push-tasks/{taskID}/run` 可重复预演或正式执行；每次执行都会将任务名称、实际版本和筛选条件快照到发布日志。客户端应为一次执行生成 `Idempotency-Key`：网络重试复用原键会返回原执行，用户主动再次发布则生成新键。
+管理员在全局“机器与目标”页使用 `/api/push/hosts` 创建、维护 SSH 目标，并通过 `/api/push/hosts/{hostID}/servers` 绑定一个或多个 `project|server_id`；`project_name` 必填，未归属项目的历史绑定不会参与任何项目发布。项目“部署”步骤默认调用 `/api/projects/{id}/push-deployments` 并设置 `all_project_targets=true`，直接部署该项目的最新已发布版本与全部当前绑定，不依赖旧任务或标签。只有固定版本、固定 `server_ids` 或标签策略才需要 `/api/projects/{id}/push-tasks` 高级任务。每次执行都会将实际版本和筛选条件快照到发布日志。客户端应为一次执行生成 `Idempotency-Key`：网络重试复用原键会返回原执行，用户主动再次发布则生成新键。
 
 远端同一内容指纹已经运行且健康时直接成功返回，不重启进程。默认优雅退出等待 180 秒，每 200ms 检查一次；超时会在换包前中止，不发送 SIGKILL。仅在明确设置 `EXPRESS233_FORCE_KILL_AFTER_TIMEOUT=1` 时允许强杀。
 
@@ -21,7 +21,7 @@
 
 ### 版本发布自动 Hook
 
-- 在项目“自动 Hook”页将一个 Hook 关联到可重复发布任务。Hook 可随时启停；停用会取消仍在等待窗口内的触发，不需要反复删除和重建。
+- 在项目“自动 Hook”页将一个 Hook 关联到同一项目的可重复发布任务。跨项目任务无法关联；目标也只从该项目绑定中解析。Hook 可随时启停；停用会取消仍在等待窗口内的触发，不需要反复删除和重建。
 - `POST /api/projects/{id}/versions/{ver}/publish` 成功后会自动触发所有已启用 Hook。发布接口是幂等的：CI 对已发布版本重试会作为新的 Hook 触发进入同一合并窗口。
 - 默认使用 30 秒尾随防抖。窗口内的新触发会刷新 `due_at` 并覆盖为最新触发版本；最终只创建一次 SSH 发布任务，批量目标仍按发布任务定义串行安全重启。
 - 等待队列存储在 SQLite，中央服务重启不会丢失。每次派发使用 `hook_event_id` 作为唯一幂等键；超过租约时间的 `running` 事件会恢复，并复用已经创建的发布记录。多个到期 Hook 全局串行执行，避免两个任务同时重启重叠节点。也可调用 `POST /api/projects/{id}/release-hooks/{hookID}/trigger` 手动或由 Gitea/GitHub CI 显式触发。
