@@ -31,10 +31,10 @@ func TestPublishedVersionQueuesAndCoalescesReleaseHook(t *testing.T) {
 		t.Fatal(err)
 	}
 	host, _ := st.CreatePushHost(store.PushHost{TenantID: 1, Name: "loopback-unreachable", Address: "127.0.0.1", Port: 1, Username: "nobody", AuthMode: "agent"}, "")
-	if _, err := st.CreatePushServerBinding(store.PushServerBinding{TenantID: 1, HostID: host.ID, ServerID: "fictional-21", Labels: "test", RemoteRoot: "/tmp/fictional-game"}); err != nil {
+	if _, err := st.CreatePushServerBinding(store.PushServerBinding{TenantID: 1, HostID: host.ID, ProjectName: project.Name, ServerID: "fictional-21", Labels: "test", RemoteRoot: "/tmp/fictional-game"}); err != nil {
 		t.Fatal(err)
 	}
-	task, _ := st.CreatePushDeploymentTask(store.PushDeploymentTask{TenantID: 1, ProjectID: project.ID, Name: "fictional-auto-release", ServerIDs: []string{"fictional-21"}, Tags: []string{"test"}, CreatedBy: "root"})
+	task, _ := st.CreatePushDeploymentTask(store.PushDeploymentTask{TenantID: 1, ProjectID: project.ID, Name: "fictional-auto-release", Tags: []string{"test"}, CreatedBy: "root"})
 	hook, err := st.CreateReleaseHook(store.ReleaseHook{TenantID: 1, ProjectID: project.ID, TaskID: task.ID, Name: "gitea-upload-hook", Enabled: true, DebounceSeconds: 30, CreatedBy: "root"})
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +69,7 @@ func TestPublishedVersionQueuesAndCoalescesReleaseHook(t *testing.T) {
 	if deployments[0].HookEventID != events[0].ID {
 		t.Fatalf("deployment idempotency key=%d event=%d", deployments[0].HookEventID, events[0].ID)
 	}
-	targets, _ := st.ListPushBindingsForSelector(1, project.Name, []string{"fictional-21"}, []string{"test"}, true)
+	targets, _ := st.ListPushBindingsForSelector(1, project.Name, nil, []string{"test"}, true)
 	if _, err := st.CreatePushDeployment(store.PushDeployment{TenantID: 1, ProjectID: project.ID, TaskID: task.ID, TaskName: task.Name, HookEventID: events[0].ID, Version: "3.0.0", RequestedBy: "root", Selector: `{}`}, targets); err == nil {
 		t.Fatal("duplicate deployment accepted for the same hook event")
 	}

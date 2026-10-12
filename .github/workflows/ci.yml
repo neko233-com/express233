@@ -14,24 +14,65 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install Linux deployment test dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y rsync
+
+      - name: Run Go tests
+        run: go test ./... -count=1 -timeout=10m
+
+  scripts:
+    name: validate scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Bash syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' script; do
+            bash -n "$script"
+          done < <(git ls-files -z '*.sh')
+
+      - name: Validate PowerShell syntax
+        shell: pwsh
+        run: |
+          $failed = $false
+          git ls-files '*.ps1' | ForEach-Object {
+            $parseErrors = $null
+            $tokens = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Join-Path $PWD $_), [ref]$tokens, [ref]$parseErrors)
+            if ($parseErrors.Count -gt 0) {
+              $parseErrors | ForEach-Object { Write-Error $_ -ErrorAction Continue }
+              $failed = $true
+            }
+          }
+          if ($failed) { exit 1 }
+
   build:
     name: build binaries
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Build React console
-        working-directory: frontend
-        run: |
-          npm ci
-          npm run typecheck
-          npm run build
 
       - uses: actions/setup-go@v5
         with:

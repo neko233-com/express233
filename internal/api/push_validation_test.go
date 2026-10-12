@@ -42,3 +42,14 @@ func TestPushPublicURLRequiresTLS(t *testing.T) {
 		t.Fatalf("url=%q err=%v", got, err)
 	}
 }
+
+func TestPushBindingRequiresProjectOwnership(t *testing.T) {
+	valid := pushBindingRequest{ProjectName: "game-server", ServerID: "1001", RemoteRoot: "/srv/game", OS: "linux"}
+	if err := validatePushBindingRequest(valid); err != nil {
+		t.Fatalf("valid binding rejected: %v", err)
+	}
+	valid.ProjectName = ""
+	if err := validatePushBindingRequest(valid); err == nil {
+		t.Fatal("unscoped binding accepted")
+	}
+}

@@ -12,6 +12,8 @@ test("项目版本页可发现并保存已发布版本保留策略", async ({ pa
   const card = page.getByTestId("version-retention-card");
   await expect(card).toBeVisible();
   await expect(card).toContainText("版本保留策略");
+  await expect(card.locator("#versionRetentionLimited")).not.toBeVisible();
+  await card.locator("summary").click();
   await card.locator("#versionRetentionLimited").check();
   await card.locator("#versionRetentionCount").fill("3");
   await page.getByTestId("save-version-retention").click();

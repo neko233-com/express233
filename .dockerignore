@@ -5,9 +5,6 @@
 .visual-e2e-data
 output
 test
-frontend/node_modules
-frontend/dist
-internal/api/web/dist
 **/*.test
 **/*.exe
 **/*.zip

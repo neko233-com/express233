@@ -35,12 +35,13 @@ type pushBindingRequest struct {
 	Arch        string `json:"arch"`
 }
 type createPushDeploymentRequest struct {
-	Version        string   `json:"version"`
-	ServerIDs      []string `json:"server_ids"`
-	Tags           []string `json:"tags"`
-	TagMatch       string   `json:"tag_match"`
-	DryRun         bool     `json:"dry_run"`
-	IdempotencyKey string   `json:"idempotency_key,omitempty"`
+	Version           string   `json:"version"`
+	ServerIDs         []string `json:"server_ids"`
+	Tags              []string `json:"tags"`
+	TagMatch          string   `json:"tag_match"`
+	AllProjectTargets bool     `json:"all_project_targets,omitempty"`
+	DryRun            bool     `json:"dry_run"`
+	IdempotencyKey    string   `json:"idempotency_key,omitempty"`
 }
 
 func (s *Server) pushCipher() (*pushCredentialCipher, error) { return newPushCredentialCipher() }
@@ -287,7 +288,11 @@ func (s *Server) createPushDeployment(r *http.Request, pc projectCtx, req create
 	if req.TagMatch != "all" && req.TagMatch != "any" {
 		return nil, fmt.Errorf("tag_match must be all or any")
 	}
-	if len(req.Tags) == 0 {
+	if req.AllProjectTargets {
+		if len(req.ServerIDs) > 0 || len(req.Tags) > 0 {
+			return nil, fmt.Errorf("all_project_targets cannot be combined with server_ids or tags")
+		}
+	} else if len(req.Tags) == 0 {
 		req.Tags = []string{"test"}
 	}
 	if req.Version == "" {

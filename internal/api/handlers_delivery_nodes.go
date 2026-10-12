@@ -53,6 +53,7 @@ type deliveryNodeView struct {
 	Drift             bool     `json:"drift"`
 	HostID            int64    `json:"host_id,omitempty"`
 	HostName          string   `json:"host_name,omitempty"`
+	SkipBackup        bool     `json:"skip_backup,omitempty"`
 }
 
 func (s *Server) handleDeliveryNodeHeartbeat(w http.ResponseWriter, r *http.Request) {
@@ -201,7 +202,7 @@ func (s *Server) handleListDeliveryNodes(w http.ResponseWriter, r *http.Request)
 			ID: "push:" + strconv.FormatInt(binding.ID, 10), DeliveryMode: "push", ServerID: binding.ServerID,
 			Role: role, Environment: environment, Labels: labels, OS: binding.OS, Arch: binding.Arch,
 			CurrentVersion: current, Status: status, LastError: host.LastCheckError,
-			LastSeenAt: host.LastCheckAt, Online: status == "ok", HostID: host.ID, HostName: host.Name,
+			LastSeenAt: host.LastCheckAt, Online: status == "ok", HostID: host.ID, HostName: host.Name, SkipBackup: binding.SkipBackup,
 		})
 	}
 	writeJSON(w, http.StatusOK, views)

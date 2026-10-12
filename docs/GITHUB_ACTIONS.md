@@ -6,8 +6,9 @@
 
 - **触发**：`main` / `master` 的 push 与 PR
 - **内容**：
-  - `build binaries`：Ubuntu / Windows / macOS 构建 React 控制台与 CLI + Server，并上传平台二进制。
-  - 默认 CI 刻意不跑单测、冒烟或脚本检查，以缩短构建/发布反馈；完整 Docker 集成验证见 `docker-integration.yml`，由人工触发。
+  - `build binaries`：在 Ubuntu 交叉构建五个平台的 CLI + Server，控制台静态文件随 Go embed 打包。
+  - `test (ubuntu-latest)` / `test (windows-latest)` / `test (macos-latest)`：运行 Go 测试。
+  - `validate scripts`：校验已跟踪的 Bash 与 PowerShell 脚本语法。完整 Docker 集成验证见 `docker-integration.yml`，由人工触发。
 
 ### Lint (`lint.yml`)
 
@@ -54,7 +55,7 @@
 
 ## 发布 checklist
 
-1. 确保 `main` 上 **build binaries + Lint** 全部通过（Release 会二次校验）
+1. 确保目标 `main` 提交上 **三平台 test、build binaries、validate scripts、golangci-lint** 六项全部通过（Release 会二次校验）
 2. 可选：`bash scripts/require-green-checks.sh $(git rev-parse HEAD)`
 3. 打 tag：`git tag v0.1.0 && git push origin v0.1.0`
 4. 等待 Release workflow 完成，检查 Assets

@@ -57,11 +57,14 @@ let state = {
   pendingInviteToken: null,
   globalView: "workspace",
   projectTab: "versions",
-  releaseSection: "tasks",
   serverEntries: [],
   serverConfigFilter: "",
   selectedServerID: null,
   previewConfirmed: false,
+  validation: null,
+  validationBusy: false,
+  publishBusy: false,
+  uploadBusy: false,
 };
 
 let fileTree = null;
@@ -71,6 +74,11 @@ let filePreviewRequestID = 0;
 const navigationHistory = [];
 const recentUserTokens = new Map();
 let navigationRestoring = false;
+let previewRequestID = 0;
+let previewReadyKey = null;
+let contentRevision = 0;
+let serverConfigEditorID = null;
+let rememberedProjectScope = null;
 const collapsedFileTreeFolders = {
   version: new Set(),
   diff: new WeakMap(),
@@ -143,6 +151,14 @@ function showApp(username) {
   try {
   document.title = "express233 · 发布控制台";
   state.username = username;
+  const projectScope = `express233:project:${state.tenantSlug || "default"}:${username}`;
+  if (rememberedProjectScope !== projectScope) {
+    state.projectId = null;
+    state.version = null;
+    state.projectTab = "versions";
+    serverConfigEditorID = null;
+    rememberedProjectScope = projectScope;
+  }
   document.getElementById("login").classList.add("hidden");
   document.getElementById("app").classList.remove("hidden");
   const who = document.getElementById("who");
@@ -164,7 +180,6 @@ function showApp(username) {
   loadServerYaml();
   loadServerIDs();
   parseInviteHash();
-  scheduleOnboarding();
   } catch (showAppErr) {
     console.error("show app failed:", showAppErr);
     throw showAppErr;
@@ -175,26 +190,21 @@ function navigationSnapshot() {
   return {
     globalView: state.globalView,
     projectTab: state.projectTab,
-    releaseSection: state.releaseSection,
     projectId: state.projectId,
   };
 }
 
 function navigationKey(item) {
-  return [item.globalView, item.projectTab, item.releaseSection, item.projectId || ""].join(":");
+  return [item.globalView, item.projectTab, item.projectId || ""].join(":");
 }
 
 function navigationLabel(item) {
   const project = state.projects.find((entry) => entry.id === item.projectId)?.name || (item.projectId === state.projectId ? state.projectName : null);
   if (item.globalView === "workspace") {
-    const tabs = { versions: "Artifact 版本", config: "Server 配置", preview: "合成预览", publish: "发布", diff: "差异", cluster: "集群节点", team: "团队", deploy: "部署脚本" };
+    const tabs = { versions: "版本包", config: "分服配置", preview: "配置预览", publish: "发布版本", delivery: "部署", diff: "差异", cluster: "集群节点", team: "团队", deploy: "部署脚本" };
     return project ? `项目工作区 · ${tabs[item.projectTab] || "项目"}` : "项目工作区";
   }
-  if (item.globalView === "release") {
-    const sections = { tasks: "发布任务", logs: "发布日志", hooks: "自动 Hook", ssh: "SSH 机器" };
-    return `远程交付 · ${sections[item.releaseSection] || "发布任务"}`;
-  }
-  return { dashboard: "交付总览", guide: "文档目录", server: "高级配置", storage: "存储空间", settings: "系统设置" }[item.globalView] || "上一步";
+  return { dashboard: "交付总览", guide: "文档目录", agent: "机器与目标", server: "高级配置", storage: "存储空间", settings: "系统设置" }[item.globalView] || "上一步";
 }
 
 function updateNavigationBackUI() {
@@ -230,13 +240,6 @@ function navigateProjectTab(tab) {
   setProjectTab(tab);
 }
 
-function navigateReleaseSection(section = "tasks") {
-  if (state.globalView === "release" && state.releaseSection === section) return;
-  rememberNavigation();
-  setGlobalView("release");
-  setReleaseSection(section);
-}
-
 async function navigateBack() {
   const target = navigationHistory.pop();
   if (!target) return;
@@ -247,10 +250,8 @@ async function navigateBack() {
       if (project) await selectProject(project, { remember: false });
     }
     state.projectTab = target.projectTab || "versions";
-    state.releaseSection = target.releaseSection || "tasks";
     setGlobalView(target.globalView || "workspace");
     if (target.globalView === "workspace") setProjectTab(state.projectTab);
-    if (target.globalView === "release") setReleaseSection(state.releaseSection);
   } finally {
     navigationRestoring = false;
     updateNavigationBackUI();
@@ -267,7 +268,7 @@ function setGlobalView(view) {
   document.getElementById("globalSettings").classList.toggle("hidden", view !== "settings");
   document.getElementById("globalDashboard").classList.toggle("hidden", view !== "dashboard");
   document.getElementById("globalGuide").classList.toggle("hidden", view !== "guide");
-  document.getElementById("globalRelease").classList.toggle("hidden", view !== "release");
+  document.getElementById("globalAgent")?.classList.toggle("hidden", view !== "agent");
   const inProject = view === "workspace" && state.projectId;
   document.getElementById("projectWorkspace").classList.toggle("hidden", !inProject);
   document.getElementById("emptyProject").classList.toggle("hidden", inProject || view !== "workspace");
@@ -280,68 +281,100 @@ function setGlobalView(view) {
   if (view === "storage") loadStorageOverview();
   if (view === "dashboard") loadDashboard();
   if (view === "guide") loadGuideDirectory();
-  if (view === "release") {
-    loadReleaseWorkspace();
-    setReleaseSection(state.releaseSection || "tasks");
-  }
+  if (view === "agent" && state.isAdmin) loadAgentWorkspace();
   updateNavigationBackUI();
 }
 
 function setProjectTab(tab) {
-  if (tab === "hooks") {
-    setGlobalView("release");
-    setReleaseSection("hooks");
-    return;
-  }
   state.projectTab = tab;
   const workspace = document.getElementById("projectWorkspace");
   if (workspace) workspace.dataset.activeTab = tab;
-  if (tab !== "pushlogs" && pushLogRefreshTimer) {
+  if (tab !== "delivery" && pushLogRefreshTimer) {
     window.clearTimeout(pushLogRefreshTimer);
     pushLogRefreshTimer = null;
   }
-  if (tab !== "hooks" && releaseHookRefreshTimer) {
+  if (tab !== "delivery" && releaseHookRefreshTimer) {
     window.clearTimeout(releaseHookRefreshTimer);
     releaseHookRefreshTimer = null;
   }
   document.querySelectorAll(".project-tab").forEach((b) => {
     b.classList.toggle("active", b.dataset.ptab === tab);
   });
-  ["versions", "config", "preview", "publish", "cluster", "team", "deploy", "hooks", "diff"].forEach((t) => {
+  const activeTab = document.querySelector(`.project-tab[data-ptab="${CSS.escape(tab)}"]`);
+  const tabStrip = document.querySelector(".project-module-tabs");
+  if (activeTab && tabStrip && tabStrip.scrollWidth > tabStrip.clientWidth) {
+    tabStrip.scrollTo({ left: activeTab.offsetLeft - (tabStrip.clientWidth - activeTab.offsetWidth) / 2, behavior: "smooth" });
+  }
+  ["versions", "config", "preview", "publish", "delivery", "cluster", "team", "deploy", "diff"].forEach((t) => {
     const el = document.getElementById("ptab-" + t);
     if (el) el.classList.toggle("hidden", t !== tab);
   });
   if (tab === "deploy") generateDeployScript();
   if (tab === "config") loadServerConfigs();
   if (tab === "cluster") loadDeliveryNodes();
-  if (tab === "hooks") loadReleaseHooks();
+  if (tab === "delivery") loadDeliveryWorkspace();
   updateWorkflowUI();
-  updateNavigationBackUI();
-}
-
-function setReleaseSection(section) {
-  if (section === "ssh" && !state.isAdmin) section = "tasks";
-  if (section !== "hooks" && releaseHookRefreshTimer) {
-    window.clearTimeout(releaseHookRefreshTimer);
-    releaseHookRefreshTimer = null;
-  }
-  state.releaseSection = section;
-  document.querySelectorAll("[data-release-section]").forEach((button) => button.classList.toggle("active", button.dataset.releaseSection === section));
-  document.getElementById("releaseProjectContext")?.classList.toggle("hidden", section === "ssh");
-  document.getElementById("globalAgent")?.classList.toggle("hidden", section !== "ssh");
-  const ready = !!state.projectId;
-  document.getElementById("releaseProjectEmpty")?.classList.toggle("hidden", section === "ssh" || ready);
-  document.getElementById("releaseProjectContent")?.classList.toggle("hidden", section === "ssh" || !ready);
-  document.getElementById("ptab-push")?.classList.toggle("hidden", section !== "tasks");
-  document.getElementById("ptab-pushlogs")?.classList.toggle("hidden", section !== "logs");
-  document.getElementById("ptab-hooks")?.classList.toggle("hidden", section !== "hooks" || !ready);
-  if (section === "ssh" && state.isAdmin) loadAgentWorkspace();
-  if (section === "hooks") loadReleaseHooks();
   updateNavigationBackUI();
 }
 
 function targetTag(serverID = state.selectedServerID) {
   return state.projectName && serverID ? `${state.projectName}|${serverID}` : "—";
+}
+
+function versionContextKey() {
+  return `${state.projectId || ""}:${state.version || ""}:${contentRevision}`;
+}
+
+function previewContextKey() {
+  return `${versionContextKey()}:${document.getElementById("verPreviewServerId")?.value.trim() || ""}`;
+}
+
+function invalidatePreview() {
+  state.previewConfirmed = false;
+  previewReadyKey = null;
+  previewRequestID += 1;
+  const button = document.getElementById("btnConfirmPreview");
+  if (button) button.disabled = true;
+  const refreshButton = document.getElementById("btnVerPreview");
+  if (refreshButton) refreshButton.textContent = "刷新预览";
+}
+
+function invalidateVersionChecks() {
+  contentRevision += 1;
+  state.validation = null;
+  invalidatePreview();
+  renderValidationResult();
+}
+
+function renderValidationResult(message = "") {
+  const result = state.validation;
+  let html = message ? `<p class="hint">${escapeHtml(message)}</p>` : "";
+  if (!message && result) {
+    html = `<p class="${result.ok ? "hint" : "warn"}">${result.ok ? "可以发布：文件检查通过。发布后将锁定版本内容。" : "暂时无法发布，请修复以下问题后重试。"}</p>`;
+    (result.errors || []).forEach((error) => { html += `<p class="warn">${escapeHtml(error)}</p>`; });
+    (result.warnings || []).forEach((warning) => { html += `<p class="hint">${escapeHtml(warning)}</p>`; });
+  }
+  ["validateResult", "flowValidateResult"].forEach((id) => {
+    const element = document.getElementById(id);
+    if (element) {
+      element.innerHTML = html;
+      element.setAttribute("role", "status");
+      element.setAttribute("aria-live", "polite");
+    }
+  });
+}
+
+function suggestNextVersion() {
+  const versions = (state.versions || []).map((item) => item.version).filter((version) => /^\d+\.\d+\.\d+$/.test(version));
+  versions.sort((a, b) => {
+    const left = a.split(".").map(Number);
+    const right = b.split(".").map(Number);
+    return right[0] - left[0] || right[1] - left[1] || right[2] - left[2];
+  });
+  const parts = (versions[0] || "0.0.0").split(".").map(Number);
+  parts[2] += 1;
+  const input = document.getElementById("newVersion");
+  if (input && !input.value.trim()) input.value = parts.join(".");
 }
 
 function updateWorkflowUI() {
@@ -370,10 +403,55 @@ function updateWorkflowUI() {
   const configCheck = document.getElementById("publishConfigCheck");
   const previewCheck = document.getElementById("publishPreviewCheck");
   if (versionCheck) versionCheck.textContent = state.version ? `Artifact ${state.version} 已选择` : "未选择 Artifact 版本";
-  if (configCheck) configCheck.textContent = selectedServer ? `Server ${selectedServer} 已配置` : "未选择 Server 配置";
-  if (previewCheck) previewCheck.textContent = state.previewConfirmed ? "预览已确认" : "预览尚未确认";
+  if (configCheck) configCheck.textContent = selectedServer ? `当前配置：${selectedServer}` : "按需配置：没有分服差异可跳过";
+  if (previewCheck) previewCheck.textContent = state.previewConfirmed ? "配置预览已确认" : "可选：检查分服配置后的文件内容";
+  const published = state.versionStatus === "published";
+  const busy = state.uploadBusy || state.validationBusy || state.publishBusy;
+  const canPublish = canWriteProject() && !!state.version && ["draft", "pending_review"].includes(state.versionStatus);
   const flowPublishButton = document.getElementById("btnFlowPublish");
-  if (flowPublishButton) flowPublishButton.disabled = !(state.version && selectedServer && state.previewConfirmed) || state.versionStatus === "published";
+  [flowPublishButton, document.getElementById("btnPublish")].filter(Boolean).forEach((button) => {
+    button.disabled = !canPublish || busy;
+    button.textContent = state.publishBusy ? "正在发布…" : published ? "已发布" : "正式发布";
+  });
+  ["btnValidate", "btnFlowValidate"].forEach((id) => {
+    const button = document.getElementById(id);
+    if (button) {
+      button.disabled = !state.version || published || busy;
+      button.textContent = state.validationBusy ? "正在检查…" : "发布前检查";
+    }
+  });
+  const publishHint = document.getElementById("flowPublishHint");
+  if (publishHint) publishHint.textContent = published
+    ? "版本已发布，可进入部署查看当前项目的目标和执行结果。"
+    : !canWriteProject() ? "当前账号为只读成员，请联系项目管理员发布。"
+      : state.uploadBusy ? "文件正在上传，完成后即可检查和发布。"
+        : state.versionStatus === "rejected" ? "该版本已驳回，请修改后重新提交审批。"
+          : "发布将锁定版本文件。开启自动发布时会触发对应任务；手动部署在下一步执行。";
+  document.getElementById("btnPublishedDeploy")?.classList.toggle("hidden", !published);
+  const nextButton = document.getElementById("btnWorkspaceNext");
+  let next = !state.version
+    ? { title: "创建第一个版本", hint: "填写版本号，然后上传服务器程序、配置文件或 ZIP 包。", action: "创建版本", target: "versions", focus: "newVersion" }
+    : published
+      ? { title: `${state.version} 已发布`, hint: "进入部署确认最新发布版本与目标；历史版本回滚可使用高级发布任务。", action: "前往部署", target: "delivery" }
+      : !state.fileRows.length
+        ? { title: "上传版本文件", hint: "选择服务器程序、配置文件或 ZIP 包。分服配置可以稍后设置。", action: "上传文件", target: "versions", focus: "fileInput" }
+        : { title: "文件已就绪，准备发布", hint: "检查通过后发布版本。有分服差异时，可先配置并预览。", action: "检查并发布", target: "publish" };
+  if (state.uploadBusy) next = { ...next, title: "正在上传版本文件", hint: "上传始终归属开始时选定的项目与版本，请等待完成。", action: "正在上传…" };
+  if (state.validation?.ok === false) next = { title: "发布前检查未通过", hint: "在发布页查看具体原因，修改文件后重新检查。", action: "查看问题", target: "publish" };
+  const nextTitle = document.getElementById("workspaceNextTitle");
+  const nextHint = document.getElementById("workspaceNextHint");
+  if (nextTitle) nextTitle.textContent = next.title;
+  if (nextHint) nextHint.textContent = next.hint;
+  if (nextButton) {
+    nextButton.textContent = next.action;
+    nextButton.disabled = busy || (!canWriteProject() && !published);
+    nextButton.onclick = () => {
+      navigateProjectTab(next.target);
+      const element = next.focus && document.getElementById(next.focus);
+      if (next.focus === "fileInput") element?.click();
+      else element?.focus();
+    };
+  }
   const latest = latestPublishedVersion();
   const latestVersion = document.getElementById("workspaceLatestVersion");
   const latestState = document.getElementById("workspaceLatestState");
@@ -382,7 +460,7 @@ function updateWorkflowUI() {
   if (latestVersion) latestVersion.textContent = latest?.version || "—";
   if (latestState) latestState.textContent = latest ? "已发布 · 不可变制品" : "暂无已发布版本";
   if (workspaceTarget) workspaceTarget.textContent = selectedServer || "待选择";
-  if (workspaceTargetState) workspaceTargetState.textContent = selectedServer ? targetTag(selectedServer) : "进入 Server 配置选择";
+  if (workspaceTargetState) workspaceTargetState.textContent = selectedServer ? "当前配置预览对象" : "部署时确认项目绑定目标";
 }
 
 function setVersionStatusBadge(status) {
@@ -432,10 +510,11 @@ async function loadServerConfigs() {
     const payload = await api("/api/servers");
     state.serverEntries = payload.servers || [];
     renderServerConfigList();
-    if (state.selectedServerID) {
-      const current = state.serverEntries.find((item) => item.server_id === state.selectedServerID);
+    const preferredServer = hasUnsavedServerConfig() ? serverConfigEditorID : state.selectedServerID;
+    if (preferredServer) {
+      const current = state.serverEntries.find((item) => item.server_id === preferredServer);
       if (current) selectServerConfig(current);
-      else state.selectedServerID = null;
+      else if (!hasUnsavedServerConfig()) state.selectedServerID = null;
     }
     updateWorkflowUI();
   } catch (error) {
@@ -460,14 +539,31 @@ function renderServerConfigList() {
     return `<button type="button" class="server-config-row ${item.server_id === state.selectedServerID ? "active" : ""}" data-server-config="${escapeAttr(item.server_id)}"><span><strong>${escapeHtml(item.server_id)}</strong><code>${escapeHtml(targetTag(item.server_id))}</code></span><small>${replacementCount} 个模板文件</small></button>`;
   }).join("");
   list.querySelectorAll("[data-server-config]").forEach((button) => {
-    button.onclick = () => selectServerConfig(state.serverEntries.find((item) => item.server_id === button.dataset.serverConfig));
+    button.onclick = async () => {
+      const serverID = button.dataset.serverConfig;
+      if (serverID !== serverConfigEditorID && !(await confirmDiscardServerConfig())) return;
+      selectServerConfig(state.serverEntries.find((item) => item.server_id === serverID));
+    };
   });
+}
+
+function hasUnsavedServerConfig() {
+  return !!serverConfigEditorID && (document.getElementById("serverConfigSaveState")?.textContent === "未保存"
+    || !!document.querySelector("#serverOverrideForm .override-field input:invalid")
+    || Array.from(document.querySelectorAll("#serverOverrideForm .override-add input")).some((input) => input.value.trim() !== ""));
+}
+
+async function confirmDiscardServerConfig() {
+  if (!hasUnsavedServerConfig()) return true;
+  return showConfirm({ title: "分服配置尚未保存", message: `${serverConfigEditorID} 有未保存的修改。切换配置会放弃这些修改。`, confirmText: "放弃修改并切换", cancelText: "继续编辑" });
 }
 
 function selectServerConfig(item) {
   if (!item) return;
+  const preserveEditor = serverConfigEditorID === item.server_id && hasUnsavedServerConfig();
+  serverConfigEditorID = item.server_id;
   state.selectedServerID = item.server_id;
-  state.previewConfirmed = false;
+  invalidatePreview();
   document.getElementById("serverConfigEmpty")?.classList.add("hidden");
   document.getElementById("serverConfigEditor")?.classList.remove("hidden");
   document.getElementById("serverConfigTitle").textContent = item.server_id;
@@ -475,10 +571,13 @@ function selectServerConfig(item) {
   document.getElementById("configSourceVersion").textContent = state.version || "未选版本";
   document.getElementById("configSourceServer").textContent = item.server_id;
   const editor = document.getElementById("serverConfigJSON");
-  editor.value = JSON.stringify(item.entry || { replacements: {} }, null, 2);
-  document.getElementById("serverConfigSaveState").textContent = "已保存";
+  if (!preserveEditor) {
+    editor.value = JSON.stringify(item.entry || { replacements: {} }, null, 2);
+    if (typeof renderServerOverrideForm === "function") renderServerOverrideForm();
+    document.getElementById("serverConfigSaveState").textContent = "已保存";
+  }
   const files = Object.entries(item.entry?.replacements || {});
-  document.getElementById("serverReplacementFiles").innerHTML = files.length ? files.map(([name, values], index) => `<button type="button" class="replacement-file-row ${index === 0 ? "active" : ""}"><strong>${escapeHtml(name)}</strong><small>${Object.keys(values || {}).length} 个覆盖项</small></button>`).join("") : '<div class="agent-empty">尚无覆盖项，在右侧 JSON 中添加 replacements。</div>';
+  document.getElementById("serverReplacementFiles").innerHTML = files.length ? files.map(([name, values]) => `<div class="replacement-file-row"><strong>${escapeHtml(name)}</strong><small>${Object.keys(values || {}).length} 个覆盖项</small></div>`).join("") : '<div class="agent-empty">尚无覆盖项，可在右侧添加分服参数。</div>';
   const previewInput = document.getElementById("verPreviewServerId");
   if (previewInput) previewInput.value = item.server_id;
   renderServerConfigList();
@@ -486,6 +585,7 @@ function selectServerConfig(item) {
 }
 
 async function createServerConfig(copyFrom = null) {
+  if (!(await confirmDiscardServerConfig())) return;
   const serverID = await showPrompt({ title: copyFrom ? "复制 Server 配置" : "新建 Server 配置", message: "输入 Server ID；目标标签将自动生成 project|serverId。", value: copyFrom ? `${copyFrom.server_id}-copy` : "" });
   if (serverID == null) return;
   const clean = serverID.trim();
@@ -494,6 +594,7 @@ async function createServerConfig(copyFrom = null) {
   const entry = copyFrom ? copyFrom.entry : { replacements: {}, post_hook: "", post_hook_env: {} };
   try {
     const created = await api(`/api/servers/${encodeURIComponent(clean)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(entry) });
+    serverConfigEditorID = null;
     state.selectedServerID = created.server_id;
     await loadServerIDs();
     await loadServerConfigs();
@@ -502,26 +603,41 @@ async function createServerConfig(copyFrom = null) {
 }
 
 async function saveServerConfig() {
-  if (!state.selectedServerID) return;
+  const serverID = serverConfigEditorID;
+  if (!serverID) return;
+  const invalidField = document.querySelector("#serverOverrideForm .override-field input:invalid");
+  if (invalidField) {
+    invalidField.reportValidity();
+    return;
+  }
   let entry;
-  try { entry = JSON.parse(document.getElementById("serverConfigJSON").value); }
+  const submittedJSON = document.getElementById("serverConfigJSON").value;
+  try { entry = JSON.parse(submittedJSON); }
   catch (error) { showToast(`JSON 格式错误：${error.message}`, "err"); return; }
   try {
-    await api(`/api/servers/${encodeURIComponent(state.selectedServerID)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(entry) });
-    document.getElementById("serverConfigSaveState").textContent = "已保存";
+    await api(`/api/servers/${encodeURIComponent(serverID)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(entry) });
+    if (serverConfigEditorID !== serverID) return;
+    const unchanged = document.getElementById("serverConfigJSON").value === submittedJSON && !document.querySelector("#serverOverrideForm .override-field input:invalid");
+    if (unchanged) document.getElementById("serverConfigSaveState").textContent = "已保存";
+    state.selectedServerID = serverID;
     await loadServerIDs();
     await loadServerConfigs();
-    navigateProjectTab("preview");
-    scheduleDeployPreview();
-    showToast("Server 配置已保存");
+    if (unchanged) {
+      navigateProjectTab("preview");
+      scheduleDeployPreview();
+    }
+    showToast(unchanged ? "Server 配置已保存" : "已保存提交内容，当前仍有未保存的修改");
   } catch (error) { showToast(error.message, "err"); }
 }
 
 async function deleteServerConfig() {
-  if (!state.selectedServerID) return;
-  if (!await showConfirm({ title: "删除 Server 配置", message: `删除 ${targetTag()}？SSH 绑定不会自动删除。`, danger: true })) return;
+  const serverID = serverConfigEditorID;
+  if (!serverID) return;
+  if (!await showConfirm({ title: "删除 Server 配置", message: `删除 ${targetTag(serverID)}？SSH 绑定不会自动删除。`, danger: true })) return;
   try {
-    await api(`/api/servers/${encodeURIComponent(state.selectedServerID)}`, { method: "DELETE" });
+    await api(`/api/servers/${encodeURIComponent(serverID)}`, { method: "DELETE" });
+    if (serverConfigEditorID !== serverID) return;
+    serverConfigEditorID = null;
     state.selectedServerID = null;
     document.getElementById("serverConfigEditor")?.classList.add("hidden");
     document.getElementById("serverConfigEmpty")?.classList.remove("hidden");
@@ -558,25 +674,6 @@ function setupServerIDCombobox(input) {
     if (event.key === "Escape") options.classList.add("hidden");
   });
   document.addEventListener("click", (event) => { if (!box.contains(event.target)) options.classList.add("hidden"); });
-}
-
-async function loadReleaseWorkspace() {
-  const select = document.getElementById("releaseProject");
-  if (!select) return;
-  const selected = String(state.projectId || "");
-  select.innerHTML = '<option value="">选择项目</option>' + state.projects.map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join("");
-  select.value = selected;
-  const ready = !!state.projectId;
-  const cards = document.getElementById("releaseProjectCards");
-  if (cards) {
-    cards.innerHTML = state.projects.map((p) => `<button type="button" class="btn btn-secondary" data-release-project="${p.id}">${escapeHtml(p.name)}</button>`).join("") || '<span class="hint">暂无可访问项目</span>';
-    cards.querySelectorAll("[data-release-project]").forEach((button) => button.onclick = async () => {
-      document.getElementById("releaseProject").value = button.dataset.releaseProject;
-      document.getElementById("releaseProject").dispatchEvent(new Event("change"));
-    });
-  }
-  setReleaseSection(state.releaseSection || "tasks");
-  if (ready) { await loadPushTasks(); await loadPushLogs(); }
 }
 
 function updateDeployCmd() {
@@ -807,39 +904,13 @@ document.querySelectorAll(".sidebar-nav-item[data-global]").forEach((btn) => {
 });
 
 document.getElementById("btnNavigateBack")?.addEventListener("click", navigateBack);
-document.getElementById("btnReturnProject")?.addEventListener("click", () => navigateGlobalView("workspace"));
-
-document.getElementById("releaseProject")?.addEventListener("change", async (event) => {
-  const project = state.projects.find((item) => item.id === Number(event.target.value));
-  if (!project) return loadReleaseWorkspace();
-  if (project.id !== state.projectId) rememberNavigation();
-  state.projectId = project.id;
-  state.projectName = project.name;
-  state.versions = (await api(`/api/projects/${project.id}/versions`)) || [];
-  await loadReleaseWorkspace();
-});
-document.getElementById("btnReleaseReload")?.addEventListener("click", loadReleaseWorkspace);
-
-const releaseHookPanel = document.getElementById("ptab-hooks");
-if (releaseHookPanel) document.getElementById("globalRelease")?.appendChild(releaseHookPanel);
-const agentPanel = document.getElementById("globalAgent");
-if (agentPanel) document.getElementById("globalRelease")?.appendChild(agentPanel);
 
 document.querySelectorAll(".project-tab").forEach((btn) => {
-  btn.onclick = () => btn.dataset.ptab === "hooks" ? navigateReleaseSection("hooks") : navigateProjectTab(btn.dataset.ptab);
+  btn.onclick = () => navigateProjectTab(btn.dataset.ptab);
 });
 
 document.querySelectorAll("[data-flow-target]").forEach((btn) => {
   btn.addEventListener("click", () => navigateProjectTab(btn.dataset.flowTarget));
-});
-
-document.querySelectorAll("[data-project-action='release']").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    navigateReleaseSection(btn.dataset.releaseTarget || "tasks");
-  });
-});
-document.querySelectorAll("[data-release-section]").forEach((button) => {
-  button.addEventListener("click", () => navigateReleaseSection(button.dataset.releaseSection));
 });
 
 document.getElementById("btnPushAddHost")?.addEventListener("click", async () => {
@@ -890,8 +961,11 @@ document.getElementById("btnClosePushHostEditor")?.addEventListener("click", () 
 document.getElementById("btnCloseBindingDrawer")?.addEventListener("click", () => document.getElementById("sshBindingDrawer")?.classList.add("hidden"));
 ["sshSearch", "sshStatusFilter", "sshProjectFilter"].forEach((id) => document.getElementById(id)?.addEventListener("input", renderPushHosts));
 document.getElementById("btnSavePushTask")?.addEventListener("click", savePushTask);
+document.getElementById("pushTaskTargetMode")?.addEventListener("change", updatePushTaskTargetMode);
 document.getElementById("btnSaveAndRunPushTask")?.addEventListener("click", async () => {
+  document.getElementById("pushTaskTargetMode").value = "project";
   document.getElementById("pushTaskServerIDs").value = "";
+  updatePushTaskTargetMode();
   const task = await savePushTask();
   if (task) await runPushTask(task.id, false);
 });
@@ -901,6 +975,11 @@ document.getElementById("btnCancelReleaseHook")?.addEventListener("click", reset
 document.getElementById("btnReloadReleaseHooks")?.addEventListener("click", loadReleaseHooks);
 document.getElementById("btnReloadPushLogs")?.addEventListener("click", loadPushLogs);
 document.getElementById("btnReloadDeliveryNodes")?.addEventListener("click", loadDeliveryNodes);
+document.getElementById("btnReloadDelivery")?.addEventListener("click", loadDeliveryWorkspace);
+document.getElementById("btnQuickDeploy")?.addEventListener("click", (event) => runQuickDeployment(false, event.currentTarget));
+document.getElementById("btnQuickDeployPreview")?.addEventListener("click", (event) => runQuickDeployment(true, event.currentTarget));
+document.getElementById("deliveryAutomationToggle")?.addEventListener("change", (event) => setProjectAutomationEnabled(event.currentTarget.checked));
+document.getElementById("btnDeliveryAutomationSettings")?.addEventListener("click", () => { document.getElementById("deliveryHooksDetails").open = true; });
 
 document.querySelectorAll("#settingsTabs .seg-tab").forEach((btn) => {
   btn.onclick = () => {
@@ -942,13 +1021,16 @@ document.getElementById("serverConfigSearch")?.addEventListener("input", (event)
   renderServerConfigList();
 });
 document.getElementById("btnNewServerConfig")?.addEventListener("click", () => createServerConfig());
-document.getElementById("btnDuplicateServerConfig")?.addEventListener("click", () => createServerConfig(state.serverEntries.find((item) => item.server_id === state.selectedServerID)));
+document.getElementById("btnDuplicateServerConfig")?.addEventListener("click", () => createServerConfig(state.serverEntries.find((item) => item.server_id === serverConfigEditorID)));
 document.getElementById("btnSaveServerConfig")?.addEventListener("click", saveServerConfig);
 document.getElementById("btnDeleteServerConfig")?.addEventListener("click", deleteServerConfig);
 document.getElementById("btnOpenRawYaml")?.addEventListener("click", () => navigateGlobalView("server"));
 document.getElementById("serverConfigJSON")?.addEventListener("input", () => {
   const stateLabel = document.getElementById("serverConfigSaveState");
   if (stateLabel) stateLabel.textContent = "未保存";
+  invalidatePreview();
+  if (typeof renderServerOverrideForm === "function") renderServerOverrideForm();
+  updateWorkflowUI();
 });
 
 function renderProjectList() {
@@ -984,6 +1066,12 @@ async function loadProjects() {
   state.projects = (await api("/api/projects")) || [];
   renderProjectList();
   populateDashboardProjects();
+  if (!state.projectId && rememberedProjectScope) {
+    let savedID;
+    try { savedID = localStorage.getItem(rememberedProjectScope); } catch (_) {}
+    const previous = state.projects.find((project) => String(project.id) === savedID);
+    if (previous) await selectProject(previous, { remember: false });
+  }
   return state.projects;
 }
 
@@ -998,11 +1086,22 @@ function updateProjectWriteUI() {
     if (el.tagName === "INPUT" || el.tagName === "BUTTON") el.disabled = !w;
   });
   const fileInput = document.getElementById("fileInput");
-  if (fileInput) fileInput.disabled = !w;
+  const editable = w && !!state.version && state.versionStatus !== "published";
+  if (fileInput) fileInput.disabled = !editable || state.uploadBusy || state.publishBusy;
+  document.querySelectorAll(".upload-zone, .tag-toolbar, .tag-batch, #versionAdvanced").forEach((element) => {
+    element.classList.toggle("hidden", !editable);
+  });
+  ["btnDeleteVersion", "btnApplyFileTags", "btnSubmitReview", "btnRejectReview"].forEach((id) => {
+    const button = document.getElementById(id);
+    if (button && (state.uploadBusy || state.publishBusy)) button.disabled = true;
+  });
+  const tagButton = document.getElementById("btnApplyFileTags");
+  if (tagButton) tagButton.disabled = !editable || state.uploadBusy || state.publishBusy;
   ["versionRetentionLimited", "versionRetentionUnlimited", "versionRetentionCount", "btnSaveVersionRetention"].forEach((id) => {
     const element = document.getElementById(id);
     if (element) element.disabled = !w;
   });
+  updateWorkflowUI();
 }
 
 async function loadProjectTeam() {
@@ -1019,18 +1118,31 @@ async function loadProjectTeam() {
   }
 }
 
-async function selectProject(p, { remember = true } = {}) {
+async function selectProject(p, { remember = true, preferredVersion: requestedVersion = null } = {}) {
   const projectChanged = state.projectId !== p.id;
+  p = { ...state.projects.find((item) => item.id === p.id), ...p };
   if (remember && (projectChanged || state.globalView !== "workspace")) rememberNavigation();
   state.projectId = p.id;
+  if (rememberedProjectScope) {
+    try { localStorage.setItem(rememberedProjectScope, String(p.id)); } catch (_) {}
+  }
   state.projectName = p.name;
   state.projectRole = p.my_role || (state.isAdmin ? "admin" : "viewer");
   state.projectMaxPublishedVersions = Number(p.max_published_versions || 0);
   state.version = null;
   state.versionStatus = null;
+  state.fileRows = [];
+  invalidateVersionChecks();
   if (projectChanged) {
+    state.versions = [];
+    document.getElementById("versionDetail").classList.add("hidden");
+    renderVersionList();
     state.selectedServerID = null;
-    state.previewConfirmed = false;
+    state.projectTab = "versions";
+    state.versionFilter = "";
+    document.getElementById("versionSearch").value = "";
+    document.getElementById("newVersion").value = "";
+    document.getElementById("verPreviewServerId").value = "";
   }
   document.getElementById("curProject").textContent = p.name;
   const roleBadge = document.getElementById("projectRoleBadge");
@@ -1043,17 +1155,22 @@ async function selectProject(p, { remember = true } = {}) {
   await loadProjects();
   const refreshedProject = state.projects.find((item) => item.id === p.id);
   if (refreshedProject) state.projectMaxPublishedVersions = Number(refreshedProject.max_published_versions || 0);
-  state.versions = (await api(`/api/projects/${p.id}/versions`)) || [];
+  const versions = (await api(`/api/projects/${p.id}/versions`)) || [];
+  if (state.projectId !== p.id) return [];
+  state.versions = versions;
+  suggestNextVersion();
   renderVersionList();
   renderVersionRetention();
   renderVersionActivity();
   if (state.isAdmin) await loadServerConfigs();
+  if (state.projectId !== p.id) return [];
   if (state.projectTab === "cluster") await loadDeliveryNodes();
+  if (state.projectTab === "delivery") await loadDeliveryWorkspace();
   // Populate diff dropdowns
   populateDiffDropdowns(state.versions);
   // Generate deploy script when switching to deploy tab
   generateDeployScript();
-  const preferredVersion = latestPublishedVersion() || state.versions[0];
+  const preferredVersion = state.versions.find((version) => version.version === requestedVersion) || latestPublishedVersion() || state.versions[0];
   if (preferredVersion) await selectVersion(preferredVersion);
   else document.getElementById("versionDetail").classList.add("hidden");
   updateWorkflowUI();
@@ -1202,7 +1319,9 @@ function updateReviewButtons(status) {
 async function selectVersion(v) {
   state.version = v.version;
   state.versionStatus = v.status;
-  state.previewConfirmed = false;
+  state.fileRows = [];
+  invalidateVersionChecks();
+  const key = versionContextKey();
   document.getElementById("versionDetail").classList.remove("hidden");
   const detailTitle = document.getElementById("verDetailTitle");
   if (detailTitle) detailTitle.textContent = v.version;
@@ -1229,10 +1348,11 @@ async function selectVersion(v) {
   } else {
     dl.classList.add("hidden");
   }
-  document.getElementById("validateResult").innerHTML = "";
+  renderValidationResult();
   document.getElementById("previewProject").value = state.projectName || "";
   document.getElementById("previewVersion").value = v.version;
   const rows = await loadVersionFileTags();
+  if (key !== versionContextKey()) return [];
   try {
     const cfg = await api(`/api/projects/${state.projectId}/versions/${v.version}/config-files`);
     const dup = Object.entries(cfg.duplicates || {}).filter(([, n]) => n > 1);
@@ -1240,6 +1360,7 @@ async function selectVersion(v) {
       showFilePreviewMessage(`重复配置文件 basename: ${dup.map(([b]) => b).join(", ")}`);
     }
   } catch (_) {}
+  if (key !== versionContextKey()) return [];
   renderFileDiffWorkspace([], document.getElementById("verPreviewTable"), { empty: "选择 server_id" });
   updateDeployCmd();
   tryAutoPreviewOnVersionSelect();
@@ -1249,9 +1370,12 @@ async function selectVersion(v) {
 
 async function loadVersionFileTags() {
   if (!state.projectId || !state.version) return [];
+  const key = versionContextKey();
   const rows = (await api(`/api/projects/${state.projectId}/versions/${encodeURIComponent(state.version)}/file-tags`)) || [];
+  if (key !== versionContextKey()) return [];
   state.fileRows = rows;
   renderFileList();
+  updateWorkflowUI();
   return rows;
 }
 
@@ -1303,12 +1427,129 @@ let releaseHookEvents = [];
 let editingReleaseHookID = null;
 let releaseHookRefreshTimer = null;
 let deliveryNodes = [];
+let pushDeployments = [];
+let latestDeliveryRequestID = 0;
+
+async function loadDeliveryWorkspace() {
+  if (!state.projectId) return;
+  await Promise.all([loadPushTasks(), loadReleaseHooks(), loadDeliveryNodes(), loadPushLogs()]);
+  updateDeliveryOverview();
+}
+
+function updateDeliveryOverview() {
+  const latest = latestPublishedVersion();
+  const pushNodes = deliveryNodes.filter((node) => node.delivery_mode === "push");
+  const pullNodes = deliveryNodes.filter((node) => node.delivery_mode === "pull");
+  const skippedBackups = pushNodes.filter((node) => node.skip_backup).length;
+  const projectName = state.projectName || "—";
+  const targetSummary = pushNodes.length
+    ? `${pushNodes.length} 个 Push 目标${pullNodes.length ? ` · ${pullNodes.length} 个 Pull 节点独立收敛` : ""}`
+    : "尚未绑定 Push 目标";
+  const backupSummary = !pushNodes.length
+    ? "尚无目标策略"
+    : skippedBackups === pushNodes.length
+      ? "不保留旧发布"
+      : skippedBackups
+        ? `${skippedBackups}/${pushNodes.length} 个目标不备份`
+        : "目标发布前保留备份";
+  const ready = !!latest && pushNodes.length > 0;
+  const readiness = document.getElementById("deliveryReadiness");
+  if (readiness) {
+    readiness.textContent = ready ? "可以部署" : !latest ? "缺少已发布版本" : "缺少部署目标";
+    readiness.className = `badge badge-${ready ? "ok" : "draft"}`;
+  }
+  document.getElementById("deliveryProjectName").textContent = projectName;
+  document.getElementById("deliveryVersionName").textContent = latest?.version || "暂无已发布版本";
+  document.getElementById("deliveryTargetSummary").textContent = targetSummary;
+  document.getElementById("deliveryBackupSummary").textContent = backupSummary;
+  document.getElementById("deliveryProjectTag").textContent = state.projectName ? `${state.projectName}|serverId` : "project|serverId";
+  document.getElementById("deliveryTaskCount").textContent = `${pushTasks.length} 个`;
+  document.getElementById("deliveryHookCount").textContent = `${releaseHooks.length} 个`;
+  ["btnQuickDeploy", "btnQuickDeployPreview"].forEach((id) => {
+    const button = document.getElementById(id);
+    if (button) button.disabled = !ready || !canWriteProject();
+  });
+  const enabledHooks = releaseHooks.filter((hook) => hook.enabled);
+  const automationToggle = document.getElementById("deliveryAutomationToggle");
+  if (automationToggle) automationToggle.checked = enabledHooks.length > 0;
+  const automationSummary = document.getElementById("deliveryAutomationSummary");
+  if (automationSummary) {
+    automationSummary.textContent = !releaseHooks.length
+      ? "未配置自动发布。需要时再开启。"
+      : enabledHooks.length
+        ? `${enabledHooks.length} 个 Hook 已启用，只跟随 ${projectName}。`
+        : `${releaseHooks.length} 个 Hook 已停用。`;
+  }
+}
+
+function quickDeploymentKey(dryRun) {
+  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `ui:${state.projectId}:quick:${dryRun ? "preview" : "release"}:${suffix}`;
+}
+
+async function runQuickDeployment(dryRun, triggerButton) {
+  const latest = latestPublishedVersion();
+  const pushNodes = deliveryNodes.filter((node) => node.delivery_mode === "push");
+  if (!latest || !pushNodes.length) return;
+  if (!dryRun) {
+    const backupSummary = document.getElementById("deliveryBackupSummary")?.textContent || "按目标策略";
+    const confirmed = await showConfirm({
+      title: `部署 ${state.projectName}`,
+      message: `版本：${latest.version}\n目标：当前项目全部 ${pushNodes.length} 个 Push 目标\n备份：${backupSummary}\n不同项目的任务和目标不会参与。`,
+      confirmText: "确认部署",
+      cancelText: "取消",
+    });
+    if (!confirmed) return;
+  }
+  const storageKey = `express233:push:${state.projectId}:quick:${dryRun ? "preview" : "release"}`;
+  const idempotencyKey = sessionStorage.getItem(storageKey) || quickDeploymentKey(dryRun);
+  sessionStorage.setItem(storageKey, idempotencyKey);
+  if (triggerButton) triggerButton.disabled = true;
+  try {
+    const deployment = await api(`/api/projects/${state.projectId}/push-deployments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify({ version: latest.version, all_project_targets: true, dry_run: dryRun, idempotency_key: idempotencyKey }),
+    });
+    sessionStorage.removeItem(storageKey);
+    showToast(deployment.replayed ? `已接续原执行 #${deployment.id}` : dryRun ? `预演 #${deployment.id} 完成` : `部署 #${deployment.id} 已进入串行队列`);
+    document.getElementById("deliveryHistoryDetails").open = true;
+    await loadPushLogs();
+  } catch (error) {
+    showToast(`${error.message}；重试将接续同一执行`, "err", 5200);
+  } finally {
+    updateDeliveryOverview();
+  }
+}
+
+async function setProjectAutomationEnabled(enabled) {
+  const details = document.getElementById("deliveryHooksDetails");
+  if (!releaseHooks.length) {
+    if (details) details.open = true;
+    document.getElementById("deliveryAutomationToggle").checked = false;
+    showToast("先创建一个当前项目 Hook", "err");
+    return;
+  }
+  try {
+    await Promise.all(releaseHooks.map((hook) => api(`/api/projects/${state.projectId}/release-hooks/${hook.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: hook.name, task_id: hook.task_id, debounce_seconds: hook.debounce_seconds, enabled }),
+    })));
+    showToast(enabled ? "当前项目自动发布已启用" : "当前项目自动发布已停用");
+    await loadReleaseHooks();
+  } catch (error) {
+    showToast(error.message, "err");
+    await loadReleaseHooks();
+  }
+}
 
 async function loadDeliveryNodes() {
   if (!state.projectId) return;
   try {
     deliveryNodes = (await api(`/api/projects/${state.projectId}/delivery-nodes`)) || [];
     renderDeliveryNodes();
+    updateDeliveryOverview();
   } catch (e) { showToast(e.message, "err"); }
 }
 
@@ -1354,6 +1595,19 @@ function latestPublishedVersion() {
   return (state.versions || []).find((v) => v.status === "published") || null;
 }
 
+function pushTaskScopeLabel(task) {
+  const serverIDs = task.server_ids || [];
+  return serverIDs.length ? `固定目标：${serverIDs.join(", ")}` : "跟随项目当前目标";
+}
+
+function updatePushTaskTargetMode() {
+  const followsProject = document.getElementById("pushTaskTargetMode")?.value !== "fixed";
+  const serverIDs = document.getElementById("pushTaskServerIDs");
+  if (!serverIDs) return;
+  serverIDs.disabled = followsProject;
+  serverIDs.placeholder = followsProject ? "执行时自动读取当前项目绑定" : "server_id，逗号分隔";
+}
+
 async function loadPushTasks() {
   if (!state.projectId) return;
   const latest = latestPublishedVersion();
@@ -1368,18 +1622,30 @@ async function loadPushTasks() {
   try {
     pushTasks = await api(`/api/projects/${state.projectId}/push-tasks`);
     renderPushTasks();
+    renderReleaseHookTaskOptions();
+    updateDeliveryOverview();
   } catch (e) { showToast(e.message, "err"); }
+}
+
+function renderReleaseHookTaskOptions() {
+  const taskSelect = document.getElementById("releaseHookTask");
+  if (!taskSelect) return;
+  const selected = taskSelect.value;
+  taskSelect.innerHTML = '<option value="">选择当前项目的发布任务</option>' + pushTasks.map((task) => `<option value="${task.id}">${escapeHtml(task.name)} · ${escapeHtml(pushTaskScopeLabel(task))}</option>`).join("");
+  if (pushTasks.some((task) => String(task.id) === selected)) taskSelect.value = selected;
 }
 
 function resetPushTaskEditor() {
   editingPushTaskID = null;
   document.getElementById("pushTaskName").value = "";
   document.getElementById("pushTaskVersion").value = "";
+  document.getElementById("pushTaskTargetMode").value = "project";
   document.getElementById("pushTaskServerIDs").value = "";
   document.getElementById("pushTaskTags").value = "test";
   document.getElementById("pushTaskTagMatch").value = "all";
   document.getElementById("btnSavePushTask").textContent = "保存任务";
   document.getElementById("btnCancelPushTask").classList.add("hidden");
+  updatePushTaskTargetMode();
 }
 
 async function savePushTask() {
@@ -1387,7 +1653,7 @@ async function savePushTask() {
   const payload = {
     name: document.getElementById("pushTaskName").value.trim(),
     version: document.getElementById("pushTaskVersion").value,
-    server_ids: csvValues(document.getElementById("pushTaskServerIDs").value),
+    server_ids: document.getElementById("pushTaskTargetMode").value === "project" ? [] : csvValues(document.getElementById("pushTaskServerIDs").value),
     tags: csvValues(document.getElementById("pushTaskTags").value || "test"),
     tag_match: document.getElementById("pushTaskTagMatch").value,
   };
@@ -1405,10 +1671,10 @@ function renderPushTasks() {
   const box = document.getElementById("pushTaskList");
   if (!box) return;
   if (!pushTasks.length) {
-    box.innerHTML = '<div class="empty-state compact"><h3>还没有发布任务</h3><p>先保存一个任务；SSH 节点与 server_id 绑定在全局 Agent 页面维护。</p></div>';
+    box.innerHTML = '<div class="empty-state compact"><h3>不需要高级任务</h3><p>上方“发布当前项目”已覆盖常规发布；只有固定版本、固定 server_id 或标签策略才需要创建任务。</p></div>';
     return;
   }
-  box.innerHTML = `<table class="data-table release-task-table"><thead><tr><th>任务</th><th>版本策略</th><th>目标筛选</th><th>执行</th><th>最近运行</th><th>操作</th></tr></thead><tbody>${pushTasks.map((task) => `<tr><td><strong>${escapeHtml(task.name)}</strong><small>#${task.id}</small></td><td>${task.version ? `<code>${escapeHtml(task.version)}</code>` : '<span class="badge badge-ok">每次取最新已发布</span>'}</td><td><small>server_id：${escapeHtml((task.server_ids || []).join(", ") || "全部")}</small><small>标签（${task.tag_match === "any" ? "任一" : "全部"}）：${escapeHtml((task.tags || []).join(", ") || "test")}</small></td><td><strong>${task.run_count || 0}</strong><small>次</small></td><td><small>${escapeHtml(task.last_run_at || "尚未执行")}</small></td><td class="release-task-actions"><button type="button" class="btn btn-secondary btn-sm" data-run-push-task="${task.id}" data-dry-run="true">预演</button><button type="button" class="btn btn-primary btn-sm" data-run-push-task="${task.id}">发布</button><button type="button" class="btn btn-ghost btn-sm" data-edit-push-task="${task.id}">编辑</button><button type="button" class="btn btn-danger btn-sm" data-delete-push-task="${task.id}">删除</button></td></tr>`).join("")}</tbody></table>`;
+  box.innerHTML = `<table class="data-table release-task-table"><thead><tr><th>任务</th><th>版本策略</th><th>目标筛选</th><th>执行</th><th>最近运行</th><th>操作</th></tr></thead><tbody>${pushTasks.map((task) => `<tr><td><strong>${escapeHtml(task.name)}</strong><small>#${task.id}</small></td><td>${task.version ? `<code>${escapeHtml(task.version)}</code>` : '<span class="badge badge-ok">每次取最新已发布</span>'}</td><td><small>${escapeHtml(pushTaskScopeLabel(task))}</small><small>项目：${escapeHtml(state.projectName || "当前项目")}</small><small>标签（${task.tag_match === "any" ? "任一" : "全部"}）：${escapeHtml((task.tags || []).join(", ") || "test")}</small></td><td><strong>${task.run_count || 0}</strong><small>次</small></td><td><small>${escapeHtml(task.last_run_at || "尚未执行")}</small></td><td class="release-task-actions"><button type="button" class="btn btn-secondary btn-sm" data-run-push-task="${task.id}" data-dry-run="true">预演</button><button type="button" class="btn btn-primary btn-sm" data-run-push-task="${task.id}">发布</button><button type="button" class="btn btn-ghost btn-sm" data-edit-push-task="${task.id}">编辑</button><button type="button" class="btn btn-danger btn-sm" data-delete-push-task="${task.id}">删除</button></td></tr>`).join("")}</tbody></table>`;
   box.querySelectorAll("[data-run-push-task]").forEach((button) => button.onclick = () => runPushTask(Number(button.dataset.runPushTask), button.dataset.dryRun === "true", button));
   box.querySelectorAll("[data-edit-push-task]").forEach((button) => button.onclick = () => editPushTask(Number(button.dataset.editPushTask)));
   box.querySelectorAll("[data-delete-push-task]").forEach((button) => button.onclick = () => deletePushTask(Number(button.dataset.deletePushTask)));
@@ -1420,11 +1686,13 @@ function editPushTask(taskID) {
   editingPushTaskID = taskID;
   document.getElementById("pushTaskName").value = task.name;
   document.getElementById("pushTaskVersion").value = task.version || "";
+  document.getElementById("pushTaskTargetMode").value = (task.server_ids || []).length ? "fixed" : "project";
   document.getElementById("pushTaskServerIDs").value = (task.server_ids || []).join(", ");
   document.getElementById("pushTaskTags").value = (task.tags || []).join(", ");
   document.getElementById("pushTaskTagMatch").value = task.tag_match || "all";
   document.getElementById("btnSavePushTask").textContent = "更新任务";
   document.getElementById("btnCancelPushTask").classList.remove("hidden");
+  updatePushTaskTargetMode();
 }
 
 function newIdempotencyKey(taskID, dryRun) {
@@ -1437,7 +1705,7 @@ async function runPushTask(taskID, dryRun, triggerButton) {
   if (!task) return;
   if (!dryRun) {
     const version = task.version || latestPublishedVersion()?.version || "无可用版本";
-    const targets = (task.server_ids || []).join(", ") || "全部匹配服务器（串行）";
+    const targets = (task.server_ids || []).join(", ") || "当前项目全部匹配服务器（串行）";
     const confirmed = await showConfirm({ title: `发布 ${task.name}`, message: `版本：${version}\n目标：${targets}\n策略：先预拉取；SIGTERM 后等待正常退出；换包后必须通过启动与健康检查。`, confirmText: "确认发布", cancelText: "取消" });
     if (!confirmed) return;
   }
@@ -1450,8 +1718,8 @@ async function runPushTask(taskID, dryRun, triggerButton) {
     sessionStorage.removeItem(storageKey);
     showToast(deployment.replayed ? `已接续原执行 #${deployment.id}，未重复发布` : dryRun ? `预演 #${deployment.id} 完成` : `发布 #${deployment.id} 已进入串行队列`);
     await loadPushTasks();
-    setGlobalView("release");
-    navigateReleaseSection("logs");
+    document.getElementById("deliveryHistoryDetails").open = true;
+    await loadPushLogs();
   } catch (e) {
     showToast(`${e.message}；重试将接续同一执行`, "err", 5200);
   } finally {
@@ -1490,16 +1758,12 @@ async function loadReleaseHooks() {
     pushTasks = tasks || [];
     releaseHooks = hooks || [];
     releaseHookEvents = events || [];
-    const taskSelect = document.getElementById("releaseHookTask");
-    if (taskSelect) {
-      const selected = taskSelect.value;
-      taskSelect.innerHTML = '<option value="">选择发布任务</option>' + pushTasks.map((task) => `<option value="${task.id}">${escapeHtml(task.name)}</option>`).join("");
-      if (pushTasks.some((task) => String(task.id) === selected)) taskSelect.value = selected;
-    }
+    renderReleaseHookTaskOptions();
     renderReleaseHooks();
     renderReleaseHookEvents();
+    updateDeliveryOverview();
     if (releaseHookRefreshTimer) window.clearTimeout(releaseHookRefreshTimer);
-    if (state.globalView === "release" && state.releaseSection === "hooks" && releaseHooks.some((hook) => hook.pending_events > 0 || hook.last_status === "running")) {
+    if (state.globalView === "workspace" && state.projectTab === "delivery" && releaseHooks.some((hook) => hook.pending_events > 0 || hook.last_status === "running")) {
       releaseHookRefreshTimer = window.setTimeout(loadReleaseHooks, 2000);
     }
   } catch (error) { showToast(error.message, "err"); }
@@ -1525,10 +1789,10 @@ function renderReleaseHooks() {
   const box = document.getElementById("releaseHookList");
   if (!box) return;
   if (!releaseHooks.length) {
-    box.innerHTML = '<div class="empty-state compact"><h3>还没有自动 Hook</h3><p>先在“发布任务”创建可重复任务，再在这里关联并启用。</p></div>';
+    box.innerHTML = '<div class="empty-state compact"><h3>自动发布未开启</h3><p>需要时先创建一个当前项目的高级任务，再把 Hook 与它关联。</p></div>';
     return;
   }
-  box.innerHTML = `<table class="data-table release-hook-table"><thead><tr><th>Hook</th><th>关联任务</th><th>开关</th><th>合并窗口</th><th>触发统计</th><th>最近状态</th><th>操作</th></tr></thead><tbody>${releaseHooks.map((hook) => `<tr><td><strong>${escapeHtml(hook.name)}</strong><small>#${hook.id}</small></td><td><strong>${escapeHtml(hook.task_name || "任务已失效")}</strong><small>任务 #${hook.task_id}</small></td><td><label class="switch"><input type="checkbox" data-toggle-release-hook="${hook.id}" ${hook.enabled ? "checked" : ""}/><span></span></label><small>${hook.enabled ? "已启用" : "已停用"}</small></td><td><strong>${hook.debounce_seconds} 秒</strong>${hook.pending_events ? `<small class="hook-pending">等待中 · 已合并 ${hook.pending_events} 次</small><small>${escapeHtml(hook.due_at)}</small>` : '<small>当前无等待任务</small>'}</td><td><strong>${hook.trigger_count || 0}</strong><small>触发 · ${hook.merge_count || 0} 合并 · ${hook.run_count || 0} 派发</small></td><td><span class="badge badge-${hook.last_status === "failed" ? "warn" : hook.last_status === "success" ? "ok" : "draft"}">${escapeHtml(hook.last_status || "尚未触发")}</span><small title="${escapeAttr(hook.last_error || "")}">${escapeHtml(hook.last_error || hook.last_trigger_at || "—")}</small></td><td class="release-task-actions"><button type="button" class="btn btn-secondary btn-sm" data-trigger-release-hook="${hook.id}" ${hook.enabled ? "" : "disabled"}>立即触发</button><button type="button" class="btn btn-ghost btn-sm" data-edit-release-hook="${hook.id}">编辑</button><button type="button" class="btn btn-danger btn-sm" data-delete-release-hook="${hook.id}">删除</button></td></tr>`).join("")}</tbody></table>`;
+  box.innerHTML = `<table class="data-table release-hook-table"><thead><tr><th>Hook</th><th>关联任务</th><th>开关</th><th>合并窗口</th><th>触发统计</th><th>最近状态</th><th>操作</th></tr></thead><tbody>${releaseHooks.map((hook) => { const task = pushTasks.find((item) => item.id === hook.task_id); return `<tr><td><strong>${escapeHtml(hook.name)}</strong><small>#${hook.id}</small></td><td><strong>${escapeHtml(hook.task_name || "任务已失效")}</strong><small>项目：${escapeHtml(state.projectName || "当前项目")}</small><small>${escapeHtml(task ? pushTaskScopeLabel(task) : "任务已不可用")}</small></td><td><label class="switch"><input type="checkbox" data-toggle-release-hook="${hook.id}" ${hook.enabled ? "checked" : ""}/><span></span></label><small>${hook.enabled ? "已启用" : "已停用"}</small></td><td><strong>${hook.debounce_seconds} 秒</strong>${hook.pending_events ? `<small class="hook-pending">等待中 · 已合并 ${hook.pending_events} 次</small><small>${escapeHtml(hook.due_at)}</small>` : '<small>当前无等待任务</small>'}</td><td><strong>${hook.trigger_count || 0}</strong><small>触发 · ${hook.merge_count || 0} 合并 · ${hook.run_count || 0} 派发</small></td><td><span class="badge badge-${hook.last_status === "failed" ? "warn" : hook.last_status === "success" ? "ok" : "draft"}">${escapeHtml(hook.last_status || "尚未触发")}</span><small title="${escapeAttr(hook.last_error || "")}">${escapeHtml(hook.last_error || hook.last_trigger_at || "—")}</small></td><td class="release-task-actions"><button type="button" class="btn btn-secondary btn-sm" data-trigger-release-hook="${hook.id}" ${hook.enabled ? "" : "disabled"}>立即触发</button><button type="button" class="btn btn-ghost btn-sm" data-edit-release-hook="${hook.id}">编辑</button><button type="button" class="btn btn-danger btn-sm" data-delete-release-hook="${hook.id}">删除</button></td></tr>`; }).join("")}</tbody></table>`;
   box.querySelectorAll("[data-toggle-release-hook]").forEach((input) => input.onchange = () => toggleReleaseHook(Number(input.dataset.toggleReleaseHook), input.checked));
   box.querySelectorAll("[data-trigger-release-hook]").forEach((button) => button.onclick = () => triggerReleaseHook(Number(button.dataset.triggerReleaseHook)));
   box.querySelectorAll("[data-edit-release-hook]").forEach((button) => button.onclick = () => editReleaseHook(Number(button.dataset.editReleaseHook)));
@@ -1725,7 +1989,7 @@ async function runAgentHostCheck(hostID, button) {
   try {
     const result = await api(`/api/push/hosts/${hostID}/check`, { method: "POST" });
     showToast(result.status === "ok" ? `SSH 可连接，${result.latency_ms} ms` : `SSH 连接失败：${result.error}`, result.status === "ok" ? "ok" : "err");
-    if (state.globalView === "release" && state.releaseSection === "ssh") { await loadAgentWorkspace(); await loadAgentHostHistory(hostID); }
+    if (state.globalView === "agent") { await loadAgentWorkspace(); await loadAgentHostHistory(hostID); }
     else await loadAgentWorkspace();
   } catch (error) { showToast(error.message, "err"); }
   finally { if (button) { button.disabled = false; button.classList.remove("is-checking"); } }
@@ -1764,13 +2028,42 @@ async function loadPushLogs() {
   if (!state.projectId) return;
   const box = document.getElementById("pushLogList");
   if (!box) return;
-  const deployments = await api(`/api/projects/${state.projectId}/push-deployments`);
+  const projectID = state.projectId;
+  const deployments = await api(`/api/projects/${projectID}/push-deployments`);
+  if (projectID !== state.projectId) return;
+  pushDeployments = deployments || [];
   const statusLabel = { queued: "等待串行执行", running: "发布中", success: "成功", failed: "失败" };
-  box.innerHTML = `<table class="data-table"><thead><tr><th>时间</th><th>任务快照</th><th>版本</th><th>筛选</th><th>状态</th><th>服务器日志</th></tr></thead><tbody>${deployments.map((d) => { const selector = parsePushSelector(d.selector); return `<tr><td>${escapeHtml(d.created_at)}</td><td><strong>${escapeHtml(d.task_name || "临时发布")}</strong><small>${d.task_id ? `任务 #${d.task_id}` : `执行 #${d.id}`}</small>${d.idempotency_key ? `<small>请求 ${escapeHtml(d.idempotency_key.slice(-12))}</small>` : ""}</td><td><code>${escapeHtml(d.version)}</code></td><td><small>server_id：${escapeHtml((selector.server_ids || []).join(", ") || "全部")}</small><small>标签：${escapeHtml((selector.tags || []).join(", ") || "test")}</small></td><td><span class="badge badge-${d.status === "success" ? "ok" : d.status === "failed" ? "warn" : "draft"}">${escapeHtml(statusLabel[d.status] || d.status)}</span></td><td><button type="button" class="btn btn-ghost btn-sm" data-push-log="${d.id}">查看逐服输出</button></td></tr>`; }).join("")}</tbody></table>`;
+  box.innerHTML = deployments.length
+    ? `<table class="data-table"><thead><tr><th>时间</th><th>来源</th><th>版本</th><th>目标策略</th><th>状态</th><th>服务器日志</th></tr></thead><tbody>${deployments.map((d) => { const selector = parsePushSelector(d.selector); const strategy = selector.all_project_targets ? "当前项目全部目标" : `server_id：${(selector.server_ids || []).join(", ") || "全部"} · 标签：${(selector.tags || []).join(", ") || "test"}`; return `<tr><td>${escapeHtml(d.created_at)}</td><td><strong>${escapeHtml(d.task_name || "项目直接部署")}</strong><small>${d.task_id ? `任务 #${d.task_id}` : `执行 #${d.id}`}</small>${d.idempotency_key ? `<small>请求 ${escapeHtml(d.idempotency_key.slice(-12))}</small>` : ""}</td><td><code>${escapeHtml(d.version)}</code></td><td><small>${escapeHtml(strategy)}</small></td><td><span class="badge badge-${d.status === "success" ? "ok" : d.status === "failed" ? "warn" : "draft"}">${escapeHtml(statusLabel[d.status] || d.status)}</span></td><td><button type="button" class="btn btn-ghost btn-sm" data-push-log="${d.id}">查看逐服输出</button></td></tr>`; }).join("")}</tbody></table>`
+    : '<div class="empty-state compact"><h3>还没有部署记录</h3><p>先执行一次预演，确认当前项目解析出的目标。</p></div>';
   box.querySelectorAll("[data-push-log]").forEach((btn) => btn.onclick = async () => { const d = await api(`/api/projects/${state.projectId}/push-deployments/${btn.dataset.pushLog}`); const lines = (d.targets || []).map((t) => `# ${t.host_name} / ${t.server_id} [${t.status}]\n${t.output || "等待执行"}`).join("\n\n"); showModal({ title: `${d.task_name || "临时发布"} · 执行 #${d.id}`, message: lines || "没有目标", confirmText: "关闭", cancelText: "关闭", mode: "confirm" }); });
+  await loadLatestDelivery(deployments[0], projectID);
   if (pushLogRefreshTimer) window.clearTimeout(pushLogRefreshTimer);
-  if (state.globalView === "release" && deployments.some((item) => item.status === "queued" || item.status === "running")) {
+  if (state.globalView === "workspace" && state.projectTab === "delivery" && deployments.some((item) => item.status === "queued" || item.status === "running")) {
     pushLogRefreshTimer = window.setTimeout(loadPushLogs, 3000);
+  }
+}
+
+async function loadLatestDelivery(deployment, projectID) {
+  const requestID = ++latestDeliveryRequestID;
+  const meta = document.getElementById("deliveryLatestMeta");
+  const box = document.getElementById("deliveryLatestTargets");
+  if (!meta || !box) return;
+  if (!deployment) {
+    meta.textContent = "当前项目暂无部署记录。";
+    box.innerHTML = '<div class="agent-empty">暂无目标结果</div>';
+    return;
+  }
+  try {
+    const detail = await api(`/api/projects/${projectID}/push-deployments/${deployment.id}`);
+    if (requestID !== latestDeliveryRequestID || projectID !== state.projectId) return;
+    const statusLabel = { queued: "等待", running: "部署中", success: "成功", failed: "失败" };
+    meta.textContent = `#${detail.id} · ${detail.version} · ${detail.created_at} · ${statusLabel[detail.status] || detail.status}`;
+    box.innerHTML = (detail.targets || []).length
+      ? `<table class="data-table delivery-target-table"><thead><tr><th>目标</th><th>机器</th><th>状态</th><th>完成时间</th></tr></thead><tbody>${detail.targets.map((target) => `<tr><td><code>${escapeHtml(state.projectName)}|${escapeHtml(target.server_id)}</code></td><td>${escapeHtml(target.host_name || "—")}</td><td><span class="badge badge-${target.status === "success" ? "ok" : target.status === "failed" ? "warn" : "draft"}">${escapeHtml(statusLabel[target.status] || target.status)}</span></td><td>${escapeHtml(target.completed_at || target.started_at || "等待执行")}</td></tr>`).join("")}</tbody></table>`
+      : '<div class="agent-empty">本次执行没有解析到当前项目目标</div>';
+  } catch (error) {
+    if (requestID === latestDeliveryRequestID) box.innerHTML = `<div class="agent-error">${escapeHtml(error.message)}</div>`;
   }
 }
 
@@ -2255,9 +2548,7 @@ let renderedPreviewIndex = 0;
 document.getElementById("verPreviewServerId")?.addEventListener("input", () => {
   const previewSid = document.getElementById("verPreviewServerId")?.value.trim() || "";
   state.selectedServerID = previewSid || null;
-  state.previewConfirmed = false;
-  const confirmButton = document.getElementById("btnConfirmPreview");
-  if (confirmButton) confirmButton.disabled = true;
+  invalidatePreview();
   updateWorkflowUI();
   const deploySid = document.getElementById("deployServerId");
   if (deploySid && !deploySid.value.trim()) deploySid.value = previewSid;
@@ -2271,14 +2562,7 @@ function scheduleDeployPreview() {
 }
 
 async function runDeployPreviewAuto() {
-  const sid = document.getElementById("verPreviewServerId")?.value.trim();
-  if (!state.projectName || !state.version || !sid) return;
-  try {
-    const d = await fetchDeployPreview(state.projectName, state.version, sid);
-    renderPreviewReport(d, document.getElementById("verPreviewTable"));
-    const confirmButton = document.getElementById("btnConfirmPreview");
-    if (confirmButton) confirmButton.disabled = false;
-  } catch (_) {}
+  await refreshSelectedPreview();
 }
 
 function renderPreviewReport(report, container) {
@@ -2497,25 +2781,40 @@ async function fetchDeployPreview(project, version, serverId) {
   return api("/api/deploy/preview?" + q);
 }
 
-document.getElementById("btnVerPreview").onclick = async () => {
+async function refreshSelectedPreview({ notifyErrors = false } = {}) {
+  clearTimeout(previewDebounceTimer);
   const sid = document.getElementById("verPreviewServerId").value.trim();
   if (!state.projectName || !state.version || !sid) {
-    showToast("请选择版本并填写 server_id", "warn");
+    invalidatePreview();
+    if (notifyErrors) showToast("请选择版本并填写 server_id", "warn");
     return;
   }
+  invalidatePreview();
+  const requestID = previewRequestID;
+  const key = previewContextKey();
+  const button = document.getElementById("btnVerPreview");
+  button.textContent = "正在生成预览…";
   try {
     const d = await fetchDeployPreview(state.projectName, state.version, sid);
+    if (requestID !== previewRequestID || key !== previewContextKey()) return;
     renderPreviewReport(d, document.getElementById("verPreviewTable"));
     state.selectedServerID = sid;
-    state.previewConfirmed = false;
+    previewReadyKey = key;
     document.getElementById("btnConfirmPreview").disabled = false;
     updateWorkflowUI();
   } catch (e) {
-    showToast(e.message, "error");
+    if (requestID !== previewRequestID || key !== previewContextKey()) return;
+    renderFileDiffWorkspace([], document.getElementById("verPreviewTable"), { empty: `预览失败：${e.message}。检查服务器配置后重试。` });
+    if (notifyErrors) showToast(e.message, "error");
+  } finally {
+    if (requestID === previewRequestID) button.textContent = "刷新预览";
   }
-};
+}
+
+document.getElementById("btnVerPreview").onclick = () => refreshSelectedPreview({ notifyErrors: true });
 
 document.getElementById("btnConfirmPreview")?.addEventListener("click", () => {
+  if (!previewReadyKey || previewReadyKey !== previewContextKey()) return;
   state.previewConfirmed = true;
   updateWorkflowUI();
   navigateProjectTab("publish");
@@ -2524,7 +2823,7 @@ document.getElementById("btnConfirmPreview")?.addEventListener("click", () => {
 
 document.getElementById("btnFlowValidate")?.addEventListener("click", () => {
   if (!state.version) return navigateProjectTab("versions");
-  document.getElementById("btnValidate")?.click();
+  validateSelectedVersion();
 });
 
 document.getElementById("btnFlowPublish")?.addEventListener("click", () => {
@@ -2551,13 +2850,27 @@ document.getElementById("btnAddProject").onclick = async () => {
     showToast("项目名称不能包含 |，该字符用于 project|serverId 目标标签", "warn");
     return;
   }
-  await api("/api/projects", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
-  });
-  document.getElementById("newProject").value = "";
-  loadProjects();
+  const button = document.getElementById("btnAddProject");
+  button.disabled = true;
+  try {
+    const created = await api("/api/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    document.getElementById("newProject").value = "";
+    state.projectFilter = "";
+    document.getElementById("projectSearch").value = "";
+    await loadProjects();
+    const project = state.projects.find((item) => item.name === name) || created;
+    if (project?.id) await selectProject(project);
+    document.getElementById("newVersion")?.focus();
+    showToast(`项目 ${name} 已创建，接下来创建版本`);
+  } catch (error) {
+    showToast(error.message, "error");
+  } finally {
+    button.disabled = false;
+  }
 };
 
 document.getElementById("btnAddVersion").onclick = async () => {
@@ -2565,36 +2878,57 @@ document.getElementById("btnAddVersion").onclick = async () => {
   const input = document.getElementById("newVersion");
   const name = input.value.trim();
   if (!name || !state.projectId) return;
+  const project = { id: state.projectId, name: state.projectName, my_role: state.projectRole };
   if (!/^\d+\.\d+\.\d+$/.test(name)) {
     showToast("正式版本推荐使用 X.Y.Z（例如 0.0.1）；server_id 差异写 server.yaml", "warn");
   }
   button.disabled = true;
   try {
-    await api(`/api/projects/${state.projectId}/versions`, {
+    await api(`/api/projects/${project.id}/versions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
     });
-    if (input.value.trim() === name) input.value = "";
-    await selectProject({ id: state.projectId, name: state.projectName });
+    if (state.projectId === project.id) {
+      if (input.value.trim() === name) input.value = "";
+      state.versionFilter = "";
+      document.getElementById("versionSearch").value = "";
+      await selectProject(project, { preferredVersion: name });
+      navigateProjectTab("versions");
+    }
+    showToast(`版本 ${name} 已创建，请上传文件`);
+  } catch (error) {
+    showToast(error.message, "error");
   } finally {
     button.disabled = !canWriteProject();
   }
 };
 
-document.getElementById("btnValidate").onclick = async () => {
-  if (!state.projectId || !state.version) return;
+async function validateSelectedVersion() {
+  if (!state.projectId || !state.version || state.uploadBusy || state.validationBusy || state.publishBusy) return;
+  const key = versionContextKey();
+  state.validation = null;
+  state.validationBusy = true;
+  renderValidationResult("正在检查版本文件，请稍候…");
+  updateWorkflowUI();
   try {
     const r = await api(`/api/projects/${state.projectId}/versions/${encodeURIComponent(state.version)}/validate`);
-    const el = document.getElementById("validateResult");
-    let html = r.ok ? "<p class='hint'>✓ 可以发布</p>" : "<p class='warn'>✗ 不可发布</p>";
-    (r.errors || []).forEach((e) => (html += `<p class="warn">${escapeHtml(e)}</p>`));
-    (r.warnings || []).forEach((w) => (html += `<p class="hint">⚠ ${escapeHtml(w)}</p>`));
-    el.innerHTML = html;
+    if (key !== versionContextKey()) return;
+    state.validation = r;
+    renderValidationResult();
+    return r;
   } catch (e) {
-    showToast(e.message, "error");
+    if (key === versionContextKey()) {
+      state.validation = { ok: false, errors: [e.message] };
+      renderValidationResult();
+    }
+  } finally {
+    state.validationBusy = false;
+    updateWorkflowUI();
   }
-};
+}
+
+document.getElementById("btnValidate").onclick = validateSelectedVersion;
 
 document.getElementById("btnSubmitReview")?.addEventListener("click", async () => {
   if (!state.projectId || !state.version) return;
@@ -2612,13 +2946,33 @@ document.getElementById("btnRejectReview")?.addEventListener("click", async () =
 });
 
 document.getElementById("btnPublish").onclick = async () => {
-  if (!(await showConfirm({ title: "正式发布", message: "发布后不可修改。确认发布当前版本？", confirmText: "发布" }))) return;
+  if (!canWriteProject() || !state.version || state.versionStatus === "published" || state.uploadBusy || state.publishBusy || state.validationBusy) return;
+  const project = { id: state.projectId, name: state.projectName, my_role: state.projectRole };
   const ver = state.version;
-  await api(`/api/projects/${state.projectId}/versions/${encodeURIComponent(ver)}/publish`, { method: "POST" });
-  await selectProject({ id: state.projectId, name: state.projectName });
-  const versions = (await api(`/api/projects/${state.projectId}/versions`)) || [];
-  const published = versions.find((v) => v.version === ver);
-  if (published) await selectVersion(published);
+  const key = versionContextKey();
+  if (!(await showConfirm({ title: "正式发布", message: `项目：${project.name}\n版本：${ver}\n发布后版本文件不可修改。已启用的自动发布任务会被触发；否则可随后手动部署。`, confirmText: "发布" }))) return;
+  if (key !== versionContextKey() || state.uploadBusy || state.publishBusy) return;
+  state.publishBusy = true;
+  updateProjectWriteUI();
+  renderValidationResult("正在发布版本，请稍候…");
+  try {
+    await api(`/api/projects/${project.id}/versions/${encodeURIComponent(ver)}/publish`, { method: "POST" });
+    if (state.projectId === project.id && state.version === ver) {
+      await selectProject(project, { preferredVersion: ver });
+      renderValidationResult(`版本 ${ver} 已发布。可进入部署确认目标与执行结果。`);
+    }
+    showToast(`版本 ${ver} 已发布，可进入部署查看目标`);
+  } catch (error) {
+    if (key === versionContextKey()) {
+      state.validation = { ok: false, errors: [error.message] };
+      renderValidationResult();
+    }
+    showToast(error.message, "error");
+  } finally {
+    state.publishBusy = false;
+    updateReviewButtons(state.versionStatus);
+    updateProjectWriteUI();
+  }
 };
 
 document.getElementById("btnVersionDiff")?.addEventListener("click", async () => {
@@ -2668,18 +3022,49 @@ document.getElementById("btnDeleteVersion").onclick = async () => {
 };
 
 async function uploadFiles(files) {
+  if (!files?.length || state.uploadBusy || state.publishBusy || !canWriteProject() || !state.version || state.versionStatus === "published") return;
+  const context = { projectID: state.projectId, projectName: state.projectName, version: state.version };
   const tags = parseTagsInput(document.getElementById("uploadTags")?.value || "");
-  for (const file of files) {
-    await uploadOneFileWithRetry(file, tags, 3);
+  state.uploadBusy = true;
+  invalidateVersionChecks();
+  updateProjectWriteUI();
+  let progress = document.getElementById("versionUploadStatus");
+  if (!progress) {
+    progress = document.createElement("p");
+    progress.id = "versionUploadStatus";
+    progress.className = "hint upload-status";
+    progress.setAttribute("role", "status");
+    document.querySelector(".upload-zone")?.after(progress);
   }
-  selectVersion({ version: state.version, status: state.versionStatus, created_at: "", published_at: "" });
+  const fileList = Array.from(files);
+  try {
+    for (const [index, file] of fileList.entries()) {
+      const updateProgress = (percentage) => {
+        progress.textContent = `${context.projectName} / ${context.version} · ${index + 1}/${fileList.length}：${file.name}${percentage == null ? " · 正在上传…" : ` · ${percentage}%`}`;
+      };
+      updateProgress(null);
+      await uploadOneFileWithRetry(file, tags, 3, context, updateProgress);
+    }
+    progress.textContent = `${context.projectName} / ${context.version}：${fileList.length} 个文件上传完成`;
+    showToast(`${context.version}：${fileList.length} 个文件上传完成`);
+  } catch (error) {
+    progress.textContent = `上传未完成：${error.message}。已上传的文件会保留，可重试剩余文件。`;
+    throw error;
+  } finally {
+    if (state.projectId === context.projectID && state.version === context.version) {
+      try { await loadVersionFileTags(); } catch (error) { showToast(`刷新文件列表失败：${error.message}`, "error"); }
+    }
+    state.uploadBusy = false;
+    updateReviewButtons(state.versionStatus);
+    updateProjectWriteUI();
+  }
 }
 
-async function uploadOneFileWithRetry(file, tags, retries) {
+async function uploadOneFileWithRetry(file, tags, retries, context, onProgress) {
   let lastErr = null;
   for (let attempt = 1; attempt <= retries; attempt += 1) {
     try {
-      await uploadOneFile(file, tags, attempt);
+      await uploadOneFile(file, tags, attempt, context, onProgress);
       return;
     } catch (err) {
       lastErr = err;
@@ -2692,25 +3077,32 @@ async function uploadOneFileWithRetry(file, tags, retries) {
   throw lastErr;
 }
 
-function uploadOneFile(file, tags, attempt) {
+function uploadOneFile(file, tags, attempt, context, onProgress) {
   return new Promise((resolve, reject) => {
     const fd = new FormData();
     fd.append("file", file);
     fd.append("path", file.name);
     tags.forEach((tag) => fd.append("tags", tag));
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", `/api/projects/${state.projectId}/versions/${state.version}/files`);
+    xhr.open("POST", `/api/projects/${context.projectID}/versions/${encodeURIComponent(context.version)}/files`);
     xhr.withCredentials = true;
     xhr.timeout = 5 * 60 * 1000;
     const t = getToken();
     if (t) xhr.setRequestHeader("Authorization", `Bearer ${t}`);
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress?.(Math.round(event.loaded / event.total * 100));
+    };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         if (attempt > 1) showToast(`${file.name} 上传成功`, "ok");
         resolve();
         return;
       }
-      reject(new Error(xhr.responseText || `upload failed ${xhr.status}`));
+      if (xhr.status === 401) {
+        setToken(null);
+        showLogin();
+      }
+      reject(new Error(xhr.responseText || `上传失败 ${xhr.status}`));
     };
     xhr.onerror = () => reject(new Error(`${file.name} 网络错误`));
     xhr.ontimeout = () => reject(new Error(`${file.name} 上传超时`));
@@ -2733,6 +3125,7 @@ document.getElementById("fileList")?.addEventListener("click", async (e) => {
   }
   const row = state.fileRows[Number(btn.dataset.index)];
   if (!row) return;
+  if (!canWriteProject() || state.versionStatus === "published" || state.uploadBusy || state.publishBusy) return;
   try {
     if (btn.dataset.action === "edit-tags") {
       const next = await showPrompt({
@@ -2746,12 +3139,14 @@ document.getElementById("fileList")?.addEventListener("click", async (e) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path: row.path, tags: parseTagsInput(next) }),
       });
+      invalidateVersionChecks();
       await loadVersionFileTags();
     }
     if (btn.dataset.action === "clear-tags") {
       await api(`/api/projects/${state.projectId}/versions/${encodeURIComponent(state.version)}/file-tags?path=${encodeURIComponent(row.path)}`, {
         method: "DELETE",
       });
+      invalidateVersionChecks();
       await loadVersionFileTags();
     }
   } catch (err) {
@@ -2760,7 +3155,7 @@ document.getElementById("fileList")?.addEventListener("click", async (e) => {
 });
 
 document.getElementById("btnApplyFileTags")?.addEventListener("click", async () => {
-  if (!state.projectId || !state.version) return;
+  if (!state.projectId || !state.version || !canWriteProject() || state.versionStatus === "published" || state.uploadBusy || state.publishBusy) return;
   const raw = document.getElementById("tagBatchPaths")?.value || "";
   const items = raw.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
   const patterns = items.filter((x) => /[*?[\]]/.test(x) || x.endsWith("/**"));
@@ -2773,6 +3168,7 @@ document.getElementById("btnApplyFileTags")?.addEventListener("click", async () 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ paths, patterns, tags, mode }),
     });
+    invalidateVersionChecks();
     await loadVersionFileTags();
   } catch (err) {
     showToast(err.message, "error");
@@ -2780,15 +3176,11 @@ document.getElementById("btnApplyFileTags")?.addEventListener("click", async () 
 });
 
 document.getElementById("fileInput").onchange = async (e) => {
-  const uploadActions = [document.getElementById("btnValidate"), document.getElementById("btnPublish")].filter(Boolean);
-  const previousDisabled = uploadActions.map((button) => button.disabled);
-  uploadActions.forEach((button) => { button.disabled = true; });
   try {
     await uploadFiles(e.target.files);
   } catch (err) {
     showToast(err.message, "error");
   } finally {
-    uploadActions.forEach((button, index) => { button.disabled = previousDisabled[index]; });
     // Selecting the same local file for another version must fire change again.
     // File inputs cannot be assigned programmatically except to clear them.
     e.target.value = "";
@@ -3108,11 +3500,6 @@ function hasSeenOnboarding() {
 
 function markOnboardingSeen(status = "done") {
   localStorage.setItem(onboardingKey(), JSON.stringify({ status, at: new Date().toISOString() }));
-}
-
-function scheduleOnboarding() {
-  if (navigator.webdriver || hasSeenOnboarding()) return;
-  window.setTimeout(() => startOnboarding({ force: false }), 1200);
 }
 
 function demoServerYaml() {

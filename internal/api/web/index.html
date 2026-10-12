@@ -25,7 +25,7 @@
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
         </div>
         <h1>express233</h1>
-        <p class="login-sub">游戏服务器集群 · 推拉一体交付控制台</p>
+        <p class="login-sub">管理版本，安心发布游戏服务器</p>
       </div>
       <h2 class="login-title">账号密码登录</h2>
       <label class="field">
@@ -81,9 +81,9 @@
           <svg class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>
           <span>文档目录</span>
         </button>
-        <button type="button" class="sidebar-nav-item" data-global="release" data-testid="nav-release">
-          <svg class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 1l4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3"/></svg>
-          <span>远程发布</span>
+        <button type="button" class="sidebar-nav-item admin-only hidden" data-global="agent" data-testid="nav-agent">
+          <svg class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01M11 7h7M11 17h7"/></svg>
+          <span>机器与目标</span>
         </button>
         <button type="button" class="sidebar-nav-item" data-global="server">
           <svg class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
@@ -126,38 +126,12 @@
         </button>
         <span id="navigationCurrent" class="navigation-current"></span>
       </div>
-      <div id="globalRelease" class="global-panel hidden" data-testid="release-panel">
-        <header class="page-header release-header">
-          <div><h1>远程交付</h1><p class="subtitle">项目版本、发布任务、执行日志与全局 SSH 机器在同一工作区完成。</p></div>
-          <div id="releaseProjectContext" class="toolbar compact"><button type="button" id="btnReturnProject" class="btn btn-ghost btn-sm" data-testid="return-project-workspace">返回项目工作区</button><select id="releaseProject" class="input" aria-label="发布项目"><option value="">选择项目</option></select><button type="button" id="btnReleaseReload" class="btn btn-secondary btn-sm">刷新</button></div>
-        </header>
-        <nav class="release-tabs" aria-label="远程交付功能">
-          <button type="button" class="release-tab active" data-release-section="tasks" data-testid="release-tab-tasks">发布任务</button>
-          <button type="button" class="release-tab" data-release-section="logs" data-testid="release-tab-logs">发布日志</button>
-          <button type="button" class="release-tab" data-release-section="hooks" data-testid="release-tab-hooks">自动 Hook</button>
-          <button type="button" class="release-tab admin-only hidden" data-release-section="ssh" data-testid="release-tab-ssh">SSH 机器</button>
-        </nav>
-        <div id="releaseProjectEmpty" class="card empty-state"><h3>先选择发布项目</h3><p>选择项目后立即配置、编辑、删除或一键执行整个集群的发布任务。</p><div id="releaseProjectCards" class="release-project-cards"></div></div>
-        <div id="releaseProjectContent" class="hidden">
-          <div id="ptab-push" class="card">
-            <div class="card-title-row"><div><h3 class="card-title">可重复发布任务</h3><p class="hint">留空服务器 ID 即整个集群；任务引用全局 SSH 节点与 server_id 绑定。</p></div><span id="pushLatestHint" class="badge badge-ok">最新已发布版本：—</span></div>
-            <div class="release-safety-strip" aria-label="安全发布顺序"><span><b>1</b>远端预拉取与校验</span><i>→</i><span><b>2</b>逐目标加锁</span><i>→</i><span><b>3</b>SIGTERM 等待正常退出</span><i>→</i><span><b>4</b>换包、启动、健康门禁</span></div>
-            <p class="release-contract-note">控制台提供执行 ID、Idempotency-Key 与 <code>project|serverId</code>；游戏服发布脚本负责 PID / systemd、优雅退出和健康条件。</p>
-            <div class="release-task-editor project-write" data-testid="release-task-editor"><input id="pushTaskName" class="input" maxlength="100" placeholder="任务名称，例如全服发布" /><select id="pushTaskVersion" class="input" aria-label="发布版本"></select><input id="pushTaskServerIDs" class="input" placeholder="服务器 ID，留空=整个集群" /><input id="pushTaskTags" class="input" value="test" placeholder="标签，默认 test" /><select id="pushTaskTagMatch" class="input"><option value="all">标签同时满足</option><option value="any">任一标签匹配</option></select><button type="button" id="btnSavePushTask" class="btn btn-secondary btn-sm">保存任务</button><button type="button" id="btnSaveAndRunPushTask" class="btn btn-primary btn-sm">保存并发布整个集群</button><button type="button" id="btnCancelPushTask" class="btn btn-ghost btn-sm hidden">取消编辑</button></div>
-            <div id="pushTaskList" class="table-wrap" data-testid="release-task-list"></div>
-          </div>
-          <div id="ptab-pushlogs" class="card">
-            <div class="card-title-row"><div><h3 class="card-title">发布日志</h3><p class="hint">每次执行保留逐服务器输出；不可删除 · 保留 30 天。</p></div><button type="button" id="btnReloadPushLogs" class="btn btn-secondary btn-sm">刷新</button></div>
-            <div id="pushLogList" class="table-wrap"></div>
-          </div>
-        </div>
-      </div>
       <div id="emptyProject" class="empty-state">
         <div class="empty-icon" aria-hidden="true">
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
         </div>
-        <h2>选择项目</h2>
-        <p>在左侧选择或创建项目，管理版本包与 server_id 配置替换。</p>
+        <h2>从一个服务开始</h2>
+        <p>逻辑服、网关、SDK 服都可以作为独立项目管理。<br />在左侧创建或选择项目，上传版本包，再部署到服务器。</p>
         <div class="empty-actions"><button type="button" id="btnDemoProject" class="btn btn-secondary">添加演示项目</button></div>
       </div>
 
@@ -259,7 +233,7 @@
         </div>
       </div>
 
-      <div id="globalAgent" class="release-subpanel agent-panel hidden admin-only" data-testid="agent-panel">
+      <div id="globalAgent" class="global-panel agent-panel hidden admin-only" data-testid="agent-panel">
         <header class="page-header agent-header">
           <div>
             <h2>SSH 机器</h2>
@@ -444,7 +418,7 @@
             <div class="workspace-title">
               <h1 id="curProject" data-testid="cur-project">—</h1>
               <span id="projectRoleBadge" class="project-role">管理员</span>
-              <button type="button" id="btnDelProject" class="btn btn-danger btn-sm hidden">删除项目</button>
+              <details class="project-manage-menu"><summary>项目管理</summary><button type="button" id="btnDelProject" class="btn btn-danger btn-sm hidden">删除项目</button></details>
             </div>
             <div class="workspace-release-summary" aria-label="当前项目交付摘要">
               <div><span>最新发布</span><strong id="workspaceLatestVersion">—</strong><small id="workspaceLatestState">暂无已发布版本</small></div>
@@ -455,16 +429,19 @@
           <div class="project-module-tabs">
             <nav class="project-tabs project-flow-tabs" role="tablist" aria-label="项目交付流程">
               <button type="button" class="project-tab active" data-ptab="versions" title="版本" aria-label="版本">
-                <span class="flow-step-number">1</span><span>Artifact 版本</span>
+                <span>版本包</span>
               </button>
               <button type="button" class="project-tab" data-ptab="config" title="Server 配置">
-                <span class="flow-step-number">2</span><span>Server 配置</span>
+                <span>分服配置</span>
               </button>
               <button type="button" class="project-tab" data-ptab="preview" title="拉取预览" aria-label="拉取预览">
-                <span class="flow-step-number">3</span><span>合成预览</span>
+                <span>配置预览</span>
               </button>
               <button type="button" class="project-tab" data-ptab="publish" title="发布">
-                <span class="flow-step-number">4</span><span>发布</span>
+                <span>发布版本</span>
+              </button>
+              <button type="button" class="project-tab" data-ptab="delivery" title="部署">
+                <span>部署上线</span>
               </button>
             </nav>
             <nav class="project-secondary-tabs" aria-label="项目辅助功能">
@@ -472,22 +449,14 @@
               <button type="button" class="project-tab" data-ptab="cluster">集群节点</button>
               <button type="button" class="project-tab" data-ptab="team">团队</button>
               <button type="button" class="project-tab" data-ptab="deploy" aria-label="部署">部署脚本</button>
-              <button type="button" class="project-tab" data-ptab="hooks">自动 Hook</button>
-              <button type="button" class="project-action-tab" data-project-action="release" data-release-target="tasks">发布任务</button>
-              <button type="button" class="project-action-tab sr-only" data-project-action="release" data-release-target="logs">发布日志</button>
             </nav>
           </div>
         </header>
 
-        <div class="workflow-trail" aria-label="当前交付进度">
-          <button type="button" data-flow-target="versions" aria-label="打开 Artifact 步骤"><span class="trail-icon">1</span><span><strong id="flowVersion">选择 Artifact 版本</strong><small>共享模板</small></span></button>
-          <i aria-hidden="true">→</i>
-          <button type="button" data-flow-target="config"><span class="trail-icon">2</span><span><strong id="flowServers">配置 Server 覆盖</strong><small id="flowServerDetail">尚未配置</small></span></button>
-          <i aria-hidden="true">→</i>
-          <button type="button" data-flow-target="preview"><span class="trail-icon">3</span><span><strong id="flowPreview">合成预览待确认</strong><small>模板 + 覆盖</small></span></button>
-          <i aria-hidden="true">→</i>
-          <button type="button" data-flow-target="publish"><span class="trail-icon">4</span><span><strong id="flowPublish">尚未发布</strong><small>检查后交付</small></span></button>
-        </div>
+        <section class="workspace-next" aria-label="下一步" data-testid="workspace-next-card">
+          <div><strong id="workspaceNextTitle">创建第一个版本</strong><p id="workspaceNextHint">上传程序与配置，再检查并发布。</p></div>
+          <button type="button" id="btnWorkspaceNext" class="btn btn-primary btn-sm" data-testid="workspace-next">新建版本</button>
+        </section>
 
         <div id="ptab-versions" class="ptab-panel">
           <div class="split-versions">
@@ -496,14 +465,14 @@
                 <span class="card-title">版本列表</span>
               </div>
               <div class="toolbar compact">
-                <input id="newVersion" placeholder="0.0.1" class="input" data-testid="new-version-input" />
+                <input id="newVersion" placeholder="0.0.1" aria-label="新版本号" class="input" data-testid="new-version-input" />
                 <button type="button" id="btnAddVersion" class="btn btn-primary btn-sm project-write" data-testid="add-version">新建</button>
               </div>
               <div class="version-search-wrap">
                 <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
                 <input id="versionSearch" type="search" placeholder="搜索版本…" class="search-input" data-testid="version-search" />
               </div>
-              <p class="hint version-rule">推荐 <code>0.0.1</code>。正式发布只接受 <code>X.Y.Z</code>；server_id 差异写入 server.yaml。</p><div class="version-divider"></div>
+              <p class="hint version-rule">版本号格式：<code>1.0.0</code>。先存为草稿，准备好后发布。</p><div class="version-divider"></div>
               <ul id="versionList" class="version-list" data-testid="version-list"></ul>
             </div>
             <div id="versionDetail" class="card version-detail hidden" data-testid="version-detail">
@@ -518,17 +487,20 @@
                   <button type="button" id="btnDeleteVersion" class="btn btn-danger btn-sm project-write">删除版本</button>
                 </div>
               </div>
-              <div id="verProvenance" class="hint provenance-summary" data-testid="version-provenance"></div>
-              <div id="validateResult" data-testid="validate-result"></div>
-              <p class="hint">配置文件 basename 全局唯一；server.yaml 按文件名替换。已发布版本是不可变快照；修复请创建新版本，回滚请选择历史已发布版本。</p>
+              <div id="validateResult" data-testid="validate-result" role="status"></div>
+              <p class="hint">上传程序、配置文件或 ZIP 包。发布后锁定内容，后续修改请新建版本。</p>
               <h3 class="card-title">文件</h3>
               <label class="upload-zone project-write">
                 <input type="file" id="fileInput" multiple data-testid="file-input" />
-                <span>点击或拖拽上传文件 / zip 包</span>
+                <span>点击选择文件，或拖入 ZIP 版本包</span>
               </label>
               <div class="tag-toolbar project-write">
-                <input id="uploadTags" class="input" placeholder="上传标签，空=all，如 linux-amd64" data-testid="upload-tags" />
+                <input id="uploadTags" class="input" aria-label="上传文件标签" placeholder="可选：平台标签，如 linux-amd64；留空适用全部" data-testid="upload-tags" />
               </div>
+              <details id="versionAdvanced" class="workspace-details">
+                <summary>高级：批量文件标签与构建来源</summary>
+                <div id="verProvenance" class="hint provenance-summary" data-testid="version-provenance"></div>
+                <p class="hint">多平台共用一个版本包时，可通过路径和标签筛选文件。</p>
               <div class="tag-batch project-write">
                 <textarea id="tagBatchPaths" class="input tag-paths" placeholder="批量路径或 glob，每行一个，如 bin/windows/**" data-testid="tag-batch-paths"></textarea>
                 <input id="tagBatchTags" class="input" placeholder="标签，如 all,windows-amd64,windows" data-testid="tag-batch-tags" />
@@ -540,6 +512,7 @@
                 </select>
                 <button type="button" id="btnApplyFileTags" class="btn btn-secondary btn-sm" data-testid="tag-batch-apply">批量处理</button>
               </div>
+              </details>
               <div class="file-search-wrap">
                 <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
                 <input id="fileSearch" type="search" placeholder="搜索文件路径或标签…" class="search-input" data-testid="file-search" />
@@ -556,7 +529,8 @@
               </div>
             </div>
             <aside class="version-inspector" aria-label="版本策略与最近活动">
-              <section class="card version-retention-card" data-testid="version-retention-card">
+              <details id="versionPolicyDetails" class="card version-retention-card workspace-details" data-testid="version-retention-card">
+                <summary>版本保留策略</summary>
                 <div class="inspector-title-row">
                   <div><h2>版本保留策略</h2><p>控制已发布制品的存储数量</p></div>
                   <span id="versionRetentionBadge" class="badge badge-draft">无限保留</span>
@@ -575,11 +549,11 @@
                 </div>
                 <p id="versionRetentionHint" class="retention-hint">所有已发布版本都会保留，草稿不受影响。</p>
                 <button type="button" id="btnSaveVersionRetention" class="btn btn-primary btn-block" data-testid="save-version-retention">保存策略</button>
-              </section>
-              <section class="card version-activity-card">
+              </details>
+              <details class="card version-activity-card workspace-details"><summary>最近版本活动</summary>
                 <div class="inspector-title-row"><div><h2>最近活动</h2><p id="versionActivitySummary">等待版本数据</p></div></div>
                 <ol id="versionActivityList" class="version-activity-list"></ol>
-              </section>
+              </details>
             </aside>
           </div>
         </div>
@@ -587,18 +561,21 @@
         <div id="ptab-config" class="ptab-panel hidden" data-testid="server-config-panel">
           <div class="server-config-layout">
             <aside class="server-config-rail">
-              <div class="rail-title"><div><h2>Server 配置</h2><p>覆盖共享 Artifact 模板</p></div><button type="button" id="btnNewServerConfig" class="btn btn-primary btn-sm project-write">新建</button></div>
+              <div class="rail-title"><div><h2>分服配置</h2><p>租户共享；同一 server_id 的修改会影响使用它的项目</p></div><button type="button" id="btnNewServerConfig" class="btn btn-primary btn-sm project-write">新建</button></div>
               <input id="serverConfigSearch" type="search" class="search-input" placeholder="搜索 Server ID 或目标标签" />
               <div id="serverConfigList" class="server-config-list" data-testid="server-config-list"></div>
             </aside>
             <section id="serverConfigDetail" class="server-config-detail">
-              <div id="serverConfigEmpty" class="empty-state compact"><h3>选择 Server 配置</h3><p>每个 Server ID 覆盖共享模板，形成唯一交付目标。</p></div>
+              <div id="serverConfigEmpty" class="empty-state compact"><h3>为不同区服设置参数</h3><p>选择或新建 server_id，覆盖端口、区服编号等配置。<br />无需替换配置的项目，可直接检查并发布版本包。</p><button type="button" data-flow-target="publish" class="btn btn-secondary btn-sm">前往发布版本</button></div>
               <div id="serverConfigEditor" class="hidden">
                 <header class="config-editor-head"><div><h2>Server <span id="serverConfigTitle">—</span></h2><p>目标标签 <code id="serverConfigTarget">—</code></p></div><div class="toolbar compact"><button type="button" id="btnDuplicateServerConfig" class="btn btn-secondary btn-sm">复制配置</button><button type="button" id="btnDeleteServerConfig" class="btn btn-danger btn-sm project-write">删除</button></div></header>
                 <div class="source-equation"><span>Artifact 模板 <strong id="configSourceVersion">未选版本</strong></span><b>+</b><span>Server 覆盖 <strong id="configSourceServer">—</strong></span><b>=</b><span>最终交付内容</span></div>
                 <div class="config-file-workspace">
                   <aside><div class="panel-label">模板配置文件</div><div id="serverReplacementFiles" class="replacement-file-list"></div></aside>
-                  <section><div class="config-pane-head"><span id="serverConfigFileTitle">全部覆盖</span><span id="serverConfigSaveState" class="save-state">已保存</span></div><textarea id="serverConfigJSON" class="code-editor server-config-json" spellcheck="false" aria-label="Server 覆盖 JSON"></textarea></section>
+                  <section><div class="config-pane-head"><span id="serverConfigFileTitle">分服参数</span><span id="serverConfigSaveState" class="save-state">已保存</span></div>
+                    <div id="serverOverrideForm" class="override-form" data-testid="server-override-form"></div>
+                    <details id="serverConfigRaw" class="workspace-details"><summary>高级：完整 JSON 与启动钩子</summary><textarea id="serverConfigJSON" class="code-editor server-config-json" spellcheck="false" aria-label="Server 覆盖 JSON"></textarea></details>
+                  </section>
                 </div>
                 <details class="raw-yaml-details"><summary>高级：原始 server.yaml</summary><p>适合批量编辑；保存会校验全部 Server 配置。</p><button type="button" id="btnOpenRawYaml" class="btn btn-secondary btn-sm">打开高级配置</button></details>
                 <div class="config-editor-actions"><button type="button" id="btnSaveServerConfig" class="btn btn-primary project-write">保存配置并进入预览</button></div>
@@ -621,7 +598,7 @@
         </div>
 
         <div id="ptab-preview" class="ptab-panel hidden">
-          <div class="preview-context"><div><h2>合成预览</h2><p>确认 Artifact 模板应用 Server 覆盖后的最终内容。</p></div><code id="previewTargetTag">选择 Server ID</code></div>
+          <div class="preview-context"><div><h2>配置预览</h2><p>选择区服，对照原始配置和替换后的内容。预览不会修改服务器。</p></div><code id="previewTargetTag">选择 Server ID</code></div>
           <div class="card preview-card">
             <div class="toolbar preview-toolbar">
               <div class="server-id-combobox"><input id="verPreviewServerId" placeholder="搜索 server_id" class="input server-id-input" autocomplete="off" data-testid="preview-server-id" /><div class="server-id-options hidden"></div></div>
@@ -650,13 +627,65 @@
         <div id="ptab-publish" class="ptab-panel hidden" data-testid="publish-flow-panel">
           <div class="publish-flow-layout">
             <section class="publish-checklist">
-              <header><h2>发布</h2><p>按顺序确认模板、Server 配置与合成结果。</p></header>
+              <header><h2>发布版本包</h2><p>检查文件并锁定版本，供服务器部署使用。</p></header>
               <div class="publish-check-row"><span>1</span><div><strong id="publishVersionCheck">未选择 Artifact 版本</strong><small>正式版本必须为 X.Y.Z</small></div><button type="button" data-flow-target="versions" class="btn btn-ghost btn-sm">检查</button></div>
-              <div class="publish-check-row"><span>2</span><div><strong id="publishConfigCheck">未选择 Server 配置</strong><small>目标标签 project|serverId</small></div><button type="button" data-flow-target="config" class="btn btn-ghost btn-sm">检查</button></div>
-              <div class="publish-check-row"><span>3</span><div><strong id="publishPreviewCheck">预览尚未确认</strong><small>检查替换后配置全文</small></div><button type="button" data-flow-target="preview" class="btn btn-ghost btn-sm">检查</button></div>
+              <div class="publish-check-row"><span>2</span><div><strong id="publishConfigCheck">未选择分服配置</strong><small>可选：不同区服需要不同参数时设置</small></div><button type="button" data-flow-target="config" class="btn btn-ghost btn-sm">配置</button></div>
+              <div class="publish-check-row"><span>3</span><div><strong id="publishPreviewCheck">尚未预览</strong><small>可选：核对分服配置的替换结果</small></div><button type="button" data-flow-target="preview" class="btn btn-ghost btn-sm">预览</button></div>
+              <div id="flowValidateResult" data-testid="flow-validate-result" role="status"></div>
             </section>
-            <aside class="publish-action-panel"><h3>生成不可变版本</h3><p>发布后 Artifact 不可修改。需要修复时创建新版本。</p><div class="publish-summary"><span>项目<strong id="publishProjectName">—</strong></span><span>版本<strong id="publishVersionName">—</strong></span><span>目标<strong id="publishTargetName">—</strong></span></div><button type="button" id="btnFlowValidate" class="btn btn-secondary">发布前检查</button><button type="button" id="btnFlowPublish" class="btn btn-primary" disabled>正式发布</button><button type="button" data-project-action="release" data-release-target="tasks" class="btn btn-ghost">发布任务</button></aside>
+            <aside class="publish-action-panel"><h3>确认版本</h3><p>发布后文件不可修改。已启用的自动发布规则可能随后触发部署。</p><div class="publish-summary"><span>项目<strong id="publishProjectName">—</strong></span><span>版本<strong id="publishVersionName">—</strong></span><span>预览区服<strong id="publishTargetName">—</strong></span></div><p id="flowPublishHint" class="hint"></p><button type="button" id="btnFlowValidate" class="btn btn-secondary">发布前检查</button><button type="button" id="btnFlowPublish" class="btn btn-primary" disabled>正式发布</button><button type="button" id="btnPublishedDeploy" data-flow-target="delivery" class="btn btn-secondary">进入部署</button></aside>
           </div>
+        </div>
+
+        <div id="ptab-delivery" class="ptab-panel hidden" data-testid="delivery-flow-panel">
+          <div class="delivery-overview-grid">
+            <section class="card delivery-launch-card">
+              <div class="card-title-row"><div><span class="eyebrow">当前项目</span><h2 class="card-title">部署到服务器</h2><p class="hint">将最新已发布版本部署到当前项目绑定的全部目标。先预演，核对版本和目标。</p></div><span id="deliveryReadiness" class="badge badge-draft">正在检查</span></div>
+              <dl class="delivery-definition-list">
+                <div><dt>项目</dt><dd id="deliveryProjectName">—</dd></div>
+                <div><dt>版本</dt><dd id="deliveryVersionName">—</dd></div>
+                <div><dt>目标</dt><dd id="deliveryTargetSummary">—</dd></div>
+                <div><dt>备份</dt><dd id="deliveryBackupSummary">按目标策略</dd></div>
+              </dl>
+              <div class="delivery-actions project-write"><button type="button" id="btnQuickDeploy" class="btn btn-primary" data-testid="quick-deploy">发布当前项目</button><button type="button" id="btnQuickDeployPreview" class="btn btn-secondary" data-testid="quick-deploy-preview">预演</button></div>
+              <p class="release-contract-note">每次执行只解析 <code id="deliveryProjectTag">project|serverId</code>；不同项目的旧任务或目标不会被带入。</p>
+            </section>
+            <aside class="card delivery-automation-card">
+              <div class="delivery-automation-heading"><div><span class="eyebrow">自动发布</span><h3>跟随当前项目</h3></div><label class="switch" title="启用当前项目 Hook"><input id="deliveryAutomationToggle" type="checkbox" /><span></span></label></div>
+              <p id="deliveryAutomationSummary">未配置自动发布。需要时再开启。</p>
+              <button type="button" id="btnDeliveryAutomationSettings" class="btn btn-ghost btn-sm">配置 Hook</button>
+            </aside>
+          </div>
+
+          <section class="card delivery-latest-card">
+            <div class="card-title-row"><div><h3 class="card-title">最近一次部署</h3><p id="deliveryLatestMeta" class="hint">当前项目暂无部署记录。</p></div><button type="button" id="btnReloadDelivery" class="btn btn-secondary btn-sm">刷新</button></div>
+            <div id="deliveryLatestTargets" class="delivery-target-list" data-testid="delivery-latest-targets"><div class="agent-empty">暂无目标结果</div></div>
+          </section>
+
+          <details id="deliveryTasksDetails" class="card delivery-advanced">
+            <summary><span><strong>高级发布任务</strong><small>仅在需要固定版本、固定 server_id 或标签策略时使用</small></span><span id="deliveryTaskCount" class="badge badge-draft">0 个</span></summary>
+            <div id="ptab-push">
+              <div class="card-title-row"><div><h3 class="card-title">可重复发布任务</h3><p class="hint">任务只属于当前项目；默认在每次执行时解析该项目的最新目标。</p></div><span id="pushLatestHint" class="badge badge-ok">最新已发布版本：—</span></div>
+              <div class="release-task-editor project-write" data-testid="release-task-editor"><input id="pushTaskName" class="input" maxlength="100" placeholder="任务名称，例如测试服发布" /><select id="pushTaskVersion" class="input" aria-label="发布版本"></select><div class="release-task-target-editor"><select id="pushTaskTargetMode" class="input" aria-label="目标策略"><option value="project">跟随项目当前目标（推荐）</option><option value="fixed">固定 server_id 子集</option></select><input id="pushTaskServerIDs" class="input" disabled placeholder="执行时自动读取当前项目绑定" /></div><input id="pushTaskTags" class="input" value="test" placeholder="标签，默认 test" /><select id="pushTaskTagMatch" class="input"><option value="all">标签同时满足</option><option value="any">任一标签匹配</option></select><button type="button" id="btnSavePushTask" class="btn btn-secondary btn-sm">保存任务</button><button type="button" id="btnSaveAndRunPushTask" class="btn btn-primary btn-sm">保存并发布</button><button type="button" id="btnCancelPushTask" class="btn btn-ghost btn-sm hidden">取消编辑</button></div>
+              <div id="pushTaskList" class="table-wrap" data-testid="release-task-list"></div>
+            </div>
+          </details>
+
+          <details id="deliveryHooksDetails" class="card delivery-advanced">
+            <summary><span><strong>自动 Hook</strong><small>监听当前项目的新版本，只执行当前项目任务</small></span><span id="deliveryHookCount" class="badge badge-draft">0 个</span></summary>
+            <div id="ptab-hooks">
+              <div class="card-title-row"><div><h3 class="card-title">自动发布</h3><p class="hint">等待 30 秒会合并连续发布，只执行最后一个版本。</p></div><span class="badge badge-ok">默认等待 30 秒</span></div>
+              <div class="hook-editor project-write" data-testid="release-hook-editor"><input id="releaseHookName" class="input" maxlength="100" placeholder="Hook 名称，例如逻辑服自动发布" /><select id="releaseHookTask" class="input" aria-label="关联发布任务"><option value="">选择当前项目的发布任务</option></select><label class="hook-delay-field"><span>防抖等待</span><input id="releaseHookDebounce" class="input" type="number" min="1" max="3600" value="30" /><span>秒</span></label><label class="check-label"><input id="releaseHookEnabled" type="checkbox" checked />创建后立即启用</label><button type="button" id="btnSaveReleaseHook" class="btn btn-primary btn-sm">保存 Hook</button><button type="button" id="btnCancelReleaseHook" class="btn btn-ghost btn-sm hidden">取消编辑</button></div>
+              <div id="releaseHookList" class="table-wrap" data-testid="release-hook-list"></div>
+              <div class="card-title-row hook-event-heading"><div><h3 class="card-title">Hook 触发记录</h3><p class="hint">首次触发、窗口合并和最终派发全部留痕 30 天。</p></div><button type="button" id="btnReloadReleaseHooks" class="btn btn-secondary btn-sm">刷新</button></div>
+              <div id="releaseHookEventList" class="table-wrap" data-testid="release-hook-events"></div>
+            </div>
+          </details>
+
+          <details id="deliveryHistoryDetails" class="card delivery-advanced">
+            <summary><span><strong>部署历史</strong><small>逐目标输出保留 30 天</small></span><span class="badge badge-draft">只读</span></summary>
+            <div id="ptab-pushlogs"><div class="card-title-row"><div><h3 class="card-title">发布日志</h3><p class="hint">每次执行保留逐服务器输出；不可删除。</p></div><button type="button" id="btnReloadPushLogs" class="btn btn-secondary btn-sm">刷新</button></div><div id="pushLogList" class="table-wrap"></div></div>
+          </details>
         </div>
 
         <div id="ptab-team" class="ptab-panel hidden">
@@ -694,28 +723,6 @@
           </div>
         </div>
 
-        <div id="ptab-hooks" class="ptab-panel hidden">
-          <div class="card">
-            <div class="card-title-row">
-              <div><h3 class="card-title">自动发布</h3><p class="hint">先在“发布到远程”保存发布任务；这里选中任务并保存。以后 Gitea / GitHub 发布新版本时，系统会自动执行。等待 30 秒是合并连续发布，只执行最后一个版本。</p></div>
-              <span class="badge badge-ok">默认等待 30 秒</span>
-            </div>
-            <div class="hook-editor project-write" data-testid="release-hook-editor">
-              <input id="releaseHookName" class="input" maxlength="100" placeholder="Hook 名称，例如 逻辑服自动全量发布" />
-              <select id="releaseHookTask" class="input" aria-label="关联发布任务"><option value="">选择发布任务</option></select>
-              <label class="hook-delay-field"><span>防抖等待</span><input id="releaseHookDebounce" class="input" type="number" min="1" max="3600" value="30" /><span>秒</span></label>
-              <label class="check-label"><input id="releaseHookEnabled" type="checkbox" checked />创建后立即启用</label>
-              <button type="button" id="btnSaveReleaseHook" class="btn btn-primary btn-sm">保存 Hook</button>
-              <button type="button" id="btnCancelReleaseHook" class="btn btn-ghost btn-sm hidden">取消编辑</button>
-            </div>
-            <div id="releaseHookList" class="table-wrap" data-testid="release-hook-list"></div>
-          </div>
-          <div class="card hook-events-card">
-            <div class="card-title-row"><div><h3 class="card-title">Hook 触发记录</h3><p class="hint">首次触发、窗口合并和最终派发全部留痕 30 天，不记录 CI 密码、Token 或 SSH 凭据。</p></div><div class="toolbar compact"><span class="badge badge-draft">保留 30 天</span><button type="button" id="btnReloadReleaseHooks" class="btn btn-secondary btn-sm">刷新</button></div></div>
-            <div id="releaseHookEventList" class="table-wrap" data-testid="release-hook-events"></div>
-          </div>
-        </div>
-
         <div id="ptab-diff" class="ptab-panel hidden">
           <div class="card">
             <h3 class="card-title">版本对比</h3>
@@ -745,6 +752,7 @@
   <script src="/vendor/prismjs/prism-go.min.js"></script>
   <script src="/vendor/prismjs/prism-properties.min.js"></script>
   <script src="/vendor/echarts.min.js"></script>
+  <script src="/server-config-form.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

@@ -21,8 +21,7 @@ test.describe("Agent 与 SSH 节点", () => {
       if (!response.ok) throw new Error(await response.text());
     }, name);
 
-    await page.getByTestId("nav-release").click();
-    await page.getByTestId("release-tab-ssh").click();
+    await page.getByTestId("nav-agent").click();
     await expect(page.getByTestId("agent-panel")).toBeVisible();
     await expect(page.getByTestId("agent-summary")).toContainText("Agent API 操作");
     await expect(page.getByTestId("agent-capabilities")).toContainText("/api/push/hosts/{hostID}/check");
@@ -36,8 +35,7 @@ test.describe("Agent 与 SSH 节点", () => {
 
   test("移动端仍能访问节点与 API 清单", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.getByTestId("nav-release").click();
-    await page.getByTestId("release-tab-ssh").click();
+    await page.getByTestId("nav-agent").click();
     await expect(page.getByTestId("agent-summary")).toBeVisible();
     await expect(page.getByTestId("agent-host-list")).toBeVisible();
     await expect(page.getByTestId("agent-capabilities")).toBeVisible();

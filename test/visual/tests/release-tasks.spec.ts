@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import path from "path";
 import { loginAsRoot } from "./helpers";
 
-test("SSH 资源与可重复发布任务分离，执行日志只读保留", async ({ page }) => {
+test("部署始终跟随当前项目，高级任务与 Hook 按需展开", async ({ page }) => {
   await loginAsRoot(page);
 
   const projectName = `release-task-${Date.now()}`;
@@ -20,44 +20,63 @@ test("SSH 资源与可重复发布任务分离，执行日志只读保留", asyn
   await page.locator(".modal-card").getByRole("button", { name: "发布" }).click();
   await expect(page.getByTestId("ver-status")).toContainText("published", { timeout: 15_000 });
 
-  await page.evaluate(async ({ hostName }) => {
+  await page.evaluate(async ({ hostName, projectName }) => {
     const hostResponse = await fetch("/api/push/hosts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: hostName, address: "127.0.0.1", port: 1, username: "root", auth_mode: "agent", host_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", health_check_enabled: true, health_check_interval_seconds: 3600 }) });
     if (!hostResponse.ok) throw new Error(await hostResponse.text());
     const host = await hostResponse.json();
-    const bindingResponse = await fetch(`/api/push/hosts/${host.id}/servers`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ server_id: "visual-s1", labels: "test", remote_root: "/opt/game-servers", os: "linux", arch: "amd64" }) });
+    const bindingResponse = await fetch(`/api/push/hosts/${host.id}/servers`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project_name: projectName, server_id: "visual-s1", labels: "test", remote_root: "/opt/game-servers", skip_backup: true, os: "linux", arch: "amd64" }) });
     if (!bindingResponse.ok) throw new Error(await bindingResponse.text());
-  }, { hostName });
+  }, { hostName, projectName });
 
-  await page.getByTestId("nav-release").click();
-  await page.getByTestId("release-tab-ssh").click();
+  await page.getByTestId("nav-agent").click();
   await expect(page.getByTestId("ssh-resource-list")).toContainText(hostName);
   await page.getByTestId("project-list").getByText(projectName, { exact: true }).click();
-  await page.getByRole("button", { name: "发布任务" }).click();
+  await page.locator('.project-tab[data-ptab="delivery"]').click();
+  await expect(page.getByTestId("delivery-flow-panel")).toBeVisible();
+  await expect(page.getByTestId("app-shell")).not.toContainText("远程发布");
+  await expect(page.locator("#releaseProject")).toHaveCount(0);
+  await expect(page.locator("#deliveryProjectName")).toHaveText(projectName);
+  await expect(page.locator("#deliveryVersionName")).toHaveText("1.0.0");
+  await expect(page.locator("#deliveryTargetSummary")).toContainText("1 个 Push 目标");
+  await expect(page.locator("#deliveryBackupSummary")).toHaveText("不保留旧发布");
+
+  const directDeploymentRequest = page.waitForRequest((request) => request.method() === "POST" && /\/api\/projects\/\d+\/push-deployments$/.test(request.url()));
+  await page.getByTestId("quick-deploy-preview").click();
+  const directRequest = await directDeploymentRequest;
+  expect(directRequest.postDataJSON()).toMatchObject({ version: "1.0.0", all_project_targets: true, dry_run: true });
+  await expect(page.getByTestId("delivery-latest-targets")).toContainText(`${projectName}|visual-s1`);
+  await expect(page.getByTestId("delivery-latest-targets")).toContainText("成功");
+
+  await page.locator("#deliveryTasksDetails > summary").click();
   await expect(page.getByTestId("release-task-editor")).toBeVisible();
   await expect(page.locator("#ptab-push")).not.toContainText("SSH 主机与服务器绑定");
 
   await page.locator("#pushTaskName").fill("逻辑服重复发布");
+  await expect(page.locator("#pushTaskTargetMode")).toHaveValue("project");
+  await expect(page.locator("#pushTaskServerIDs")).toBeDisabled();
+  await page.locator("#pushTaskTargetMode").selectOption("fixed");
   await page.locator("#pushTaskServerIDs").fill("visual-s1");
   await page.getByRole("button", { name: "保存任务" }).click();
   const taskRow = page.getByTestId("release-task-list").getByRole("row").filter({ hasText: "逻辑服重复发布" });
   await expect(taskRow).toContainText("0");
   await taskRow.getByRole("button", { name: "预演" }).click();
   await expect(page.locator("#ptab-pushlogs")).toBeVisible();
-  await expect(page.locator("#ptab-pushlogs")).toContainText("不可删除 · 保留 30 天");
+  await expect(page.locator("#ptab-pushlogs")).toContainText("不可删除");
   await expect(page.getByTestId("app-shell")).toContainText("逻辑服重复发布");
 
-  await page.getByTestId("release-tab-tasks").click();
   let repeatedRow = page.getByTestId("release-task-list").getByRole("row").filter({ hasText: "逻辑服重复发布" });
   await expect(repeatedRow).toContainText("1");
 
-  await page.getByTestId("release-tab-hooks").click();
+  await page.locator("#deliveryHooksDetails > summary").click();
   await expect(page.getByTestId("release-hook-editor")).toBeVisible();
   await page.locator("#releaseHookName").fill("虚构逻辑服自动发布");
-  await page.locator("#releaseHookTask").selectOption({ label: "逻辑服重复发布" });
+  await page.locator("#releaseHookTask").selectOption({ label: "逻辑服重复发布 · 固定目标：visual-s1" });
   await page.locator("#releaseHookDebounce").fill("1");
   await page.getByRole("button", { name: "保存 Hook" }).click();
   let hookRow = page.getByTestId("release-hook-list").getByRole("row").filter({ hasText: "虚构逻辑服自动发布" });
   await expect(hookRow).toContainText("已启用");
+  await expect(hookRow).toContainText(projectName);
+  await expect(hookRow).toContainText("固定目标：visual-s1");
   await hookRow.getByRole("button", { name: "立即触发" }).click();
   hookRow = page.getByTestId("release-hook-list").getByRole("row").filter({ hasText: "虚构逻辑服自动发布" });
   await hookRow.getByRole("button", { name: "立即触发" }).click();
@@ -70,11 +89,9 @@ test("SSH 资源与可重复发布任务分离，执行日志只读保留", asyn
   await page.locator(".modal-card").getByRole("button", { name: "确认" }).click();
   await expect(page.getByTestId("release-hook-list")).not.toContainText("虚构逻辑服自动发布");
 
-  await page.getByTestId("release-tab-tasks").click();
   repeatedRow = page.getByTestId("release-task-list").getByRole("row").filter({ hasText: "逻辑服重复发布" });
   await repeatedRow.getByRole("button", { name: "删除" }).click();
   await page.locator(".modal-card").getByRole("button", { name: "确认" }).click();
   await expect(page.getByTestId("release-task-list")).not.toContainText("逻辑服重复发布");
-  await page.getByTestId("release-tab-logs").click();
   await expect(page.locator("#ptab-pushlogs")).toContainText("逻辑服重复发布");
 });

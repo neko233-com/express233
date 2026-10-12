@@ -67,10 +67,11 @@ test.describe("项目操作", () => {
   test("选择项目后显示工作区 tabs", async ({ page }) => {
     const name = `proj-tabs-${Date.now()}`;
     await createProject(page, name);
-    await expect(page.getByRole("button", { name: "版本" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "版本", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "拉取预览" })).toBeVisible();
     await expect(page.getByRole("button", { name: "团队" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "部署" })).toBeVisible();
+    await expect(page.locator('.project-tab[data-ptab="delivery"]')).toBeVisible();
+    await expect(page.locator('.project-tab[data-ptab="deploy"]')).toBeVisible();
     await expect(page.getByRole("button", { name: "差异" })).toBeVisible();
   });
 });
@@ -107,13 +108,13 @@ test.describe("拉取预览 — 未注册 serverId 报错", () => {
     await page.getByRole("button", { name: "拉取预览" }).click();
     await page.getByTestId("preview-server-id").fill("nonexistent-server-id");
     await page.getByTestId("preview-submit").click();
-    await expect(page.locator(".toast")).toContainText("server_id", { timeout: 10_000 });
+    await expect(page.locator(".toast").filter({ hasText: "server_id" })).toBeVisible({ timeout: 10_000 });
   });
 
   test("空 server_id 预览应报错", async ({ page }) => {
     await page.getByRole("button", { name: "拉取预览" }).click();
     await page.getByTestId("preview-submit").click();
-    await expect(page.locator(".toast")).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator(".toast.warn").filter({ hasText: "server_id" })).toBeVisible({ timeout: 5_000 });
   });
 });
 
@@ -182,13 +183,13 @@ test.describe("部署命令 tab", () => {
   });
 
   test("部署 tab 显示复制命令", async ({ page }) => {
-    await page.getByRole("button", { name: "部署" }).click();
+    await page.locator('.project-tab[data-ptab="deploy"]').click();
     await expect(page.getByTestId("deploy-cmd")).toBeVisible();
     await expect(page.getByTestId("deploy-cmd")).toContainText("express233-cli pull");
   });
 
   test("复制按钮可点击", async ({ page }) => {
-    await page.getByRole("button", { name: "部署" }).click();
+    await page.locator('.project-tab[data-ptab="deploy"]').click();
     await expect(page.getByTestId("deploy-cmd")).toBeVisible();
     // 复制按钮存在且可点击
     const copyBtn = page.getByRole("button", { name: "复制脚本" });
@@ -302,7 +303,7 @@ test.describe("侧边栏导航", () => {
     await expect(page.locator('.sidebar-nav-item[data-global="workspace"]')).toHaveClass(/active/);
   });
 
-  test("远程发布可直接返回项目工作区，流程步骤支持上一步", async ({ page }) => {
+  test("部署属于项目流程，流程步骤支持上一步", async ({ page }) => {
     const name = `nav-back-${Date.now()}`;
     await createProject(page, name);
 
@@ -311,12 +312,11 @@ test.describe("侧边栏导航", () => {
     await page.getByTestId("navigate-back").click();
     await expect(page.locator("#ptab-versions")).toBeVisible();
 
-    await page.getByRole("button", { name: "发布任务" }).click();
-    await expect(page.getByTestId("release-panel")).toBeVisible();
-    await expect(page.getByTestId("return-project-workspace")).toBeVisible();
-    await page.getByTestId("return-project-workspace").click();
-    await expect(page.getByTestId("cur-project")).toContainText(name);
-    await expect(page.getByTestId("release-panel")).not.toBeVisible();
+    await page.locator('.project-tab[data-ptab="delivery"]').click();
+    await expect(page.getByTestId("delivery-flow-panel")).toBeVisible();
+    await expect(page.locator("#releaseProject")).toHaveCount(0);
+    await page.getByTestId("navigate-back").click();
+    await expect(page.locator("#ptab-versions")).toBeVisible();
   });
 
   test("项目搜索过滤", async ({ page }) => {

@@ -58,6 +58,9 @@ func validatePushHostRequest(req pushHostRequest, requireCredential bool) error 
 }
 
 func validatePushBindingRequest(req pushBindingRequest) error {
+	if strings.TrimSpace(req.ProjectName) == "" {
+		return fmt.Errorf("project_name is required")
+	}
 	if strings.TrimSpace(req.ServerID) == "" || strings.TrimSpace(req.RemoteRoot) == "" {
 		return fmt.Errorf("server_id and remote_root are required")
 	}
