@@ -37,7 +37,7 @@ test("部署始终跟随当前项目，高级任务与 Hook 按需展开", async
   await expect(page.locator("#releaseProject")).toHaveCount(0);
   await expect(page.locator("#deliveryProjectName")).toHaveText(projectName);
   await expect(page.locator("#deliveryVersionName")).toHaveText("1.0.0");
-  await expect(page.locator("#deliveryTargetSummary")).toContainText("1 个 Push 目标");
+  await expect(page.locator("#deliveryTargetSummary")).toContainText("SSH 部署 1 个目标");
   await expect(page.locator("#deliveryBackupSummary")).toHaveText("不保留旧发布");
 
   const directDeploymentRequest = page.waitForRequest((request) => request.method() === "POST" && /\/api\/projects\/\d+\/push-deployments$/.test(request.url()));
@@ -45,7 +45,7 @@ test("部署始终跟随当前项目，高级任务与 Hook 按需展开", async
   const directRequest = await directDeploymentRequest;
   expect(directRequest.postDataJSON()).toMatchObject({ version: "1.0.0", all_project_targets: true, dry_run: true });
   await expect(page.getByTestId("delivery-latest-targets")).toContainText(`${projectName}|visual-s1`);
-  await expect(page.getByTestId("delivery-latest-targets")).toContainText("成功");
+  await expect(page.getByTestId("delivery-latest-targets")).toContainText("预演通过");
 
   await page.locator("#deliveryTasksDetails > summary").click();
   await expect(page.getByTestId("release-task-editor")).toBeVisible();
