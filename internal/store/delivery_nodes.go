@@ -240,7 +240,13 @@ func (s *Store) DeleteDeliveryNode(tenantID, projectID int64, serverID string) e
 
 func (s *Store) LatestSuccessfulPushVersion(projectID, bindingID int64) (string, error) {
 	var version string
-	err := s.db.QueryRow(`SELECT d.version FROM push_deployment_targets t JOIN push_deployments d ON d.id=t.deployment_id WHERE d.project_id=? AND t.binding_id=? AND t.status='success' ORDER BY t.id DESC LIMIT 1`, projectID, bindingID).Scan(&version)
+	// Dry-run targets also finish successfully, but never change a server's
+	// installed version. Read the persisted selector so existing preview history
+	// is excluded too. Legacy records without a selector/flag remain deployments.
+	err := s.db.QueryRow(`SELECT d.version FROM push_deployment_targets t JOIN push_deployments d ON d.id=t.deployment_id
+WHERE d.project_id=? AND t.binding_id=? AND t.status='success'
+AND CASE WHEN json_valid(d.selector) THEN COALESCE(json_extract(d.selector, '$.dry_run'), 0) ELSE 0 END = 0
+ORDER BY t.id DESC LIMIT 1`, projectID, bindingID).Scan(&version)
 	if err == sql.ErrNoRows {
 		return "", nil
 	}

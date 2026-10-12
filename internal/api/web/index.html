@@ -598,7 +598,7 @@
         </div>
 
         <div id="ptab-preview" class="ptab-panel hidden">
-          <div class="preview-context"><div><h2>配置预览</h2><p>选择区服，对照原始配置和替换后的内容。预览不会修改服务器。</p></div><code id="previewTargetTag">选择 Server ID</code></div>
+          <div class="preview-context"><div><h2>配置预览</h2><p>选择区服，对照原始配置和替换后的内容。预览不会修改服务器。</p><p class="hint">列表为共享分服配置，不代表本项目部署目标；没有分服差异可跳过。</p></div><code id="previewTargetTag">选择 Server ID</code></div>
           <div class="card preview-card">
             <div class="toolbar preview-toolbar">
               <div class="server-id-combobox"><input id="verPreviewServerId" placeholder="搜索 server_id" class="input server-id-input" autocomplete="off" data-testid="preview-server-id" /><div class="server-id-options hidden"></div></div>
@@ -612,11 +612,11 @@
               </aside>
               <section class="diff-main">
                 <div class="diff-pane">
-                  <div class="diff-pane-head">原版</div>
+                  <div class="diff-pane-head">原始配置</div>
                   <pre id="verPreviewOriginalBody" class="diff-code language-none"><code>选择 server_id</code></pre>
                 </div>
                 <div class="diff-pane">
-                  <div class="diff-pane-head">替换后</div>
+                  <div class="diff-pane-head">替换后配置</div>
                   <pre id="verPreviewRenderedBody" class="diff-code language-none" data-testid="preview-rendered-body"><code>选择 server_id</code></pre>
                 </div>
               </section>
@@ -647,7 +647,8 @@
                 <div><dt>目标</dt><dd id="deliveryTargetSummary">—</dd></div>
                 <div><dt>备份</dt><dd id="deliveryBackupSummary">按目标策略</dd></div>
               </dl>
-              <div class="delivery-actions project-write"><button type="button" id="btnQuickDeploy" class="btn btn-primary" data-testid="quick-deploy">发布当前项目</button><button type="button" id="btnQuickDeployPreview" class="btn btn-secondary" data-testid="quick-deploy-preview">预演</button></div>
+              <div id="deliveryTargetList" class="delivery-target-list" data-testid="delivery-target-list" aria-label="本次 SSH 部署目标"></div>
+              <div class="delivery-actions project-write"><button type="button" id="btnQuickDeploy" class="btn btn-primary" data-testid="quick-deploy">部署最新版本</button><button type="button" id="btnQuickDeployPreview" class="btn btn-secondary" data-testid="quick-deploy-preview">预演</button></div>
               <p class="release-contract-note">每次执行只解析 <code id="deliveryProjectTag">project|serverId</code>；不同项目的旧任务或目标不会被带入。</p>
             </section>
             <aside class="card delivery-automation-card">

@@ -402,7 +402,7 @@ function updateWorkflowUI() {
   const versionCheck = document.getElementById("publishVersionCheck");
   const configCheck = document.getElementById("publishConfigCheck");
   const previewCheck = document.getElementById("publishPreviewCheck");
-  if (versionCheck) versionCheck.textContent = state.version ? `Artifact ${state.version} 已选择` : "未选择 Artifact 版本";
+  if (versionCheck) versionCheck.textContent = state.version ? `版本 ${state.version} 已选择` : "未选择版本";
   if (configCheck) configCheck.textContent = selectedServer ? `当前配置：${selectedServer}` : "按需配置：没有分服差异可跳过";
   if (previewCheck) previewCheck.textContent = state.previewConfirmed ? "配置预览已确认" : "可选：检查分服配置后的文件内容";
   const published = state.versionStatus === "published";
@@ -429,6 +429,7 @@ function updateWorkflowUI() {
           : "发布将锁定版本文件。开启自动发布时会触发对应任务；手动部署在下一步执行。";
   document.getElementById("btnPublishedDeploy")?.classList.toggle("hidden", !published);
   const nextButton = document.getElementById("btnWorkspaceNext");
+  nextButton?.closest(".workspace-next")?.classList.toggle("hidden", state.projectTab === "delivery");
   let next = !state.version
     ? { title: "创建第一个版本", hint: "填写版本号，然后上传服务器程序、配置文件或 ZIP 包。", action: "创建版本", target: "versions", focus: "newVersion" }
     : published
@@ -963,9 +964,6 @@ document.getElementById("btnCloseBindingDrawer")?.addEventListener("click", () =
 document.getElementById("btnSavePushTask")?.addEventListener("click", savePushTask);
 document.getElementById("pushTaskTargetMode")?.addEventListener("change", updatePushTaskTargetMode);
 document.getElementById("btnSaveAndRunPushTask")?.addEventListener("click", async () => {
-  document.getElementById("pushTaskTargetMode").value = "project";
-  document.getElementById("pushTaskServerIDs").value = "";
-  updatePushTaskTargetMode();
   const task = await savePushTask();
   if (task) await runPushTask(task.id, false);
 });
@@ -1361,7 +1359,7 @@ async function selectVersion(v) {
     }
   } catch (_) {}
   if (key !== versionContextKey()) return [];
-  renderFileDiffWorkspace([], document.getElementById("verPreviewTable"), { empty: "选择 server_id" });
+  renderFileDiffWorkspace([], document.getElementById("verPreviewTable"), { empty: "选择 server_id", beforeTitle: "原始配置", afterTitle: "替换后配置" });
   updateDeployCmd();
   tryAutoPreviewOnVersionSelect();
   updateWorkflowUI();
@@ -1427,6 +1425,7 @@ let releaseHookEvents = [];
 let editingReleaseHookID = null;
 let releaseHookRefreshTimer = null;
 let deliveryNodes = [];
+let deliveryNodesProjectID = null;
 let pushDeployments = [];
 let latestDeliveryRequestID = 0;
 
@@ -1438,13 +1437,14 @@ async function loadDeliveryWorkspace() {
 
 function updateDeliveryOverview() {
   const latest = latestPublishedVersion();
-  const pushNodes = deliveryNodes.filter((node) => node.delivery_mode === "push");
-  const pullNodes = deliveryNodes.filter((node) => node.delivery_mode === "pull");
+  const nodes = deliveryNodesProjectID === state.projectId ? deliveryNodes : [];
+  const pushNodes = nodes.filter((node) => node.delivery_mode === "push");
+  const pullNodes = nodes.filter((node) => node.delivery_mode === "pull");
   const skippedBackups = pushNodes.filter((node) => node.skip_backup).length;
   const projectName = state.projectName || "—";
   const targetSummary = pushNodes.length
-    ? `${pushNodes.length} 个 Push 目标${pullNodes.length ? ` · ${pullNodes.length} 个 Pull 节点独立收敛` : ""}`
-    : "尚未绑定 Push 目标";
+    ? `SSH 部署 ${pushNodes.length} 个目标${pullNodes.length ? `；自主拉取 ${pullNodes.length} 个节点（不在本次 SSH 操作内）` : ""}`
+    : pullNodes.length ? `自主拉取 ${pullNodes.length} 个节点；尚未绑定 SSH 部署目标` : "尚未绑定 SSH 部署目标";
   const backupSummary = !pushNodes.length
     ? "尚无目标策略"
     : skippedBackups === pushNodes.length
@@ -1461,6 +1461,10 @@ function updateDeliveryOverview() {
   document.getElementById("deliveryProjectName").textContent = projectName;
   document.getElementById("deliveryVersionName").textContent = latest?.version || "暂无已发布版本";
   document.getElementById("deliveryTargetSummary").textContent = targetSummary;
+  const targetList = document.getElementById("deliveryTargetList");
+  if (targetList) targetList.innerHTML = pushNodes.length
+    ? `<table class="data-table"><thead><tr><th>本次部署的 server_id</th><th>机器名称</th></tr></thead><tbody>${pushNodes.map((node) => `<tr><td><code>${escapeHtml(node.server_id)}</code></td><td>${escapeHtml(node.host_name || "未命名机器")}</td></tr>`).join("")}</tbody></table>`
+    : '<p class="hint">绑定 SSH 目标后，可在此核对服务器名单。</p>';
   document.getElementById("deliveryBackupSummary").textContent = backupSummary;
   document.getElementById("deliveryProjectTag").textContent = state.projectName ? `${state.projectName}|serverId` : "project|serverId";
   document.getElementById("deliveryTaskCount").textContent = `${pushTasks.length} 个`;
@@ -1489,17 +1493,23 @@ function quickDeploymentKey(dryRun) {
 
 async function runQuickDeployment(dryRun, triggerButton) {
   const latest = latestPublishedVersion();
-  const pushNodes = deliveryNodes.filter((node) => node.delivery_mode === "push");
+  const pushNodes = deliveryNodesProjectID === state.projectId ? deliveryNodes.filter((node) => node.delivery_mode === "push") : [];
   if (!latest || !pushNodes.length) return;
+  const projectID = state.projectId;
+  const projectName = state.projectName;
   if (!dryRun) {
     const backupSummary = document.getElementById("deliveryBackupSummary")?.textContent || "按目标策略";
     const confirmed = await showConfirm({
-      title: `部署 ${state.projectName}`,
-      message: `版本：${latest.version}\n目标：当前项目全部 ${pushNodes.length} 个 Push 目标\n备份：${backupSummary}\n不同项目的任务和目标不会参与。`,
+      title: `部署 ${projectName}`,
+      message: `版本：${latest.version}（最新已发布）\nSSH 部署 ${pushNodes.length} 个目标：\n${pushNodes.map((node) => `• ${node.server_id}${node.host_name ? `（${node.host_name}）` : ""}`).join("\n")}\n备份：${backupSummary}\n自主拉取节点不在本次 SSH 操作内。`,
       confirmText: "确认部署",
       cancelText: "取消",
     });
     if (!confirmed) return;
+    if (state.projectId !== projectID || latestPublishedVersion()?.version !== latest.version) {
+      showToast("项目或最新版本已变化，请重新核对部署内容。", "warn");
+      return;
+    }
   }
   const storageKey = `express233:push:${state.projectId}:quick:${dryRun ? "preview" : "release"}`;
   const idempotencyKey = sessionStorage.getItem(storageKey) || quickDeploymentKey(dryRun);
@@ -1512,7 +1522,7 @@ async function runQuickDeployment(dryRun, triggerButton) {
       body: JSON.stringify({ version: latest.version, all_project_targets: true, dry_run: dryRun, idempotency_key: idempotencyKey }),
     });
     sessionStorage.removeItem(storageKey);
-    showToast(deployment.replayed ? `已接续原执行 #${deployment.id}` : dryRun ? `预演 #${deployment.id} 完成` : `部署 #${deployment.id} 已进入串行队列`);
+    showToast(deployment.replayed ? `已接续原执行 #${deployment.id}` : dryRun ? `预演 #${deployment.id} 完成，仅核对目标，未连接 SSH` : `部署 #${deployment.id} 已进入串行队列`);
     document.getElementById("deliveryHistoryDetails").open = true;
     await loadPushLogs();
   } catch (error) {
@@ -1546,8 +1556,12 @@ async function setProjectAutomationEnabled(enabled) {
 
 async function loadDeliveryNodes() {
   if (!state.projectId) return;
+  const projectID = state.projectId;
   try {
-    deliveryNodes = (await api(`/api/projects/${state.projectId}/delivery-nodes`)) || [];
+    const nodes = (await api(`/api/projects/${projectID}/delivery-nodes`)) || [];
+    if (projectID !== state.projectId) return;
+    deliveryNodes = nodes;
+    deliveryNodesProjectID = projectID;
     renderDeliveryNodes();
     updateDeliveryOverview();
   } catch (e) { showToast(e.message, "err"); }
@@ -1592,7 +1606,29 @@ function csvValues(value) {
 }
 
 function latestPublishedVersion() {
-  return (state.versions || []).find((v) => v.status === "published") || null;
+  return (state.versions || []).filter((version) => version.status === "published")
+    .sort((left, right) => String(right.published_at || "").localeCompare(String(left.published_at || "")) || Number(right.id || 0) - Number(left.id || 0))[0] || null;
+}
+
+function isAvailablePushVersion(version) {
+  return !version || (state.versions || []).some((item) => item.version === version && item.status === "published");
+}
+
+function renderPushTaskVersionOptions(selected = document.getElementById("pushTaskVersion")?.value || "") {
+  const select = document.getElementById("pushTaskVersion");
+  if (!select) return;
+  const latest = latestPublishedVersion();
+  select.innerHTML = `<option value="">最新已发布版本${latest ? `（${escapeHtml(latest.version)}）` : ""}</option>` + (state.versions || [])
+    .filter((version) => version.status === "published")
+    .map((version) => `<option value="${escapeAttr(version.version)}">${escapeHtml(version.version)}${version.version === latest?.version ? " · 最新" : ""}</option>`).join("");
+  if (selected && !isAvailablePushVersion(selected)) {
+    const missing = document.createElement("option");
+    missing.value = selected;
+    missing.textContent = `${selected}（已删除或不可用，请重新选择）`;
+    missing.disabled = true;
+    select.append(missing);
+  }
+  select.value = selected;
 }
 
 function pushTaskScopeLabel(task) {
@@ -1611,13 +1647,8 @@ function updatePushTaskTargetMode() {
 async function loadPushTasks() {
   if (!state.projectId) return;
   const latest = latestPublishedVersion();
-  const version = document.getElementById("pushTaskVersion");
   const hint = document.getElementById("pushLatestHint");
-  if (version) {
-    version.innerHTML = `<option value="">最新已发布版本${latest ? `（${escapeHtml(latest.version)}）` : ""}</option>` + (state.versions || [])
-      .filter((v) => v.status === "published")
-      .map((v) => `<option value="${escapeAttr(v.version)}">${escapeHtml(v.version)}${v.version === latest?.version ? " · 最新" : ""}</option>`).join("");
-  }
+  renderPushTaskVersionOptions();
   if (hint) hint.textContent = latest ? `最新已发布版本：${latest.version}` : "暂无已发布版本";
   try {
     pushTasks = await api(`/api/projects/${state.projectId}/push-tasks`);
@@ -1657,6 +1688,15 @@ async function savePushTask() {
     tags: csvValues(document.getElementById("pushTaskTags").value || "test"),
     tag_match: document.getElementById("pushTaskTagMatch").value,
   };
+  if (!isAvailablePushVersion(payload.version)) {
+    showToast(`固定版本 ${payload.version} 已删除或不可用，请明确选择一个已发布版本，或选择“最新已发布版本”。`, "warn", 6500);
+    document.getElementById("pushTaskVersion").focus();
+    return;
+  }
+  if (document.getElementById("pushTaskTargetMode").value === "fixed" && !payload.server_ids.length) {
+    showToast("固定目标不能为空，请填写 server_id；部署全部目标请明确选择“跟随项目当前目标”。", "warn", 6500);
+    return;
+  }
   try {
     const path = editingPushTaskID ? `/api/projects/${state.projectId}/push-tasks/${editingPushTaskID}` : `/api/projects/${state.projectId}/push-tasks`;
     const task = await api(path, { method: editingPushTaskID ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -1671,7 +1711,7 @@ function renderPushTasks() {
   const box = document.getElementById("pushTaskList");
   if (!box) return;
   if (!pushTasks.length) {
-    box.innerHTML = '<div class="empty-state compact"><h3>不需要高级任务</h3><p>上方“发布当前项目”已覆盖常规发布；只有固定版本、固定 server_id 或标签策略才需要创建任务。</p></div>';
+    box.innerHTML = '<div class="empty-state compact"><h3>不需要高级任务</h3><p>上方“部署最新版本”已覆盖常规部署；只有固定版本、固定 server_id 或标签策略才需要创建任务。</p></div>';
     return;
   }
   box.innerHTML = `<table class="data-table release-task-table"><thead><tr><th>任务</th><th>版本策略</th><th>目标筛选</th><th>执行</th><th>最近运行</th><th>操作</th></tr></thead><tbody>${pushTasks.map((task) => `<tr><td><strong>${escapeHtml(task.name)}</strong><small>#${task.id}</small></td><td>${task.version ? `<code>${escapeHtml(task.version)}</code>` : '<span class="badge badge-ok">每次取最新已发布</span>'}</td><td><small>${escapeHtml(pushTaskScopeLabel(task))}</small><small>项目：${escapeHtml(state.projectName || "当前项目")}</small><small>标签（${task.tag_match === "any" ? "任一" : "全部"}）：${escapeHtml((task.tags || []).join(", ") || "test")}</small></td><td><strong>${task.run_count || 0}</strong><small>次</small></td><td><small>${escapeHtml(task.last_run_at || "尚未执行")}</small></td><td class="release-task-actions"><button type="button" class="btn btn-secondary btn-sm" data-run-push-task="${task.id}" data-dry-run="true">预演</button><button type="button" class="btn btn-primary btn-sm" data-run-push-task="${task.id}">发布</button><button type="button" class="btn btn-ghost btn-sm" data-edit-push-task="${task.id}">编辑</button><button type="button" class="btn btn-danger btn-sm" data-delete-push-task="${task.id}">删除</button></td></tr>`).join("")}</tbody></table>`;
@@ -1685,7 +1725,8 @@ function editPushTask(taskID) {
   if (!task) return;
   editingPushTaskID = taskID;
   document.getElementById("pushTaskName").value = task.name;
-  document.getElementById("pushTaskVersion").value = task.version || "";
+  renderPushTaskVersionOptions(task.version || "");
+  if (!isAvailablePushVersion(task.version)) showToast(`固定版本 ${task.version} 已删除或不可用，保存前请明确选择版本。`, "warn", 6500);
   document.getElementById("pushTaskTargetMode").value = (task.server_ids || []).length ? "fixed" : "project";
   document.getElementById("pushTaskServerIDs").value = (task.server_ids || []).join(", ");
   document.getElementById("pushTaskTags").value = (task.tags || []).join(", ");
@@ -1703,6 +1744,10 @@ function newIdempotencyKey(taskID, dryRun) {
 async function runPushTask(taskID, dryRun, triggerButton) {
   const task = pushTasks.find((item) => item.id === taskID);
   if (!task) return;
+  if (!isAvailablePushVersion(task.version)) {
+    editPushTask(taskID);
+    return;
+  }
   if (!dryRun) {
     const version = task.version || latestPublishedVersion()?.version || "无可用版本";
     const targets = (task.server_ids || []).join(", ") || "当前项目全部匹配服务器（串行）";
@@ -1716,7 +1761,7 @@ async function runPushTask(taskID, dryRun, triggerButton) {
   try {
     const deployment = await api(`/api/projects/${state.projectId}/push-tasks/${taskID}/run`, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey }, body: JSON.stringify({ dry_run: dryRun, idempotency_key: idempotencyKey }) });
     sessionStorage.removeItem(storageKey);
-    showToast(deployment.replayed ? `已接续原执行 #${deployment.id}，未重复发布` : dryRun ? `预演 #${deployment.id} 完成` : `发布 #${deployment.id} 已进入串行队列`);
+    showToast(deployment.replayed ? `已接续原执行 #${deployment.id}，未重复发布` : dryRun ? `预演 #${deployment.id} 完成，仅核对目标，未连接 SSH` : `发布 #${deployment.id} 已进入串行队列`);
     await loadPushTasks();
     document.getElementById("deliveryHistoryDetails").open = true;
     await loadPushLogs();
@@ -2032,11 +2077,16 @@ async function loadPushLogs() {
   const deployments = await api(`/api/projects/${projectID}/push-deployments`);
   if (projectID !== state.projectId) return;
   pushDeployments = deployments || [];
-  const statusLabel = { queued: "等待串行执行", running: "发布中", success: "成功", failed: "失败" };
   box.innerHTML = deployments.length
-    ? `<table class="data-table"><thead><tr><th>时间</th><th>来源</th><th>版本</th><th>目标策略</th><th>状态</th><th>服务器日志</th></tr></thead><tbody>${deployments.map((d) => { const selector = parsePushSelector(d.selector); const strategy = selector.all_project_targets ? "当前项目全部目标" : `server_id：${(selector.server_ids || []).join(", ") || "全部"} · 标签：${(selector.tags || []).join(", ") || "test"}`; return `<tr><td>${escapeHtml(d.created_at)}</td><td><strong>${escapeHtml(d.task_name || "项目直接部署")}</strong><small>${d.task_id ? `任务 #${d.task_id}` : `执行 #${d.id}`}</small>${d.idempotency_key ? `<small>请求 ${escapeHtml(d.idempotency_key.slice(-12))}</small>` : ""}</td><td><code>${escapeHtml(d.version)}</code></td><td><small>${escapeHtml(strategy)}</small></td><td><span class="badge badge-${d.status === "success" ? "ok" : d.status === "failed" ? "warn" : "draft"}">${escapeHtml(statusLabel[d.status] || d.status)}</span></td><td><button type="button" class="btn btn-ghost btn-sm" data-push-log="${d.id}">查看逐服输出</button></td></tr>`; }).join("")}</tbody></table>`
+    ? `<table class="data-table"><thead><tr><th>时间</th><th>类型 / 来源</th><th>版本</th><th>目标策略</th><th>状态</th><th>执行明细</th></tr></thead><tbody>${deployments.map(renderPushDeploymentRow).join("")}</tbody></table>`
     : '<div class="empty-state compact"><h3>还没有部署记录</h3><p>先执行一次预演，确认当前项目解析出的目标。</p></div>';
-  box.querySelectorAll("[data-push-log]").forEach((btn) => btn.onclick = async () => { const d = await api(`/api/projects/${state.projectId}/push-deployments/${btn.dataset.pushLog}`); const lines = (d.targets || []).map((t) => `# ${t.host_name} / ${t.server_id} [${t.status}]\n${t.output || "等待执行"}`).join("\n\n"); showModal({ title: `${d.task_name || "临时发布"} · 执行 #${d.id}`, message: lines || "没有目标", confirmText: "关闭", cancelText: "关闭", mode: "confirm" }); });
+  box.querySelectorAll("[data-push-log]").forEach((btn) => btn.onclick = async () => {
+    const detail = await api(`/api/projects/${projectID}/push-deployments/${btn.dataset.pushLog}`);
+    if (projectID !== state.projectId) return;
+    const dryRun = isDryRunDeployment(detail);
+    const lines = (detail.targets || []).map((target) => `# ${target.host_name} / ${target.server_id} [${deploymentStatusLabel(target.status, dryRun)}]\n${target.output || "等待执行"}`).join("\n\n");
+    showModal({ title: `${dryRun ? "预演" : "部署"} #${detail.id} · ${detail.task_name || "当前项目"}`, message: `${dryRun ? "仅核对目标，未连接 SSH，未变更服务器。\n\n" : ""}${lines || "没有目标"}`, confirmText: "关闭", cancelText: "关闭", mode: "confirm" });
+  });
   await loadLatestDelivery(deployments[0], projectID);
   if (pushLogRefreshTimer) window.clearTimeout(pushLogRefreshTimer);
   if (state.globalView === "workspace" && state.projectTab === "delivery" && deployments.some((item) => item.status === "queued" || item.status === "running")) {
@@ -2049,6 +2099,8 @@ async function loadLatestDelivery(deployment, projectID) {
   const meta = document.getElementById("deliveryLatestMeta");
   const box = document.getElementById("deliveryLatestTargets");
   if (!meta || !box) return;
+  const heading = document.querySelector(".delivery-latest-card .card-title");
+  if (heading) heading.textContent = "最近一次执行";
   if (!deployment) {
     meta.textContent = "当前项目暂无部署记录。";
     box.innerHTML = '<div class="agent-empty">暂无目标结果</div>';
@@ -2057,10 +2109,10 @@ async function loadLatestDelivery(deployment, projectID) {
   try {
     const detail = await api(`/api/projects/${projectID}/push-deployments/${deployment.id}`);
     if (requestID !== latestDeliveryRequestID || projectID !== state.projectId) return;
-    const statusLabel = { queued: "等待", running: "部署中", success: "成功", failed: "失败" };
-    meta.textContent = `#${detail.id} · ${detail.version} · ${detail.created_at} · ${statusLabel[detail.status] || detail.status}`;
+    const dryRun = isDryRunDeployment(detail);
+    meta.textContent = `${dryRun ? "预演" : "部署"} #${detail.id} · ${detail.version} · ${detail.created_at} · ${deploymentStatusLabel(detail.status, dryRun)}${dryRun ? " · 仅核对目标，未连接 SSH，未变更服务器" : ""}`;
     box.innerHTML = (detail.targets || []).length
-      ? `<table class="data-table delivery-target-table"><thead><tr><th>目标</th><th>机器</th><th>状态</th><th>完成时间</th></tr></thead><tbody>${detail.targets.map((target) => `<tr><td><code>${escapeHtml(state.projectName)}|${escapeHtml(target.server_id)}</code></td><td>${escapeHtml(target.host_name || "—")}</td><td><span class="badge badge-${target.status === "success" ? "ok" : target.status === "failed" ? "warn" : "draft"}">${escapeHtml(statusLabel[target.status] || target.status)}</span></td><td>${escapeHtml(target.completed_at || target.started_at || "等待执行")}</td></tr>`).join("")}</tbody></table>`
+      ? `<table class="data-table delivery-target-table"><thead><tr><th>目标</th><th>机器</th><th>状态</th><th>完成时间</th></tr></thead><tbody>${detail.targets.map((target) => `<tr><td><code>${escapeHtml(state.projectName)}|${escapeHtml(target.server_id)}</code></td><td>${escapeHtml(target.host_name || "—")}</td><td><span class="badge badge-${target.status === "success" && !dryRun ? "ok" : target.status === "failed" ? "warn" : "draft"}">${escapeHtml(deploymentStatusLabel(target.status, dryRun))}</span></td><td>${escapeHtml(target.completed_at || target.started_at || "等待执行")}</td></tr>`).join("")}</tbody></table>`
       : '<div class="agent-empty">本次执行没有解析到当前项目目标</div>';
   } catch (error) {
     if (requestID === latestDeliveryRequestID) box.innerHTML = `<div class="agent-error">${escapeHtml(error.message)}</div>`;
@@ -2069,6 +2121,25 @@ async function loadLatestDelivery(deployment, projectID) {
 
 function parsePushSelector(value) {
   try { return JSON.parse(value || "{}"); } catch (_) { return {}; }
+}
+
+function isDryRunDeployment(deployment) {
+  return deployment.dry_run === true || parsePushSelector(deployment.selector)?.dry_run === true;
+}
+
+function deploymentStatusLabel(status, dryRun) {
+  const labels = dryRun
+    ? { queued: "等待预演", running: "预演中", success: "预演通过", failed: "预演失败" }
+    : { queued: "等待串行执行", running: "部署中", success: "部署成功", failed: "部署失败" };
+  return labels[status] || status;
+}
+
+function renderPushDeploymentRow(deployment) {
+  const selector = parsePushSelector(deployment.selector) || {};
+  const dryRun = isDryRunDeployment(deployment);
+  const strategy = selector.all_project_targets ? "当前项目全部目标" : `server_id：${(selector.server_ids || []).join(", ") || "全部"} · 标签：${(selector.tags || []).join(", ") || "test"}`;
+  const tone = deployment.status === "failed" ? "warn" : deployment.status === "success" && !dryRun ? "ok" : "draft";
+  return `<tr><td>${escapeHtml(deployment.created_at)}</td><td><strong>${dryRun ? "预演" : "部署"} · ${escapeHtml(deployment.task_name || "当前项目")}</strong><small>${deployment.task_id ? `任务 #${deployment.task_id}` : `执行 #${deployment.id}`}</small>${dryRun ? "<small>仅核对目标，未连接 SSH</small>" : ""}${deployment.idempotency_key ? `<small>请求 ${escapeHtml(deployment.idempotency_key.slice(-12))}</small>` : ""}</td><td><code>${escapeHtml(deployment.version)}</code></td><td><small>${escapeHtml(strategy)}</small></td><td><span class="badge badge-${tone}">${escapeHtml(deploymentStatusLabel(deployment.status, dryRun))}</span></td><td><button type="button" class="btn btn-ghost btn-sm" data-push-log="${deployment.id}">${dryRun ? "查看预演明细" : "查看逐服输出"}</button></td></tr>`;
 }
 
 function filterFileRows(rows, query) {
@@ -2582,8 +2653,8 @@ function renderPreviewReport(report, container) {
   renderFileDiffWorkspace(rendered, container, {
     empty: "无 replacements 或未匹配配置文件",
     summary: `${meta.join(" / ")} ${warnings}`,
-    beforeTitle: "原版",
-    afterTitle: "替换后",
+    beforeTitle: "原始配置",
+    afterTitle: "替换后配置",
     preservePreviewIds: container?.id === "verPreviewTable",
   });
 }
@@ -2804,7 +2875,7 @@ async function refreshSelectedPreview({ notifyErrors = false } = {}) {
     updateWorkflowUI();
   } catch (e) {
     if (requestID !== previewRequestID || key !== previewContextKey()) return;
-    renderFileDiffWorkspace([], document.getElementById("verPreviewTable"), { empty: `预览失败：${e.message}。检查服务器配置后重试。` });
+    renderFileDiffWorkspace([], document.getElementById("verPreviewTable"), { empty: `预览失败：${e.message}。检查服务器配置后重试。`, beforeTitle: "原始配置", afterTitle: "替换后配置" });
     if (notifyErrors) showToast(e.message, "error");
   } finally {
     if (requestID === previewRequestID) button.textContent = "刷新预览";

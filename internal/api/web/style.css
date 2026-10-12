@@ -1644,6 +1644,10 @@ input.cmdbox {
 }
 .modal-card {
   width: min(28rem, 100%);
+  max-height: calc(100dvh - 2rem);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
   background: var(--bg-surface);
@@ -1651,22 +1655,28 @@ input.cmdbox {
   padding: var(--space-4);
 }
 .modal-title {
+  flex-shrink: 0;
   margin: 0 0 0.45rem;
   font-size: 1rem;
   font-weight: 700;
 }
 .modal-message {
+  min-height: 0;
+  overflow: auto;
+  overflow-wrap: anywhere;
   margin: 0 0 1rem;
   color: var(--text-muted);
   line-height: 1.6;
 }
 .modal-actions {
+  flex-shrink: 0;
   display: flex;
   justify-content: flex-end;
   gap: 0.55rem;
   margin-top: 1rem;
 }
 .modal-input {
+  flex-shrink: 0;
   width: 100%;
 }
 

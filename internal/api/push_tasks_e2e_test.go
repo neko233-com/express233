@@ -181,8 +181,26 @@ func TestDirectPushDeploymentCanFollowAllCurrentProjectTargets(t *testing.T) {
 	if len(detail.Targets) != 1 || detail.Targets[0].ServerID != "1001" {
 		t.Fatalf("quick release must stay inside project: %+v", detail.Targets)
 	}
+	// The existing persisted selector is the API contract for distinguishing
+	// previews in creation, replay, detail and list responses.
+	logs := mustGET[[]store.PushDeployment](t, ts, jar, base+"/push-deployments")
+	if len(logs) != 1 {
+		t.Fatalf("expected one idempotent preview, got %d records", len(logs))
+	}
+	for _, record := range []store.PushDeployment{deployment, replay, detail, logs[0]} {
+		var selector map[string]any
+		if err := json.Unmarshal([]byte(record.Selector), &selector); err != nil {
+			t.Fatal(err)
+		}
+		if selector["dry_run"] != true {
+			t.Fatalf("preview %d lost its boolean dry_run marker", record.ID)
+		}
+	}
 	nodes := mustGET[[]deliveryNodeView](t, ts, jar, base+"/delivery-nodes")
 	if len(nodes) != 1 || nodes[0].ServerID != "1001" || !nodes[0].SkipBackup {
 		t.Fatalf("quick release backup policy view: %+v", nodes)
+	}
+	if nodes[0].CurrentVersion != "" {
+		t.Fatalf("preview must not report a deployed version: %q", nodes[0].CurrentVersion)
 	}
 }
