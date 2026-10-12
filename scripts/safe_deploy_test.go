@@ -3,6 +3,7 @@ package scripts
 import (
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -11,6 +12,86 @@ import (
 	"testing"
 	"time"
 )
+
+// Run a real executable from the instance directory so the deployment script can
+// verify /proc/PID/exe without weakening its unrelated-process protection.
+func TestSafeDeployFixtureProcess(t *testing.T) {
+	mode := os.Getenv("EXPRESS233_SAFE_DEPLOY_TEST_PROCESS")
+	if mode == "" {
+		return
+	}
+	if mode != "ignore-term" && mode != "graceful" {
+		t.Fatalf("unknown fixture process mode %q", mode)
+	}
+	termination := make(chan os.Signal, 1)
+	signal.Notify(termination, syscall.Signal(15))
+	defer signal.Stop(termination)
+	if err := os.WriteFile(os.Getenv("EXPRESS233_SAFE_DEPLOY_TEST_READY"), []byte("ready"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range termination {
+		if mode == "ignore-term" {
+			continue
+		}
+		if err := os.WriteFile(os.Getenv("EXPRESS233_SAFE_DEPLOY_TEST_STOPPED"), []byte("stopped"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+}
+
+func startSafeDeployFixture(t *testing.T, finalDir, mode, stoppedMarker string) *exec.Cmd {
+	t.Helper()
+	testExecutable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(testExecutable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverExecutable := filepath.Join(finalDir, "game-server-fixture")
+	if err := os.WriteFile(serverExecutable, contents, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	readyMarker := filepath.Join(finalDir, "run", "fixture-ready")
+	process := exec.Command(serverExecutable, "-test.run=^TestSafeDeployFixtureProcess$")
+	process.Env = append(os.Environ(),
+		"EXPRESS233_SAFE_DEPLOY_TEST_PROCESS="+mode,
+		"EXPRESS233_SAFE_DEPLOY_TEST_READY="+readyMarker,
+		"EXPRESS233_SAFE_DEPLOY_TEST_STOPPED="+stoppedMarker,
+	)
+	if err := process.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		_ = process.Wait()
+		close(done)
+	}()
+	t.Cleanup(func() {
+		_ = process.Process.Kill()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+		}
+	})
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(readyMarker); err == nil {
+			return process
+		}
+		select {
+		case <-done:
+			t.Fatal("fixture process exited before installing its signal handler")
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("fixture process did not become ready")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
 
 func TestSafeDeployDefaultsToGracefulStopOnly(t *testing.T) {
 	script, err := os.ReadFile("safe-deploy.sh")
@@ -110,14 +191,7 @@ func TestSafeDeployTimeoutAbortsBeforeSwap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldProcess := exec.Command("bash", "-c", `trap '' TERM; while :; do sleep 0.1; done`)
-	if err := oldProcess.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = oldProcess.Process.Kill()
-		_ = oldProcess.Wait()
-	})
+	oldProcess := startSafeDeployFixture(t, finalDir, "ignore-term", "")
 	if err := os.WriteFile(filepath.Join(runDir, "server.pid"), []byte(strconv.Itoa(oldProcess.Process.Pid)), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -207,22 +281,7 @@ func TestSafeDeployGracefulStopAndIdempotentReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	gracefulMarker := filepath.Join(root, "graceful-stop")
-	oldProcess := exec.Command("bash", "-c", `trap 'printf stopped >"$1"; exit 0' TERM; while :; do sleep 0.1; done`, "bash", gracefulMarker)
-	if err := oldProcess.Start(); err != nil {
-		t.Fatal(err)
-	}
-	oldDone := make(chan struct{})
-	go func() {
-		_ = oldProcess.Wait()
-		close(oldDone)
-	}()
-	t.Cleanup(func() {
-		_ = oldProcess.Process.Kill()
-		select {
-		case <-oldDone:
-		case <-time.After(time.Second):
-		}
-	})
+	oldProcess := startSafeDeployFixture(t, finalDir, "graceful", gracefulMarker)
 	if err := os.WriteFile(filepath.Join(runDir, "server.pid"), []byte(strconv.Itoa(oldProcess.Process.Pid)), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -235,6 +294,7 @@ while [[ $# -gt 0 ]]; do
   if [[ "$1" == "--dest" ]]; then dest="$2"; shift 2; else shift; fi
 done
 mkdir -p "$dest/scripts" "$dest/.express233" "$dest/config"
+cp "$EXPRESS233_TEST_SERVER_BINARY" "$dest/game-server-fixture"
 printf artifact >"$dest/game.bin"
 printf manifest >"$dest/.express233/manifest.json"
 printf 'schema: new\nnew_field: default\n' >"$dest/config/application.yaml"
@@ -243,13 +303,17 @@ cat >"$dest/scripts/restart.sh" <<'SCRIPT'
 set -eu
 printf '%s' "${EXPRESS233_SKIP_BACKUP:-missing}" >"$GAME_ROOT/downstream-skip-backup"
 mkdir -p "$GAME_ROOT/$SERVER_ID/run"
-bash -c 'trap "exit 0" TERM; while :; do sleep 0.1; done' </dev/null >/dev/null 2>&1 &
+EXPRESS233_SAFE_DEPLOY_TEST_PROCESS=graceful \
+EXPRESS233_SAFE_DEPLOY_TEST_READY="$GAME_ROOT/new-process-ready" \
+EXPRESS233_SAFE_DEPLOY_TEST_STOPPED="$GAME_ROOT/new-process-stopped" \
+  "$GAME_ROOT/$SERVER_ID/game-server-fixture" '-test.run=^TestSafeDeployFixtureProcess$' </dev/null >/dev/null 2>&1 &
 printf '%s' "$!" >"$GAME_ROOT/$SERVER_ID/run/server.pid"
 SCRIPT
 cat >"$dest/scripts/healthcheck.sh" <<'SCRIPT'
 #!/bin/bash
 pid=$(cat "$GAME_ROOT/$SERVER_ID/run/server.pid")
 kill -0 "$pid"
+test -f "$GAME_ROOT/new-process-ready"
 SCRIPT
 chmod +x "$dest/scripts/restart.sh" "$dest/scripts/healthcheck.sh"
 `
@@ -263,6 +327,7 @@ chmod +x "$dest/scripts/restart.sh" "$dest/scripts/healthcheck.sh"
 		command.Env = append(os.Environ(),
 			"GAME_ROOT="+root,
 			"EXPRESS233_BIN="+fakePull,
+			"EXPRESS233_TEST_SERVER_BINARY="+oldProcess.Path,
 			"EXPRESS233_PROJECT=game-server-sf",
 			"EXPRESS233_SERVER_ID="+serverID,
 			"EXPRESS233_DEPLOYMENT_ID=42",

@@ -71,7 +71,8 @@ test("部署始终跟随当前项目，高级任务与 Hook 按需展开", async
   await expect(page.getByTestId("release-hook-editor")).toBeVisible();
   await page.locator("#releaseHookName").fill("虚构逻辑服自动发布");
   await page.locator("#releaseHookTask").selectOption({ label: "逻辑服重复发布 · 固定目标：visual-s1" });
-  await page.locator("#releaseHookDebounce").fill("1");
+  // Leave time for two real browser interactions on a shared CI runner.
+  await page.locator("#releaseHookDebounce").fill("5");
   await page.getByRole("button", { name: "保存 Hook" }).click();
   let hookRow = page.getByTestId("release-hook-list").getByRole("row").filter({ hasText: "虚构逻辑服自动发布" });
   await expect(hookRow).toContainText("已启用");
@@ -81,7 +82,7 @@ test("部署始终跟随当前项目，高级任务与 Hook 按需展开", async
   hookRow = page.getByTestId("release-hook-list").getByRole("row").filter({ hasText: "虚构逻辑服自动发布" });
   await hookRow.getByRole("button", { name: "立即触发" }).click();
   await expect(page.getByTestId("release-hook-events")).toContainText("合并触发");
-  await expect(page.getByTestId("release-hook-events")).toContainText("最终派发", { timeout: 8_000 });
+  await expect(page.getByTestId("release-hook-events")).toContainText("最终派发", { timeout: 15_000 });
   hookRow = page.getByTestId("release-hook-list").getByRole("row").filter({ hasText: "虚构逻辑服自动发布" });
   await hookRow.locator("label.switch").click();
   await expect(hookRow).toContainText("已停用");
