@@ -4037,3 +4037,7 @@ textarea.input:focus {
 .project-role { flex-shrink: 0; white-space: nowrap; }
 .project-manage-menu > summary { white-space: nowrap; }
 @media (max-width: 900px) { .file-browser { grid-template-columns: 1fr; } }
+@media (max-width: 900px) {
+  .workspace-title { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr) auto auto; }
+  .workspace-title h1 { min-width: 0; }
+}
