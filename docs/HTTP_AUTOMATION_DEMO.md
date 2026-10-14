@@ -1,216 +1,160 @@
 # HTTP 自动化 Demo
 
-以下示例演示完整自动化运维链路：
+本例在不关联生产发布 Hook 的隔离测试租户中演示“分服配置 → 创建版本 → 上传 → 预览/差异 → 发布 → 下载”，会写入项目和版本。准备 Linux / WSL Bash、Python 3、curl、jq、tar，以及具有相应管理权限的测试账号。预览会返回文件正文，只使用虚构配置，不将生产响应贴入日志。
 
-1. 用已配置的管理员账号走 HTTP Basic Auth
-2. 注册 `server_id` 与替换规则
-3. 创建项目与两个版本
-4. 上传整个版本目录（`tar.gz`）
-5. 预览替换结果与版本 diff
-6. 发布并拉取最新版本
+## 1. 从环境提供认证
 
-假设服务地址为 `http://127.0.0.1:23380`。
+由 Secret 管理系统或本机未跟踪配置注入 `EXPRESS233_SERVER`、`EXPRESS233_USERNAME`、`EXPRESS233_PASSWORD`；服务地址格式示例为 `https://express233.example.invalid`。除本机回环测试外使用 HTTPS。不要把密码、Token、Cookie 或真实线上地址写进脚本。
 
-## 1. 准备认证
+以下函数在内存中生成 curl 配置，经标准输入提供 URL 和 Basic Auth；命令参数只包含相对 API 路径与非敏感操作参数。不要开启 `set -x`、curl verbose/trace，或打印生成的配置。
 
 ```bash
-export EXPRESS233_SERVER=http://127.0.0.1:23380
-export EXPRESS233_BASIC_AUTH='<username>:<password>'
+set -euo pipefail
+: "${EXPRESS233_SERVER:?inject the central URL}"
+: "${EXPRESS233_USERNAME:?inject the test account}"
+: "${EXPRESS233_PASSWORD:?inject the password}"
+umask 077
+
+api() {
+  local api_path="$1"
+  shift
+  API_PATH="$api_path" python3 - <<'PY' | curl --disable --config - --fail --silent --show-error "$@"
+import base64
+import json
+import os
+
+base = os.environ["EXPRESS233_SERVER"].rstrip("/")
+path = os.environ["API_PATH"]
+if not path.startswith("/api/"):
+    raise SystemExit("expected a relative API path")
+credential = (os.environ["EXPRESS233_USERNAME"] + ":" +
+              os.environ["EXPRESS233_PASSWORD"]).encode("utf-8")
+authorization = "Authorization: Basic " + base64.b64encode(credential).decode("ascii")
+print("url = " + json.dumps(base + path))
+print("header = " + json.dumps(authorization))
+PY
+}
 ```
 
-## 2. 注册 server_id 与替换模板
+不要用 `curl -u "$SECRET"`、`--token "$TOKEN"` 或带 token 的 URL 替换此方式：环境变量展开后仍会成为进程参数。生产自动化使用最小权限账号，并单独管理认证和响应输出。
+
+## 2. 注册演示分服配置
 
 ```bash
-curl --fail -u "$EXPRESS233_BASIC_AUTH" \
-  -H 'Content-Type: application/json' \
-  -X PUT "$EXPRESS233_SERVER/api/servers/game-a" \
+api /api/servers/game-a \
+  -H 'Content-Type: application/json' -X PUT \
   -d '{
     "replacements": {
-      "game.properties": {
-        "server.port": "9001"
-      },
-      "application.yaml": {
-        "spring.profiles.active": "game-a"
-      }
-    },
-    "post_hook": "scripts/reload-{{SERVER_ID}}.sh",
-    "post_hook_env": {
-      "ZONE": "demo"
+      "game.properties": {"server.port": "9001"},
+      "application.yaml": {"spring.profiles.active": "game-a"}
     }
   }'
+
+api /api/servers
+api /api/server-ids
 ```
 
-列出当前 server 条目：
+规则按文件 basename 匹配后替换键。本例没有设置 Hook，避免下载测试顺带运行游戏服脚本；正式部署的启动契约见 [SAFE_DEPLOY.md](SAFE_DEPLOY.md)。
+
+## 3. 创建项目与两个版本
+
+同名项目可复用已有可写项目；重复执行本例仍会创建新版本，所以应使用专门测试租户。空版本请求由服务端原子分配下一 patch，后续必须使用返回值。
 
 ```bash
-curl --fail -u "$EXPRESS233_BASIC_AUTH" "$EXPRESS233_SERVER/api/servers"
-curl --fail -u "$EXPRESS233_BASIC_AUTH" "$EXPRESS233_SERVER/api/server-ids"
+PROJECT_ID=$(api /api/projects -H 'Content-Type: application/json' \
+  -X POST -d '{"name":"demo-auto"}' | jq -er '.id')
+VERSION_1=$(api "/api/projects/$PROJECT_ID/versions" \
+  -H 'Content-Type: application/json' -X POST -d '{}' | jq -er '.version')
+VERSION_2=$(api "/api/projects/$PROJECT_ID/versions" \
+  -H 'Content-Type: application/json' -X POST -d '{}' | jq -er '.version')
 ```
 
-## 3. Get or create 项目，并自动创建两个版本
+## 4. 上传版本目录
+
+使用独立临时目录，归档中仅包含演示配置：
 
 ```bash
-PROJECT_ID=$(curl --fail -u "$EXPRESS233_BASIC_AUTH" \
-  -H 'Content-Type: application/json' \
-  -X POST "$EXPRESS233_SERVER/api/projects" \
-  -d '{"name":"demo-auto"}' | jq -r '.id')
-
-VERSION_1=$(curl --fail -u "$EXPRESS233_BASIC_AUTH" \
-  -H 'Content-Type: application/json' \
-  -X POST "$EXPRESS233_SERVER/api/projects/$PROJECT_ID/versions" \
-  -d '{}' | jq -r '.version')
-
-VERSION_2=$(curl --fail -u "$EXPRESS233_BASIC_AUTH" \
-  -H 'Content-Type: application/json' \
-  -X POST "$EXPRESS233_SERVER/api/projects/$PROJECT_ID/versions" \
-  -d '{}' | jq -r '.version')
-
-echo "created versions: $VERSION_1 -> $VERSION_2"
-```
-
-## 4. 上传整个版本目录
-
-准备两个版本目录：
-
-```bash
-mkdir -p /tmp/express233-demo/v1/conf /tmp/express233-demo/v2/conf
-
-cat >/tmp/express233-demo/v1/conf/game.properties <<'EOF'
+DEMO_DIR=$(mktemp -d)
+mkdir -p "$DEMO_DIR/v1/conf" "$DEMO_DIR/v2/conf"
+cat >"$DEMO_DIR/v1/conf/game.properties" <<'EOF'
 server.port=8080
 feature.flag=base
 EOF
-
-cat >/tmp/express233-demo/v1/conf/application.yaml <<'EOF'
+cat >"$DEMO_DIR/v2/conf/game.properties" <<'EOF'
+server.port=8181
+feature.flag=blue
+EOF
+cat >"$DEMO_DIR/v1/conf/application.yaml" <<'EOF'
 spring:
   profiles:
     active: default
 EOF
-
-cat >/tmp/express233-demo/v2/conf/game.properties <<'EOF'
-server.port=8181
-feature.flag=blue
-EOF
-
-cat >/tmp/express233-demo/v2/conf/application.yaml <<'EOF'
+cat >"$DEMO_DIR/v2/conf/application.yaml" <<'EOF'
 spring:
   profiles:
     active: staging
 EOF
+tar -C "$DEMO_DIR/v1" -czf "$DEMO_DIR/v1.tar.gz" .
+tar -C "$DEMO_DIR/v2" -czf "$DEMO_DIR/v2.tar.gz" .
 
-tar -C /tmp/express233-demo/v1 -czf "/tmp/express233-demo-${VERSION_1}.tar.gz" .
-tar -C /tmp/express233-demo/v2 -czf "/tmp/express233-demo-${VERSION_2}.tar.gz" .
+api "/api/projects/$PROJECT_ID/versions/$VERSION_1/files" -F "file=@$DEMO_DIR/v1.tar.gz"
+api "/api/projects/$PROJECT_ID/versions/$VERSION_2/files" -F "file=@$DEMO_DIR/v2.tar.gz"
 ```
 
-上传整包：
+上传支持单文件、`.zip`、`.tar`、`.tar.gz` / `.tgz`。真实版本包需排除数据、日志、环境文件、私钥和其它 Secret；不可直接把整个工作区不加筛选地归档。
+
+## 5. 预览与比较
 
 ```bash
-curl --fail -u "$EXPRESS233_BASIC_AUTH" \
-  -F "file=@/tmp/express233-demo-${VERSION_1}.tar.gz" \
-  "$EXPRESS233_SERVER/api/projects/$PROJECT_ID/versions/$VERSION_1/files"
-
-curl --fail -u "$EXPRESS233_BASIC_AUTH" \
-  -F "file=@/tmp/express233-demo-${VERSION_2}.tar.gz" \
-  "$EXPRESS233_SERVER/api/projects/$PROJECT_ID/versions/$VERSION_2/files"
+api "/api/deploy/preview?project=demo-auto&version=$VERSION_2&server_id=game-a"
+api "/api/deploy/diff?project=demo-auto&from=$VERSION_1&to=$VERSION_2&server_id=game-a"
 ```
 
-## 5. 预览替换结果与版本差异
+预览响应的 `files` 为键级摘要，`rendered_files` 为文件 before/after 全文；差异响应的 `file_diffs` 为文件级对比。本例两个版本的 `server.port` 都应被覆盖成 `9001`，`feature.flag` 则从 `base` 变为 `blue`。
 
-预览 `$VERSION_2` 在 `game-a` 上的最终替换效果：
+这些接口预览配置，不执行部署脚本。请求里的演示名称和版本只包含 URL 安全字符；自动化传入任意名称时应使用正确的 URL 编码。
+
+## 6. 发布并下载
 
 ```bash
-curl --fail -u "$EXPRESS233_BASIC_AUTH" \
-  "$EXPRESS233_SERVER/api/deploy/preview?project=demo-auto&version=$VERSION_2&server_id=game-a"
+api "/api/projects/$PROJECT_ID/versions/$VERSION_1/publish" -X POST
+api "/api/projects/$PROJECT_ID/versions/$VERSION_2/publish" -X POST
+api "/api/projects/$PROJECT_ID/versions"
+
+api '/api/pull?project=demo-auto&server_id=game-a' -o "$DEMO_DIR/latest.tar.gz"
+tar -tzf "$DEMO_DIR/latest.tar.gz"
+tar -xOf "$DEMO_DIR/latest.tar.gz" conf/game.properties
+tar -xOf "$DEMO_DIR/latest.tar.gz" conf/application.yaml
 ```
 
-返回值同时包含：
+发布会执行服务端校验；如果项目配置了审批，先按审批流程取得批准，不绕过失败。若项目存在已启用的版本发布 Hook，发布还会触发对应任务，因此测试项目应不绑定任何生产 Hook。下载使用同一账号的 Basic Auth，不读取管理员拉取 Token，不把 Token 拼进 URL。
 
-- `files`: 兼容脚本使用的键级变更摘要
-- `rendered_files`: Web/自动化可直接展示的文件全文 before/after，用于双栏 diff
+预期结果为 `server.port=9001`、`feature.flag=blue`、`spring.profiles.active: game-a`。仅下载及查看归档不会执行 Hook。
 
-对比两个版本在 `game-a` 上的有效配置差异：
+CLI 也可以读取上述账号环境变量；使用前确认本机 CLI 配置没有遗留 Token（Token 优先于账号认证，不要用 `config show` 向日志泄露它）。拉取只落到新暂存目录：
 
 ```bash
-curl --fail -u "$EXPRESS233_BASIC_AUTH" \
-  "$EXPRESS233_SERVER/api/deploy/diff?project=demo-auto&from=$VERSION_1&to=$VERSION_2&server_id=game-a"
+export EXPRESS233_PROJECT=demo-auto
+CLI_STAGE=$(mktemp -d)
+express233-cli pull --server-id game-a --dest "$CLI_STAGE" --skip-hook --retries 5
 ```
 
-这里会看到两类变化：
+CLI 默认最多尝试下载 3 次，完整下载后才开始解压；`--retries 5` 改为最多 5 次。解压仍是直接写目标目录，并非原子换包，失败时可能留下部分文件。`deploy` 与 `pull` 是别名，二者都只有加 `--skip-hook` 才会跳过包内 Hook。运行中的游戏服必须走安全部署脚本。
 
-- `game.properties.server.port` 最终都会变成 `9001`，所以不应再被报告为版本差异
-- `feature.flag` 会从 `base` 变成 `blue`
-- `file_diffs` 会返回文件级 from/to 全文，适合做 VSCode/JetBrains 风格双栏对比
+## 7. 配置维护
 
-## 6. 发布并拉取
+仅清理本例的演示分服条目时：
 
 ```bash
-curl --fail -u "$EXPRESS233_BASIC_AUTH" \
-  -X POST "$EXPRESS233_SERVER/api/projects/$PROJECT_ID/versions/$VERSION_1/publish"
-
-curl --fail -u "$EXPRESS233_BASIC_AUTH" \
-  -X POST "$EXPRESS233_SERVER/api/projects/$PROJECT_ID/versions/$VERSION_2/publish"
+api /api/servers/game-a -X DELETE
 ```
 
-获取 root 的拉取 token：
+整文件配置接口仍可用，但会影响该租户多个分服；先读取并核对，再在明确需要时写入。本例只展示将响应保存到受保护临时目录，避免把生产配置直接输出：
 
 ```bash
-PULL_TOKEN=$(curl --fail -u "$EXPRESS233_BASIC_AUTH" "$EXPRESS233_SERVER/api/users" | jq -r '.[] | select(.username=="root") | .token')
+api /api/server-yaml -o "$DEMO_DIR/server-yaml.json"
+# 维护者审阅 server-yaml-update.json 后才执行：
+# api /api/server-yaml -H 'Content-Type: application/json' -X PUT -d @server-yaml-update.json
 ```
 
-查看已发布版本：
-
-```bash
-curl --fail "$EXPRESS233_SERVER/api/pull/versions?token=$PULL_TOKEN&project=demo-auto"
-```
-
-拉取最新已发布版本：
-
-```bash
-curl --fail -o /tmp/demo-auto-latest.tar.gz \
-  "$EXPRESS233_SERVER/api/pull?token=$PULL_TOKEN&project=demo-auto&server_id=game-a"
-
-tar -xOf /tmp/demo-auto-latest.tar.gz ./conf/game.properties
-tar -xOf /tmp/demo-auto-latest.tar.gz ./conf/application.yaml
-```
-
-应能看到：
-
-- `server.port=9001`
-- `feature.flag=blue`
-- `spring.profiles.active: game-a`
-
-CLI 拉取默认会先把 gzip 包完整下载到临时文件，成功后再解压；弱网中断不会把半截包直接写进目标目录。可按网络情况调大重试次数：
-
-```bash
-express233-cli pull \
-  --server "$EXPRESS233_SERVER" \
-  --token "$PULL_TOKEN" \
-  --project demo-auto \
-  --server-id game-a \
-  --dest /opt/game/game-a \
-  --retries 5
-```
-
-## 7. 细粒度 CRUD
-
-删除单个 server_id：
-
-```bash
-curl --fail -u "$EXPRESS233_BASIC_AUTH" -X DELETE "$EXPRESS233_SERVER/api/servers/game-a"
-```
-
-仍可保留整文件方式：
-
-```bash
-curl --fail -u "$EXPRESS233_BASIC_AUTH" "$EXPRESS233_SERVER/api/server-yaml"
-curl --fail -u "$EXPRESS233_BASIC_AUTH" \
-  -H 'Content-Type: application/json' \
-  -X PUT "$EXPRESS233_SERVER/api/server-yaml" \
-  -d @server-yaml-update.json
-```
-
-## 8. 压缩与弱网建议
-
-- 上传支持单文件、`.zip`、`.tar`、`.tar.gz`/`.tgz`。大量小文件推荐打成 `.tar.gz` 或 `.zip` 后上传，减少 HTTP 往返与表单开销。
-- 下载端已经返回 `application/gzip` 的 tar.gz 包。不要再对 `.zip` 套一层 gzip；zip 内部通常已经压缩，二次压缩收益很小，还会增加 CPU 和失败恢复成本。
-- Go 编译出的二进制通常可压缩，但跨平台大包更应该配合文件标签，让 Linux 节点只下载 `linux` / `linux-amd64` 等匹配文件。
-- 弱网场景优先使用 CLI `--retries`，以及上传端的整包归档；Web 上传会对单个文件自动重试。
+完成后按测试环境的清理策略处理演示项目和临时目录，不使用真实业务项目做删除练习。SSH 推送的目标预览、幂等键与执行结果见 [SSH_PUSH_DEPLOY.md](SSH_PUSH_DEPLOY.md)。

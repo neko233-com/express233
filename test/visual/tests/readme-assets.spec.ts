@@ -1,105 +1,193 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import path from "path";
 import fs from "fs";
 import { loginAsRoot } from "./helpers";
 
 const assetsDir = path.resolve(__dirname, "../../../.assets");
+const projectName = "game-demo";
+const serverIDs = ["1001", "1002", "1003"];
+
+// Capture actual application data without replacing responses or visible UI.
+async function capture(page: Page, filename: string) {
+  await expect(page.locator(".toast")).toHaveCount(0, { timeout: 10_000 });
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    window.scrollTo(0, 0);
+    document.querySelector(".main")?.scrollTo(0, 0);
+  });
+  await page.mouse.move(0, 0);
+  await page.screenshot({ path: path.join(assetsDir, filename), animations: "disabled" });
+}
+
+async function seedVersion(page: Page, projectID: number, version: string, published: boolean) {
+  const base = `/api/projects/${projectID}/versions`;
+  expect((await page.request.post(base, { data: { name: version } })).ok()).toBeTruthy();
+  const files = [
+    {
+      name: "config/game.properties", tags: "all",
+      content: `# Game demo: shared template\napp.name=game-demo\napp.version=${version}\nserver.id=0\nserver.name=demo-template\nserver.port=18000\nregion=demo\nmax.players=${version === "1.2.0" ? 1000 : 1500}\nmaintenance=false\n`,
+    },
+    { name: "config/events.json", tags: "all", content: JSON.stringify({ season: "demo-season", dailyResetHour: 5, rewardMultiplier: version === "1.2.0" ? 1 : 1.2 }, null, 2) + "\n" },
+    { name: "bin/linux-amd64/game-server", tags: "linux-amd64", content: `Documentation fixture for game-demo ${version}.\nNot an executable game server.\n` },
+    { name: "scripts/restart.sh", tags: "linux-amd64", content: "#!/bin/sh\n# Documentation fixture only; no service is started.\necho 'game-demo: local documentation fixture'\n" },
+  ];
+  for (const file of files) {
+    expect((await page.request.post(`${base}/${version}/files`, {
+      multipart: { path: file.name, tags: file.tags, file: { name: path.basename(file.name), mimeType: "text/plain", buffer: Buffer.from(file.content) } },
+    })).ok()).toBeTruthy();
+  }
+  if (published) expect((await page.request.post(`${base}/${version}/publish`)).ok()).toBeTruthy();
+}
+
+async function selectVersion(page: Page, version: string) {
+  await page.locator('.project-tab[data-ptab="versions"]').click();
+  await page.getByTestId("version-list").getByText(version, { exact: true }).click();
+  await expect(page.locator("#verDetailTitle")).toHaveText(version);
+  await page.getByTestId("file-list").locator(".tree-file").filter({ hasText: "game.properties" }).locator(".file-path").click();
+  await expect(page.locator("#filePreviewBody")).toContainText(`app.version=${version}`);
+}
 
 test.describe("README 功能截图", () => {
-  test.beforeAll(() => {
-    fs.mkdirSync(assetsDir, { recursive: true });
-  });
+  test.use({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
 
-  test.beforeEach(async ({ page }) => {
-    await loginAsRoot(page);
-  });
-
-  test("capture feature screenshots", async ({ page }) => {
+  test("capture feature screenshots", async ({ page, baseURL }) => {
     test.setTimeout(120_000);
-    const defaultYaml = await page.evaluate(async () => (await fetch("/api/server-yaml")).json().then((x) => x.content));
-    const projectName = `readme-demo-${Date.now()}`;
-    const fixture = path.join(__dirname, "../../../testdata/validation-tree/version/deploy/game.properties");
+    // Never create documentation fixtures against a remote or production API.
+    expect(new URL(baseURL!).hostname).toMatch(/^(127\.0\.0\.1|localhost|\[::1\])$/);
+    fs.mkdirSync(assetsDir, { recursive: true });
+    await loginAsRoot(page);
+    const defaultYaml = (await (await page.request.get("/api/server-yaml")).json()).content;
+    const hostIDs: number[] = [];
+    let projectID: number | undefined;
 
-    await page.getByTestId("new-project-input").fill(projectName);
-    await page.getByTestId("add-project").click();
-    await page.getByTestId("project-list").getByText(projectName, { exact: true }).click();
+    try {
+      const created = await page.request.post("/api/projects", { data: { name: projectName } });
+      expect(created.ok(), "Use a fresh isolated data directory for README captures").toBeTruthy();
+      projectID = (await created.json()).id;
+      expect(projectID).toBeDefined();
 
-    await page.getByTestId("new-version-input").fill("1.0.0");
-    await page.getByTestId("add-version").click();
-    await page.getByTestId("version-list").getByText("1.0.0").click();
-    await page.getByTestId("upload-tags").fill("linux-amd64");
-    await page.getByTestId("file-input").setInputFiles(fixture);
-    await expect(page.getByTestId("file-list")).toContainText("linux-amd64", { timeout: 15_000 });
-    await page.screenshot({ path: path.join(assetsDir, "file-tags.png"), fullPage: true });
-
-    await page.getByTestId("publish-version").click();
-    await page.locator(".modal-card").getByRole("button", { name: "发布" }).click();
-    await expect(page.getByTestId("version-list")).toContainText("published", { timeout: 15_000 });
-
-    await page.locator('.project-tab[data-ptab="versions"]').click();
-    await page.getByTestId("new-version-input").fill("2.0.0");
-    await page.getByTestId("add-version").click();
-    await page.getByTestId("version-list").getByText("2.0.0").click();
-    await page.getByTestId("file-input").setInputFiles(fixture);
-    await expect(page.getByTestId("file-list")).toContainText("game.properties", { timeout: 15_000 });
-    await page.evaluate(async (name) => {
-      const projects = await fetch("/api/projects").then((response) => response.json());
-      const project = projects.find((item) => item.name === name);
-      const body = new FormData();
-      body.append("file", new Blob(["mysql.url=jdbc:mysql://db.v2:3306/game\n"], { type: "text/plain" }), "game.properties");
-      const response = await fetch(`/api/projects/${project.id}/versions/2.0.0/files`, { method: "POST", body });
-      if (!response.ok) throw new Error(await response.text());
-    }, projectName);
-    await page.getByTestId("version-list").getByText("2.0.0").click();
-    await page.getByTestId("publish-version").click();
-    await page.locator(".modal-card").getByRole("button", { name: "发布" }).click();
-    await expect(page.getByTestId("version-list")).toContainText("published", { timeout: 15_000 });
-    await page.locator('.project-tab[data-ptab="versions"]').click();
-    await page.screenshot({ path: path.join(assetsDir, "multi-version.png"), fullPage: true });
-
-    await page.getByRole("button", { name: "差异" }).click();
-    await page.locator("#diffFromVer").selectOption("1.0.0");
-    await page.locator("#diffToVer").selectOption("2.0.0");
-    await page.locator("#diffServerId").fill("visual-s1");
-    await page.getByRole("button", { name: "生成 diff" }).click();
-    await expect(page.locator("#versionDiffOut")).toContainText("game.properties", { timeout: 15_000 });
-    await page.screenshot({ path: path.join(assetsDir, "version-diff.png"), fullPage: true });
-
-    await page.evaluate(async () => {
-      await fetch("/api/server-yaml", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          content: `servers:
-  visual-s1:
+      const demoYaml = "servers:\n" + serverIDs.map((id, index) => `  "${id}":
     replacements:
       game.properties:
-        mysql.url: "jdbc:mysql://db.prod:3306/game_live"
-`,
-        }),
-      });
-    });
-    await page.locator('.project-tab[data-ptab="versions"]').click();
-    await page.getByTestId("version-list").getByText("1.0.0").click();
-    await page.locator('.project-tab[data-ptab="preview"]').click();
-    await page.getByTestId("preview-server-id").fill("visual-s1");
-    await page.getByTestId("preview-submit").click();
-    await expect(page.getByTestId("preview-table")).toContainText("game.properties", { timeout: 15_000 });
-    await expect(page.getByTestId("preview-rendered-body")).toContainText("db.prod", { timeout: 15_000 });
-    await page.screenshot({ path: path.join(assetsDir, "template-replacement.png"), fullPage: true });
+        server.id: ${id}
+        server.name: "Demo Realm ${index + 1}"
+        server.port: ${18001 + index}
+        region: "demo-east"
+    post_hook_env:
+      SERVER_ID: "${id}"
+`).join("");
+      expect((await page.request.put("/api/server-yaml", { data: { content: demoYaml } })).ok()).toBeTruthy();
+      await seedVersion(page, projectID!, "1.2.0", true);
+      await seedVersion(page, projectID!, "1.2.1", true);
+      await seedVersion(page, projectID!, "1.3.0", false);
 
-    await page.getByTestId("nav-storage").click();
-    await expect(page.getByTestId("storage-panel")).toBeVisible();
-    await page.getByTestId("storage-reindex").click();
-    await expect(page.getByTestId("storage-tree")).toContainText(projectName, { timeout: 15_000 });
-    await page.screenshot({ path: path.join(assetsDir, "storage-space.png"), fullPage: true });
+      // Reserved addresses and fictitious names only. Health checks are off;
+      // the only deployment request below has dry_run=true.
+      for (const [index, ids] of [["1001", "1002"], ["1003"]].entries()) {
+        const response = await page.request.post("/api/push/hosts", { data: {
+          name: index === 0 ? "game-node-a" : "game-node-b", address: `192.0.2.${10 + index * 10}`,
+          port: 22, username: "demo-operator", auth_mode: "agent",
+          host_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          health_check_enabled: false,
+        } });
+        expect(response.ok()).toBeTruthy();
+        const host = await response.json();
+        hostIDs.push(host.id);
+        for (const serverID of ids) {
+          expect((await page.request.post(`/api/push/hosts/${host.id}/servers`, { data: {
+            project_name: projectName, server_id: serverID, labels: "demo", remote_root: "/srv/game-demo",
+            skip_backup: false, os: "linux", arch: "amd64",
+          } })).ok()).toBeTruthy();
+        }
+      }
 
-    await page.evaluate(async (content) => {
-      await fetch("/api/server-yaml", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content }),
-      });
-    }, defaultYaml);
+      await page.reload();
+      await expect(page.getByTestId("app-shell")).toBeVisible();
+      await page.getByTestId("project-list").getByText(projectName, { exact: true }).click();
+      await selectVersion(page, "1.3.0");
+      await expect(page.getByTestId("ver-status")).toHaveText("draft");
+      await expect(page.getByTestId("file-list")).toContainText("linux-amd64");
+      await capture(page, "file-tags.png");
+
+      await selectVersion(page, "1.2.1");
+      await expect(page.getByTestId("ver-status")).toHaveText("published");
+      await expect(page.getByTestId("version-list").locator(".latest-published")).toContainText("1.2.1");
+      await capture(page, "multi-version.png");
+
+      await page.locator('.project-tab[data-ptab="config"]').click();
+      await page.locator('[data-server-config="1001"]').click();
+      await expect(page.getByTestId("server-override-form").getByLabel("game.properties / server.port", { exact: true })).toHaveValue("18001");
+      await expect(page.locator("#serverConfigTitle")).toHaveText("1001");
+      await capture(page, "server-config.png");
+
+      await page.locator('.project-tab[data-ptab="preview"]').click();
+      await page.getByTestId("preview-server-id").fill("1001");
+      await page.getByTestId("preview-submit").click();
+      await expect(page.getByTestId("preview-rendered-body")).toContainText("server.port=18001");
+      await expect(page.locator("#verPreviewOriginalBody")).toContainText("server.port=18000");
+      await expect(page.locator("#btnConfirmPreview")).toBeEnabled();
+      await capture(page, "template-replacement.png");
+
+      await page.locator('.project-tab[data-ptab="diff"]').click();
+      await page.locator("#diffFromVer").selectOption("1.2.0");
+      await page.locator("#diffToVer").selectOption("1.2.1");
+      await page.locator("#diffServerId").fill("1001");
+      await page.getByRole("button", { name: "生成 diff" }).click();
+      await expect(page.locator("#versionDiffOut")).toContainText("game.properties");
+      await page.locator("#versionDiffOut [data-diff-index]").filter({ hasText: "game.properties" }).click();
+      await expect(page.locator("#versionDiffOut")).toContainText("max.players=1500");
+      await capture(page, "version-diff.png");
+
+      await page.locator('.project-tab[data-ptab="delivery"]').click();
+      await expect(page.locator("#deliveryVersionName")).toHaveText("1.2.1");
+      await expect(page.locator("#deliveryTargetSummary")).toHaveText("SSH 部署 3 个目标");
+      await expect(page.getByTestId("delivery-target-list").locator("tbody tr")).toHaveCount(3);
+      const previewRequest = page.waitForRequest((request) => request.method() === "POST" && request.url().endsWith(`/api/projects/${projectID}/push-deployments`));
+      await page.getByTestId("quick-deploy-preview").click();
+      expect((await previewRequest).postDataJSON()).toMatchObject({ version: "1.2.1", dry_run: true });
+      await expect(page.getByTestId("delivery-latest-targets").locator("tbody tr")).toHaveCount(3);
+      await expect(page.locator("#deliveryLatestMeta")).toContainText("未连接 SSH，未变更服务器");
+      await page.locator("#deliveryHistoryDetails > summary").click();
+      await capture(page, "deployment-workflow.png");
+
+      await page.getByTestId("quick-deploy").click();
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toContainText("版本：1.2.1（最新已发布）");
+      for (const id of serverIDs) await expect(dialog).toContainText(id);
+      await expect(dialog.getByRole("button", { name: "取消", exact: true })).toBeInViewport({ ratio: 1 });
+      await capture(page, "deployment-confirm.png");
+      await dialog.getByRole("button", { name: "取消", exact: true }).click();
+      await expect(dialog).not.toBeVisible();
+      const deployments = await (await page.request.get(`/api/projects/${projectID}/push-deployments`)).json();
+      expect(deployments).toHaveLength(1);
+      expect(JSON.parse(deployments[0].selector).dry_run).toBe(true);
+
+      await page.getByTestId("nav-storage").click();
+      await expect(page.getByTestId("storage-panel")).toBeVisible();
+      await expect(page.getByTestId("storage-tree")).toContainText(projectName);
+      await page.getByTestId("storage-reindex").click();
+      await expect(page.locator(".toast").filter({ hasText: "索引已重建" })).toBeVisible();
+      await expect(page.locator(".toast")).toHaveCount(0, { timeout: 10_000 });
+      await expect(page.getByTestId("storage-tree")).toContainText(projectName);
+      await expect(page.getByTestId("storage-tree")).toContainText("1.3.0");
+      // Collapse completed versions so all three versions fit, then inspect
+      // the draft file without taking any storage deletion action.
+      for (const version of ["1.2.0", "1.2.1"]) {
+        await page.getByTestId("storage-tree").locator("[data-storage-folder]").filter({
+          has: page.locator(".storage-tree-name", { hasText: new RegExp(`^${version.replaceAll(".", "\\.")}$`) }),
+        }).click();
+        await expect(page.locator("#storageDetail")).toContainText(`${projectName}/${version}`);
+      }
+      await page.getByTestId("storage-tree").locator(".storage-tree-row").filter({
+        has: page.locator(".storage-tree-name", { hasText: /^game.properties$/ }),
+      }).click();
+      await expect(page.locator("#storageDetail")).toContainText("1.3.0/config/game.properties");
+      await capture(page, "storage-space.png");
+    } finally {
+      // Restore shared configuration when the capture spec runs in the suite.
+      for (const hostID of hostIDs) await page.request.delete(`/api/push/hosts/${hostID}`);
+      if (projectID) await page.request.delete(`/api/projects/${projectID}?confirm=yes`);
+      await page.request.put("/api/server-yaml", { data: { content: defaultYaml } });
+    }
   });
 });

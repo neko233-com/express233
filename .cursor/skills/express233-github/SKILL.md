@@ -76,5 +76,5 @@ golangci-lint run --timeout=5m
 
 ## 相关文档
 
-- [AGENTS.md](../../AGENTS.md) — 总规范
-- [docs/GITHUB_ACTIONS.md](../../docs/GITHUB_ACTIONS.md)
+- [AGENTS.md](../../../AGENTS.md) — 总规范
+- [docs/GITHUB_ACTIONS.md](../../../docs/GITHUB_ACTIONS.md)

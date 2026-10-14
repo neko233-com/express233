@@ -118,7 +118,7 @@
 
     .hero {
       display: grid;
-      grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+      grid-template-columns: minmax(0, 1fr);
       gap: 1.25rem;
       align-items: center;
       min-height: 520px;
@@ -169,81 +169,9 @@
     }
     .button:hover { text-decoration: none; border-color: rgba(255,255,255,0.22); }
 
-    .mock {
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.006)), var(--panel);
-      overflow: hidden;
-      box-shadow: 0 22px 60px rgba(0,0,0,0.36);
-    }
-    .mock-bar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0.75rem 0.9rem;
-      border-bottom: 1px solid var(--line);
-      color: var(--muted);
-      font-size: 0.875rem;
-    }
-    .mock-body {
-      display: grid;
-      grid-template-columns: 34% 66%;
-      min-height: 320px;
-    }
-    .mock-side {
-      padding: 0.85rem;
-      border-right: 1px solid var(--line);
-      background: #101012;
-    }
-    .mock-row {
-      height: 34px;
-      margin-bottom: 0.45rem;
-      border: 1px solid transparent;
-      border-radius: 6px;
-      background: rgba(255,255,255,0.045);
-    }
-    .mock-row.active {
-      border-color: rgba(16, 185, 129, 0.25);
-      background: rgba(16, 185, 129, 0.1);
-      box-shadow: inset 3px 0 0 var(--primary);
-    }
-    .mock-main { padding: 0.9rem; }
-    .mock-tabs {
-      display: flex;
-      gap: 0.35rem;
-      padding: 0.25rem;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: rgba(255,255,255,0.025);
-    }
-    .mock-tab {
-      flex: 1;
-      height: 32px;
-      border-radius: 6px;
-      background: rgba(255,255,255,0.04);
-    }
-    .mock-tab.on { background: rgba(16,185,129,0.16); }
-    .mock-diff {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 0.7rem;
-      margin-top: 0.85rem;
-    }
-    .mock-code {
-      min-height: 190px;
-      padding: 0.75rem;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #0a0d12;
-    }
-    .mock-line {
-      height: 14px;
-      margin-bottom: 0.55rem;
-      border-radius: 3px;
-      background: rgba(148,163,184,0.28);
-    }
-    .mock-line.change { background: rgba(16,185,129,0.34); }
-    .mock-line.warn { background: rgba(245,158,11,0.3); }
+    .console-figure { margin: 0; }
+    .console-figure img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+    figcaption { margin-top: 0.6rem; color: var(--muted); font-size: 0.875rem; }
 
     section { padding: 2rem 0; border-bottom: 1px solid var(--line); }
     h2 { margin: 0 0 1rem; font-size: 1.75rem; line-height: 1.2; }
@@ -366,6 +294,7 @@
       <a href="#delivery">6. Push / Pull 交付</a>
       <a href="#automation">7. 自动化 HTTP</a>
       <a href="#ops">8. 大盘与运维建议</a>
+      <a href="#reference">9. 完整文档与排错</a>
       <h2>参考</h2>
       <a href="openapi.yaml">OpenAPI YAML</a>
       <a href="https://github.com/neko233-com/express233/releases">GitHub Releases</a>
@@ -374,51 +303,21 @@
     <main class="content">
       <section class="hero">
         <div>
-          <p class="eyebrow">Game Server Pull Deployment Console</p>
+          <p class="eyebrow">Game Server Release Console</p>
           <h1>express233 使用文档</h1>
-          <p class="lead">一个中央控制台维护多项目、多版本、多平台制品，并按 <code>server_id</code> 做嵌套配置替换。它统一 Pull Agent 与 SSH Push 发布，并将制品内容摘要、Git/Gitea/GitHub 提交和构建运行固化为可审计快照。</p>
+          <p class="lead">上传版本包，按 <code>server_id</code> 设置分服差异，再核对目标、部署上线。SSH Push 与 Pull Agent 共用版本和配置，日常操作按步骤展开。</p>
           <div class="actions">
             <a class="button primary" href="#start">开始使用</a>
             <a class="button" href="openapi.yaml">查看 OpenAPI</a>
             <a class="button" href="https://github.com/neko233-com/express233">进入仓库</a>
           </div>
         </div>
-        <div class="mock" aria-label="express233 console mockup">
-          <div class="mock-bar"><span>express233 控制台</span><span>root</span></div>
-          <div class="mock-body">
-            <div class="mock-side">
-              <div class="mock-row active"></div>
-              <div class="mock-row"></div>
-              <div class="mock-row"></div>
-              <div class="mock-row"></div>
-              <div class="mock-row active"></div>
-            </div>
-            <div class="mock-main">
-              <div class="mock-tabs">
-                <div class="mock-tab on"></div>
-                <div class="mock-tab"></div>
-                <div class="mock-tab"></div>
-                <div class="mock-tab"></div>
-              </div>
-              <div class="mock-diff">
-                <div class="mock-code">
-                  <div class="mock-line"></div>
-                  <div class="mock-line warn"></div>
-                  <div class="mock-line"></div>
-                  <div class="mock-line"></div>
-                  <div class="mock-line warn"></div>
-                </div>
-                <div class="mock-code">
-                  <div class="mock-line"></div>
-                  <div class="mock-line change"></div>
-                  <div class="mock-line"></div>
-                  <div class="mock-line"></div>
-                  <div class="mock-line change"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <figure class="console-figure">
+          <a href="https://github.com/neko233-com/express233/blob/main/README.md#界面预览">
+            <img src="https://raw.githubusercontent.com/neko233-com/express233/main/.assets/deployment-workflow.png" width="1440" height="900" alt="当前控制台部署页面：版本、目标服号、机器和备份策略">
+          </a>
+          <figcaption>当前界面的本地演示截图，使用虚构项目与区服；点击查看完整截图集。</figcaption>
+        </figure>
       </section>
 
       <section id="start">
@@ -431,7 +330,7 @@
           </div>
           <div class="card">
             <strong>登录后先做三件事</strong>
-            <p>创建项目，配置 <code>server.yaml</code>，上传第一个版本包。新手引导可以跳过，系统会记录已引导状态，后续也可从左下角重新打开。</p>
+            <p>创建项目，上传第一个版本包，再按需配置分服差异。没有差异可跳过覆盖字段，但 Pull / Agent 仍须注册对应 <code>server_id</code>。新手引导可以跳过，系统会记录已引导状态，后续也可从左下角重新打开。</p>
           </div>
         </div>
       </section>
@@ -440,12 +339,12 @@
         <h2>2. 项目与版本</h2>
         <div class="flow">
           <div><span>01</span>左侧创建项目</div>
-          <div><span>02</span>版本页新建版本号</div>
-          <div><span>03</span>上传文件或 zip 包</div>
-          <div><span>04</span>设置平台标签</div>
-          <div><span>05</span>预览后发布</div>
+          <div><span>02</span>版本包：新建并上传</div>
+          <div><span>03</span>按需配置与预览</div>
+          <div><span>04</span>检查并发布版本</div>
+          <div><span>05</span>核对目标再部署</div>
         </div>
-          <p>版本列表支持搜索、历史回滚和固定版本。已发布版本（包括文件标签与 VCS 溯源）不可修改；修复必须创建新草稿，避免同一版本号对应不同生产字节。</p>
+          <p>版本列表支持搜索；需要历史回滚或固定服号时进入“部署上线”的高级发布任务。已发布版本包、文件标签和 VCS 溯源不可修改；共享 <code>server.yaml</code> 在交付时应用，不随版本冻结。</p>
       </section>
 
       <section id="provenance">
@@ -456,10 +355,10 @@
   "name": "4.3.0",
   "vcs": {
     "provider": "gitea",
-    "repository": "https://git.example.com/game/server",
+    "repository": "https://git.example.invalid/game/server",
     "ref": "refs/tags/v4.3.0",
     "commit": "0123456789abcdef",
-    "run_url": "https://git.example.com/game/server/actions/runs/42",
+    "run_url": "https://git.example.invalid/game/server/actions/runs/42",
     "run_id": "42"
   }
 }</pre>
@@ -469,13 +368,13 @@
 
       <section id="tags">
         <h2>4. 多平台文件标签</h2>
-        <p>一个版本可以同时上传 Windows、macOS、Linux，x86_64、arm64 等所有二进制。下载方上报自身环境后，服务端只返回匹配标签的文件。未设置标签的文件等价于 <span class="badge">*</span>，所有平台都会下载。</p>
+        <p>一个版本可以同时上传 Windows、macOS、Linux，x86_64、arm64 等所有二进制。下载方上报自身环境后，服务端只返回匹配标签的文件。文件的多个标签按 OR 匹配；只适用一种系统和架构的二进制应使用组合标签，例如 linux-amd64。未设置标签的文件等价于 <span class="badge">*</span>，所有平台都会下载。</p>
         <div class="visual">
           <div class="visual-head">上传文件树预览</div>
           <div class="tree">
-            <div><span>bin/game-linux-amd64</span><span class="tags"><span class="badge">linux</span><span class="badge">amd64</span></span></div>
-            <div><span>bin/game-linux-arm64</span><span class="tags"><span class="badge">linux</span><span class="badge">arm64</span></span></div>
-            <div><span>bin/game-windows-amd64.exe</span><span class="tags"><span class="badge">windows</span><span class="badge">amd64</span></span></div>
+            <div><span>bin/game-linux-amd64</span><span class="tags"><span class="badge">linux-amd64</span></span></div>
+            <div><span>bin/game-linux-arm64</span><span class="tags"><span class="badge">linux-arm64</span></span></div>
+            <div><span>bin/game-windows-amd64.exe</span><span class="tags"><span class="badge">windows-amd64</span></span></div>
             <div class="active"><span>config/default.yaml</span><span class="tags"><span class="badge">*</span></span></div>
           </div>
         </div>
@@ -483,8 +382,9 @@
         <table>
           <thead><tr><th>维度</th><th>建议值</th><th>说明</th></tr></thead>
           <tbody>
-            <tr><td>系统</td><td><code>windows</code> <code>mac</code> <code>linux</code></td><td>按下载方操作系统过滤。</td></tr>
+            <tr><td>系统</td><td><code>windows</code> <code>darwin</code> <code>linux</code></td><td>按下载方操作系统过滤。</td></tr>
             <tr><td>架构</td><td><code>amd64</code> <code>arm64</code></td><td>按 CPU 架构过滤。</td></tr>
+            <tr><td>组合</td><td><code>linux-amd64</code> <code>darwin-arm64</code></td><td>二进制优先使用组合标签，避免 OR 扩大匹配范围。</td></tr>
             <tr><td>用途</td><td><code>server</code> <code>tool</code></td><td>可选，用于自动化运维选择不同文件组。</td></tr>
           </tbody>
         </table>
@@ -496,18 +396,21 @@
         <div class="split">
           <div>
             <h3>server.yaml 示例</h3>
-            <pre>replacements:
-  game.yaml:
-    s1:
-      db_host: 10.0.0.11
-      listen: 0.0.0.0:7001
-    s2:
-      db_host: 10.0.0.12
-      listen: 0.0.0.0:7002</pre>
+            <pre>servers:
+  "1001":
+    replacements:
+      game.yaml:
+        server_id: "1001"
+        listen_port: 7001
+  "1002":
+    replacements:
+      game.yaml:
+        server_id: "1002"
+        listen_port: 7002</pre>
           </div>
           <div>
             <h3>替换原则</h3>
-            <p><code>replacements</code> 的 key 是配置文件 basename，也就是 <code>game.yaml</code>，不要求写完整目录。发布前必须在“拉取预览”确认文件树和 diff。</p>
+            <p><code>replacements</code> 的 key 是配置文件 basename，也就是 <code>game.yaml</code>，不要求写完整目录。需要分服差异时，在“配置预览”核对原始配置与替换后配置；预览下拉框列出共享配置，不代表项目的部署目标。</p>
           </div>
         </div>
       </section>
@@ -517,9 +420,11 @@
         <p>Pull Agent 以最小权限 Token 或 Basic Auth 心跳并收敛 desired version/generation；Push 使用已固定 Host Key 的 SSH 资源和可重复发布任务。两种模式共用版本、配置渲染、审计与集群节点清单。</p>
         <pre># 典型节点流程
 pull 到 GAME_ROOT/.tmp/{server_id}/
-停止 GAME_ROOT/{server_id}/run/server.pid 对应进程
-rsync 临时目录到正式目录，保留 logs/ 与 run/
-执行 scripts/restart.sh</pre>
+校验 run/server.pid 对应实例，SIGTERM 后等待正常退出（默认最多 180 秒）
+rsync 临时目录到正式目录，保留 data/、logs/ 与 run/
+执行 scripts/restart.sh，再核对健康检查</pre>
+        <p>以上为 Linux 安全 runner 的关键阶段；生产应安装 rsync。Windows 停进程语义不同，使用前阅读安全部署文档。直接 CLI <code>pull</code> / <code>deploy</code> 不等同于安全 runner。</p>
+        <p><strong>控制台预演不连接 SSH，不修改服务器。</strong>“部署最新版本”只作用于确认弹窗列出的 SSH 服号，Pull 节点自主拉取。固定版本失效时必须重新选择，不会自动换成最新版本。</p>
         <p>Release Hook 可选择开启，默认在 30 秒尾随窗口合并多个触发为一次最新版本发布；Pull 节点可选择自动跟随。日志、Hook 事件与发布输出默认保留 30 天。</p>
       </section>
 
@@ -530,10 +435,9 @@ rsync 临时目录到正式目录，保留 logs/ 与 run/
 curl -fsSL https://neko233-com.github.io/express233/openapi.yaml
 
 # 下载节点建议上报信息
-server_id=s1
+server_id=1001
 os=linux
-arch=amd64
-tags=linux,amd64,server</pre>
+arch=amd64</pre>
         <p>批量运维建议把平台标签作为机器画像的一部分，避免跨平台二进制被错误拉取。</p>
       </section>
 
@@ -542,8 +446,26 @@ tags=linux,amd64,server</pre>
         <div class="grid">
           <div class="card"><strong>弱网优化</strong><p>优先上传 zip 产物，服务端按文件标签选择性下载。zip 内部已压缩的二进制再 gzip 收益有限，重点应放在断点重试、校验和、分平台过滤。</p></div>
           <div class="card"><strong>版本治理</strong><p>用 VCS commit + 制品清单摘要证明生产字节来源；一个大版本只维护一个多平台包，标签决定下载范围。</p></div>
-          <div class="card"><strong>快速定位</strong><p>ECharts 大盘显示按日上传、拉取、SSH 发布和失败压力；实时卡片显示 Pull 漂移、SSH 健康和 Hook 积压。</p></div>
+          <div class="card"><strong>快速定位</strong><p>ECharts 大盘显示按日上传、拉取、SSH 发布和失败压力；实时卡片显示 Pull 漂移、SSH 健康和 Hook 积压。SSH 可达与游戏服务健康分别判断。</p></div>
         </div>
+      </section>
+
+      <section id="reference">
+        <h2>9. 完整文档与排错</h2>
+        <p>不知道下一步点哪里，先阅读控制台工作流；安装、升级、停服或 CI 接入问题按下表查阅。源码文档与当前命令同步维护。</p>
+        <table>
+          <thead><tr><th>任务</th><th>文档</th></tr></thead>
+          <tbody>
+            <tr><td>完整目录</td><td><a href="https://github.com/neko233-com/express233/blob/main/docs/README.md">全部文档与内置指南</a></td></tr>
+            <tr><td>日常发布</td><td><a href="https://github.com/neko233-com/express233/blob/main/docs/CONSOLE_WORKFLOW.md">控制台工作流</a></td></tr>
+            <tr><td>中央服安装与保留数据升级</td><td><a href="https://github.com/neko233-com/express233/blob/main/docs/DEPLOY.md">部署与运维</a></td></tr>
+            <tr><td>SSH 目标与游戏服启停</td><td><a href="https://github.com/neko233-com/express233/blob/main/docs/SSH_PUSH_DEPLOY.md">SSH Push</a> · <a href="https://github.com/neko233-com/express233/blob/main/docs/SAFE_DEPLOY.md">安全部署</a> · <a href="https://github.com/neko233-com/express233/blob/main/docs/DEPLOYMENT_SCRIPT_CONTRACT.md">脚本契约</a></td></tr>
+            <tr><td>Push / Pull 与版本策略</td><td><a href="https://github.com/neko233-com/express233/blob/main/docs/DELIVERY_CONTROL_PLANE.md">交付控制平面</a> · <a href="https://github.com/neko233-com/express233/blob/main/docs/FILE_TAGS.md">文件标签</a></td></tr>
+            <tr><td>自动化接入</td><td><a href="https://github.com/neko233-com/express233/blob/main/docs/HTTP_AUTOMATION_DEMO.md">HTTP 示例</a> · <a href="https://github.com/neko233-com/express233/blob/main/docs/GITEA_PRODUCTION.md">Gitea</a> · <a href="https://github.com/neko233-com/express233/blob/main/docs/GITHUB_ACTIONS.md">GitHub Actions</a></td></tr>
+            <tr><td>网络入口</td><td><a href="https://github.com/neko233-com/express233/blob/main/docs/CLOUDFLARE.md">Cloudflare</a></td></tr>
+          </tbody>
+        </table>
+        <p>版本发布检查、CI 与浏览器测试不能替代游戏服实际停服存盘、启动健康和玩家链路验收。中央服升级必须保留原数据目录；备份可以按运维要求选择，不能以清空数据完成更新。</p>
       </section>
     </main>
   </div>

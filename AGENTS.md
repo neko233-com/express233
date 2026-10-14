@@ -8,7 +8,7 @@
 
 ## 产品定位
 
-游戏逻辑服 **拉模式部署** 中央控制台：项目管理、版本包、按 `server_id` 配置替换、拉取预览、发布与团队邀请。
+游戏服务器 **SSH Push / Pull Agent** 交付控制台：项目与不可变版本包、按 `server_id` 共享配置覆盖、配置预览、版本发布、目标部署、团队与审计。完整文档入口为 [docs/README.md](docs/README.md)。
 
 ## CI / GitHub / 发布（必读）
 
@@ -102,7 +102,8 @@
     ├── #globalServer — server.yaml
     ├── #globalSettings — 账号 / 审计
     └── #projectWorkspace — 选中项目后
-        ├── 横向 .project-tabs（版本 / 预览 / 团队 / 部署 / 差异）
+        ├── 横向 .project-tabs（版本包 / 分服配置 / 配置预览 / 发布版本 / 部署上线）
+        ├── 辅助导航（差异 / 集群节点 / 团队 / 部署脚本）
         └── .ptab-panel*
 ```
 
