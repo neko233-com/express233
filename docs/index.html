@@ -111,6 +111,7 @@
       text-decoration: none;
     }
     .content {
+      min-width: 0;
       width: min(1180px, 100%);
       margin: 0 auto;
       padding: 2rem clamp(1rem, 3vw, 2.5rem) 4rem;
@@ -268,10 +269,10 @@
     td { color: var(--muted); }
 
     @media (max-width: 980px) {
-      .shell { grid-template-columns: 1fr; }
+      .shell { grid-template-columns: minmax(0, 1fr); }
       .nav { position: static; height: auto; }
-      .hero, .split { grid-template-columns: 1fr; min-height: auto; }
-      .grid, .flow { grid-template-columns: 1fr; }
+      .hero, .split { grid-template-columns: minmax(0, 1fr); min-height: auto; }
+      .grid, .flow { grid-template-columns: minmax(0, 1fr); }
     }
   </style>
 </head>
