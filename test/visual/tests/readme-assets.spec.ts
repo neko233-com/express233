@@ -1,10 +1,12 @@
 import { test, expect, type Page } from "@playwright/test";
 import path from "path";
 import fs from "fs";
+import { randomUUID } from "crypto";
 import { loginAsRoot } from "./helpers";
 
-const assetsDir = path.resolve(__dirname, "../../../.assets");
-const projectName = "game-demo";
+const assetsDir = process.env.EXPRESS233_README_ASSETS_DIR
+  ? path.resolve(process.env.EXPRESS233_README_ASSETS_DIR)
+  : path.resolve(__dirname, "../../../.assets");
 const serverIDs = ["1001", "1002", "1003"];
 
 // Capture actual application data without replacing responses or visible UI.
@@ -56,27 +58,35 @@ test.describe("README 功能截图", () => {
     expect(new URL(baseURL!).hostname).toMatch(/^(127\.0\.0\.1|localhost|\[::1\])$/);
     fs.mkdirSync(assetsDir, { recursive: true });
     await loginAsRoot(page);
-    const defaultYaml = (await (await page.request.get("/api/server-yaml")).json()).content;
+    // Fresh names also isolate retries when a previous attempt could not clean up.
+    const projectName = `game-demo-${randomUUID().slice(0, 8)}`;
+    const { tenant_slug: tenantSlug } = await (await page.request.get("/api/me")).json();
+    const projectPath = `userdata/${tenantSlug}/projects/${projectName}`;
+    const previousServerEntries = new Map<string, unknown>();
     const hostIDs: number[] = [];
     let projectID: number | undefined;
 
     try {
       const created = await page.request.post("/api/projects", { data: { name: projectName } });
-      expect(created.ok(), "Use a fresh isolated data directory for README captures").toBeTruthy();
+      // A 200 response reuses an existing project; it must never become ours to delete.
+      expect(created.status(), "The screenshot fixture must own a newly created project").toBe(201);
       projectID = (await created.json()).id;
       expect(projectID).toBeDefined();
 
-      const demoYaml = "servers:\n" + serverIDs.map((id, index) => `  "${id}":
-    replacements:
-      game.properties:
-        server.id: ${id}
-        server.name: "Demo Realm ${index + 1}"
-        server.port: ${18001 + index}
-        region: "demo-east"
-    post_hook_env:
-      SERVER_ID: "${id}"
-`).join("");
-      expect((await page.request.put("/api/server-yaml", { data: { content: demoYaml } })).ok()).toBeTruthy();
+      // Preserve each touched entry instead of replacing the suite's complete YAML.
+      for (const [index, id] of serverIDs.entries()) {
+        const endpoint = `/api/servers/${id}`;
+        const existing = await page.request.get(endpoint);
+        expect([200, 404]).toContain(existing.status());
+        previousServerEntries.set(id, existing.ok() ? (await existing.json()).entry : null);
+        expect((await page.request.put(endpoint, { data: {
+          replacements: { "game.properties": {
+            "server.id": Number(id), "server.name": `Demo Realm ${index + 1}`,
+            "server.port": 18001 + index, region: "demo-east",
+          } },
+          post_hook_env: { SERVER_ID: id },
+        } })).ok()).toBeTruthy();
+      }
       await seedVersion(page, projectID!, "1.2.0", true);
       await seedVersion(page, projectID!, "1.2.1", true);
       await seedVersion(page, projectID!, "1.3.0", false);
@@ -173,21 +183,26 @@ test.describe("README 功能截图", () => {
       // Collapse completed versions so all three versions fit, then inspect
       // the draft file without taking any storage deletion action.
       for (const version of ["1.2.0", "1.2.1"]) {
-        await page.getByTestId("storage-tree").locator("[data-storage-folder]").filter({
-          has: page.locator(".storage-tree-name", { hasText: new RegExp(`^${version.replaceAll(".", "\\.")}$`) }),
-        }).click();
+        await page.getByTestId("storage-tree").locator(`[data-storage-folder="${projectPath}/${version}"]`).click();
         await expect(page.locator("#storageDetail")).toContainText(`${projectName}/${version}`);
       }
-      await page.getByTestId("storage-tree").locator(".storage-tree-row").filter({
-        has: page.locator(".storage-tree-name", { hasText: /^game.properties$/ }),
-      }).click();
+      await page.getByTestId("storage-tree").locator(`.storage-tree-row[data-path="${projectPath}/1.3.0/config/game.properties"]`).click();
       await expect(page.locator("#storageDetail")).toContainText("1.3.0/config/game.properties");
       await capture(page, "storage-space.png");
     } finally {
-      // Restore shared configuration when the capture spec runs in the suite.
-      for (const hostID of hostIDs) await page.request.delete(`/api/push/hosts/${hostID}`);
-      if (projectID) await page.request.delete(`/api/projects/${projectID}?confirm=yes`);
-      await page.request.put("/api/server-yaml", { data: { content: defaultYaml } });
+      // Retain the unique project and its deployment history in the disposable
+      // test data directory for diagnosis; retries must not depend on project deletion.
+      // Remove only our SSH hosts and restore the server entries we touched.
+      for (const hostID of hostIDs) {
+        expect.soft((await page.request.delete(`/api/push/hosts/${hostID}`)).ok()).toBeTruthy();
+      }
+      for (const [id, entry] of previousServerEntries) {
+        const endpoint = `/api/servers/${id}`;
+        const restored = entry === null
+          ? await page.request.delete(endpoint)
+          : await page.request.put(endpoint, { data: entry });
+        expect.soft(restored.ok(), `Restore only the touched server entry ${id}`).toBeTruthy();
+      }
     }
   });
 });
