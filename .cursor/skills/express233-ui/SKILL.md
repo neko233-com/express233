@@ -14,7 +14,7 @@ description: >-
 
 ## 必读
 
-1. 仓库根目录 [AGENTS.md](../../AGENTS.md) — 设计令牌、布局、禁止项。
+1. 仓库根目录 [AGENTS.md](../../../AGENTS.md) — 设计令牌、布局、禁止项。
 2. 勿破坏 `data-testid`（见 `test/visual/tests/server-flows.spec.ts`）。
 
 ## New API 暗黑要点（执行清单）

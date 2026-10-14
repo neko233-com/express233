@@ -2,339 +2,224 @@
 
 [![CI](https://github.com/neko233-com/express233/actions/workflows/ci.yml/badge.svg)](https://github.com/neko233-com/express233/actions/workflows/ci.yml)
 [![Lint](https://github.com/neko233-com/express233/actions/workflows/lint.yml/badge.svg)](https://github.com/neko233-com/express233/actions/workflows/lint.yml)
-[![CodeQL](https://github.com/neko233-com/express233/actions/workflows/codeql.yml/badge.svg)](https://github.com/neko233-com/express233/actions/workflows/codeql.yml)
+[![Release](https://img.shields.io/github/v/release/neko233-com/express233)](https://github.com/neko233-com/express233/releases/latest)
 
-面向游戏服务器集群与数据计算节点的 **推/拉一体交付控制平面**：统一管理版本制品、按 `server_id` 渲染差异配置、SSH Push 发布、Pull Agent 期望状态收敛、自动 Hook、健康门禁、回滚与 30 天审计。
+**面向游戏服务器的版本管理与部署控制台。** 上传一次版本包，按 `server_id` 生成各服配置，再通过 SSH 部署或 Pull Agent 拉取。适用于网关、逻辑服、战斗服及配套服务。
 
-它不是简单的文件上传器。网关、N 个逻辑服、N 个战斗服或 Spark Worker 都作为“交付节点”进入同一项目拓扑；控制面决定“哪个节点应运行哪个版本”，节点的数据库连接等差异由 `server.yaml[server_id]` 在交付时生成。
+[下载正式版](https://github.com/neko233-com/express233/releases/latest) · [使用流程](docs/CONSOLE_WORKFLOW.md) · [完整文档](docs/README.md) · [更新记录](CHANGELOG.md)
 
-## 功能概览
+## 界面预览
+
+部署前直接核对项目、版本、服号、机器和备份策略；高级任务与历史记录按需展开。
+
+![游戏服部署总览：版本、目标服号、机器与部署入口](.assets/deployment-workflow.png)
+
+确认弹窗再次列出本次 SSH 操作的具体目标，避免混淆“发布版本包”和“部署游戏服”。
+
+![部署确认：明确版本及每一个目标 server_id](.assets/deployment-confirm.png)
+
+<details>
+<summary>查看版本管理、分服配置和配置预览</summary>
+
+**版本管理**：草稿准备文件，发布后锁定内容。
+
+![版本列表与文件树](.assets/multi-version.png)
+
+**分服配置**：只填写不同区服需要覆盖的字段；没有差异时可跳过。
+
+![分服配置表单](.assets/server-config.png)
+
+**配置预览**：对照原始配置与替换后配置，预览不会修改服务器。
+
+![原始配置与替换后配置](.assets/template-replacement.png)
+
+</details>
+
+<details>
+<summary>查看文件标签、版本差异和存储空间</summary>
+
+![版本文件的平台标签](.assets/file-tags.png)
+
+![两个版本的配置差异](.assets/version-diff.png)
+
+![存储空间总览与目录树](.assets/storage-space.png)
+
+</details>
+
+以上均为当前控制台在本地演示环境生成的真实截图，使用虚构项目和区服，不包含生产数据。生成方法见 [截图说明](.assets/README.md)。
+
+## 从版本包到上线
+
+| 步骤 | 在控制台做什么 | 结果 |
+| --- | --- | --- |
+| 1. 版本包 | 选择项目，新建 `1.0.0` 草稿，上传程序、配置或 ZIP | 文件暂存，尚未部署 |
+| 2. 分服配置（可选） | 按 `server_id` 填写需要覆盖的字段 | 同一份包适配不同区服 |
+| 3. 配置预览（可选） | 选择区服，对照原始内容和替换结果 | 核对实际将交付的配置 |
+| 4. 发布版本 | 运行发布前检查，确认发布 | 版本内容锁定，可供交付 |
+| 5. 部署上线 | 核对版本、目标清单与备份策略，再确认部署 | SSH 按目标执行，结果进入部署历史 |
+
+**预演只核对目标，不连接 SSH、不停服，也不代表服务器已更新。** Pull Agent 自主拉取，不属于“部署最新版本”按钮的 SSH 操作范围。已开启的自动 Hook 或 Pull 自动跟随可能在版本发布后触发交付，发布前应检查这些规则。
+
+日常操作使用“部署最新版本”；需要回滚到保留的历史版本、固定部分服号或使用标签条件时，再展开“高级发布任务”。固定版本已被删除时必须重新选择，系统不会自动替换成最新版本。完整操作见 [控制台工作流](docs/CONSOLE_WORKFLOW.md)。
+
+## 核心能力
 
 | 能力 | 说明 |
-|------|------|
-| **多版本管理** | 草稿 / 审批 / 发布；语义化版本；列表搜索与批量操作 |
-| **文件标签** | 为版本内文件打平台/架构标签，拉取时按标签过滤 |
-| **配置替换预览** | 按 `server_id` 查看替换前后全文 diff（YAML / JSON / properties） |
-| **版本 diff** | 对比任意两发布版本在同一 `server_id` 下的有效配置 |
-| **存储空间** | 磁盘占用总览、目录树、索引搜索、关联删除（草稿文件 / 版本 / 项目） |
-| **安全部署** | CLI `deploy` = 拉取到 `.tmp` → stop → swap → start（见 [SAFE_DEPLOY](docs/SAFE_DEPLOY.md)） |
-| **统一 Push / Pull** | SSH 绑定和 Pull Agent 位于同一集群节点清单，展示在线、当前/期望版本和 drift |
-| **期望状态收敛** | Pull Agent 心跳领取 version + generation；健康检查成功后才确认，失败不推进、不立即重试 |
-| **发布编排** | 可重复发布任务、Gitea/GitHub 上传后 Hook、30 秒尾随防抖合并、串行执行与幂等重放 |
-| **可观测与安全** | ECharts 按日活动/失败趋势、实时 Pull/SSH/Hook 态势、Prometheus 指标、操作/发布/Hook 日志 30 天；登录 IP 限速封禁、SSH 密文不可回读 |
-| **多租户与 RBAC** | 租户隔离、`viewer` / `operator` / `admin`、项目邀请链接 |
-| **Blob 去重** | 内容寻址存储，多版本共享相同文件块，删除时按引用计数回收 |
+| --- | --- |
+| 版本与来源 | 草稿、审批、发布；不可变文件与标签；Git / GitHub / Gitea 来源和构建记录 |
+| 分服配置 | 按配置文件 basename 深度覆盖 YAML / JSON / properties，提供原始与渲染后预览 |
+| SSH 部署 | 项目目标绑定、固定服号子集、逐服执行结果、备份策略和健康检查 |
+| Pull Agent | 心跳上报当前版本，按期望版本与 generation 收敛，健康检查后确认 |
+| 自动化 | HTTP API、可重复发布任务、发布 Hook、幂等请求和防抖合并 |
+| 团队 | 多租户、项目邀请、`viewer` / `operator` / `admin` 权限 |
+| 运维 | 发布历史、逐服日志、存储空间、Blob 去重、审计与 Prometheus 指标 |
 
-### 界面截图
+Push 与 Pull 的职责、健康门禁和回滚边界见 [交付控制平面](docs/DELIVERY_CONTROL_PLANE.md)。
 
-多版本列表与搜索：
+## 安装与启动
 
-![多版本管理](.assets/multi-version.png)
+中央服使用 `express233-server`，被部署的机器使用 `express233-cli`。从 [GitHub Releases](https://github.com/neko233-com/express233/releases/latest) 下载匹配平台的二进制，也可使用安装脚本。
 
-版本文件标签（上传时或批量打标）：
+| 系统 | 已提供的 Release 架构 |
+| --- | --- |
+| Linux | amd64、arm64 |
+| macOS | amd64、arm64 |
+| Windows | amd64 |
 
-![文件标签](.assets/file-tags.png)
+每个正式版包含 10 个 CLI / Server 二进制、`SHA256SUMS` 和 `PROVENANCE.json`。校验文件使用统一的 `SHA256SUMS`，不是每个文件单独的 `.sha256`。生产安装与升级步骤见 [部署文档](docs/DEPLOY.md)。
 
-版本间配置 diff（双栏 + 文件树）：
+### 中央服
 
-![版本 diff](.assets/version-diff.png)
-
-`server_id` 模板替换后的拉取预览：
-
-![模板替换预览](.assets/template-replacement.png)
-
-存储空间：磁盘分类、目录树、索引搜索：
-
-![存储空间](.assets/storage-space.png)
-
-> 截图由 `test/visual/tests/readme-assets.spec.ts` 在本地控制台生成，存放于 [.assets/](.assets/)（非 `.github/`）。
-
-## 工作流
-
-| 步骤 | 说明 |
-|------|------|
-| 中央上传 | 项目 → 版本（草稿）→ 上传 / zip → **发布** |
-| 配置约束 | 配置文件 **basename 全局唯一**；`server.yaml` 按 **文件名** 替换（无视路径） |
-| 预览 | Web 或 `express233-cli preview` 查看每个键 before → after |
-| 节点部署 | `express233-cli deploy` = 拉取 + 替换 + `post_hook` |
-| 持续收敛 | `express233-cli agent` 定期心跳，发现新 generation 后调用安全部署 runner |
-
-详细架构、推拉边界和生产拓扑见 [交付控制平面](docs/DELIVERY_CONTROL_PLANE.md)。
-
-## 安装
-
-**CLI（节点）**
+Linux / macOS：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/neko233-com/express233/main/scripts/install.sh | bash
-```
-
-```powershell
-iwr -useb https://raw.githubusercontent.com/neko233-com/express233/main/scripts/install.ps1 | iex
-```
-
-**Server（中央）**
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/neko233-com/express233/main/scripts/install-server.sh | bash
-```
-
-```powershell
-iwr -useb https://raw.githubusercontent.com/neko233-com/express233/main/scripts/install-server.ps1 | iex
-```
-
-安装指定版本：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/neko233-com/express233/main/scripts/install-server.sh | bash -s -- v0.1.0
-```
-
-```powershell
-iwr -useb https://raw.githubusercontent.com/neko233-com/express233/main/scripts/install-server.ps1 | iex; Install-Express233Server -Ver v0.1.0
-```
-
-或 `go install ./cmd/express233-cli ./cmd/express233-server`
-
-Release 资产（tag `v*` 触发 [release.yml](.github/workflows/release.yml)）：
-
-- `express233-cli-{linux,darwin,windows}-{amd64,arm64}[.exe]`
-- `express233-server-{...}`（同上）
-- 各文件 `.sha256` 校验
-
-## 中央服运维命令
-
-默认监听 `127.0.0.1:23380`，数据目录优先读取 `EXPRESS233_DATA`，否则使用 `~/.express233-server`。
-
-首次安装后推荐顺序：
-
-```bash
+curl -fsSL https://raw.githubusercontent.com/neko233-com/express233/main/scripts/install-server.sh -o install-server.sh
+bash install-server.sh
 express233-server start
 express233-server status
-express233-server reset-root-password --password 'change-me-now'
 ```
 
-常用命令：
-
-```bash
-express233-server port
-express233-server set-port 32380
-express233-server restart
-express233-server enable-autostart
-express233-server autostart-status
-express233-server update
-express233-server backup-config
-express233-server reload-config
-express233-server disable-autostart
-express233-server restore-config
-express233-server stop
-```
-
-说明：
-
-- `start`：后台启动并写入 `run/server.pid`、`run/server-state.json`、`run/server.log`
-- `enable-autostart` / `disable-autostart`：安装或移除原生开机自启动。Linux 使用 `systemd`，macOS 使用 `launchd`，Windows 使用 `schtasks /SC ONSTART`
-- `autostart-status`：查看当前是否已安装原生开机自启动，以及当前是否 active
-- `status`：查看当前 PID、访问地址、数据目录、默认端口
-- `port`：查看默认端口 `23380` 与当前持久化监听地址
-- `set-port`：修改中央服监听端口，默认会自动重启正在运行的中央服
-- `update`：更新到最新 Release（或 `--version vX.Y.Z` 指定版本），自动替换二进制并重启中央服
-- `reload-config`：校验并热重载租户 `server.yaml`，无需重启进程
-- `backup-config` / `restore-config`：备份并恢复中央 `server.yaml`；`restore-config --default` 可恢复为示例模板
-- `reset-root-password`：仅命令行强制重置 `root` 密码，适合忘记密码时救援
-- 运行日志：默认 `info` 级别，写入 `run/server.log`，按天或 10 MiB 滚动，最多 30 份并清理超过 30 天的备份；高频 2xx 请求默认不记日志
-
-PowerShell 示例：
+Windows PowerShell：
 
 ```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/neko233-com/express233/main/scripts/install-server.ps1 -OutFile install-server.ps1
+./install-server.ps1
+# 将 %LOCALAPPDATA%\express233 加入 PATH 后：
 express233-server start
-express233-server enable-autostart
-express233-server set-port 32380
-express233-server reset-root-password --password "change-me-now"
+express233-server status
 ```
 
-生产落地建议：
+固定版本时，Shell 脚本接收 `bash install-server.sh vX.Y.Z`；PowerShell 脚本接收 `./install-server.ps1 -Version vX.Y.Z`。请把 `vX.Y.Z` 换成实际 Release 标签。安装脚本用于安装，不应直接覆盖正在运行的生产二进制。
 
-- Linux（Ubuntu / Debian / CentOS 7+）：优先用 `express233-server enable-autostart` 落到 `systemd`
-- macOS：落到 `launchd`
-- Windows：落到计划任务 `ONSTART`
-- 开启原生自启动后，后续 `start` / `stop` / `restart` 会优先走原生服务控制面
+默认访问 [http://127.0.0.1:23380](http://127.0.0.1:23380)。数据目录优先使用 `EXPRESS233_DATA`，否则为 `~/.express233-server`。使用管理员分配的账号登录；首次安装应先完成管理员改密并创建日常账号，再开放网络入口。
 
-## 一行部署
+也可从源码体验：安装 Go 1.26 后运行 [run-server.cmd](run-server.cmd) 或 [run-server.sh](run-server.sh)。这些开发脚本可能停止已有本地 Express233 实例；隔离启动可使用独立端口和数据目录：
 
 ```bash
-export EXPRESS233_SERVER=http://10.0.0.1:23380
-export EXPRESS233_TOKEN=<token>
-express233-cli deploy --project mygame --server-id game-logic-042 --dest /opt/game/042
+go run ./cmd/express233-server serve --addr 127.0.0.1:23381 --data .data-demo
 ```
 
-也可不用 pull token，改用账号密码：
+### 游戏服节点
+
+安装节点 CLI 与安全部署脚本：
 
 ```bash
-export EXPRESS233_SERVER=http://10.0.0.1:23380
-export EXPRESS233_USERNAME=root
-export EXPRESS233_PASSWORD='<account-password>'
-express233-cli deploy --project mygame --server-id game-logic-042 --version 1.0.0 --dest /opt/game/042
+curl -fsSL https://raw.githubusercontent.com/neko233-com/express233/main/scripts/install.sh -o install-cli.sh
+bash install-cli.sh
 ```
 
-批量：[examples/deploy-batch.csv](examples/deploy-batch.csv) + `express233-cli pull-batch --file ...`
-
-列出中央已配置的 server_id：`express233-cli servers --server URL --token TOKEN`
-
-环境自检：`express233-cli doctor`（检查 healthz、token、server_id、已发布版本）
-
-版本回滚：`express233-cli rollback --server-id ID`（部署上一发布版；`--to 1.0.0` 指定版本）
-
-版本 diff：`express233-cli diff --from 1.0.0 --to 1.1.0 --server-id ID`（对比两版本在 server_id 下的有效配置键）
-
-项目拉取日志：`GET /api/projects/{id}/logs?server_id=game-logic-042&version=1.0.0`（默认保留最近 30 天）
-
-## Pull Agent（持续收敛）
-
-Linux/macOS 安装脚本同时安装 `express233-cli` 与 `safe-deploy.sh`。常驻 Agent 可由 systemd、Supervisor 或容器编排器托管：
+凭据由 Secret 管理器或部署环境注入 `EXPRESS233_TOKEN`，或注入 `EXPRESS233_USERNAME` / `EXPRESS233_PASSWORD`；不要写进 Git、命令行参数或日志。以下示例只设置非敏感选项：
 
 ```bash
 export EXPRESS233_SERVER=https://control.example.invalid
-export EXPRESS233_TOKEN=<pull-token>
-express233-cli agent \
-  --project game-cluster \
-  --server-id logic-021 \
-  --role logic \
-  --environment production \
-  --label role:logic \
-  --label env:production \
-  --root /opt/game-servers \
-  --interval 1m
+export EXPRESS233_PROJECT=game-demo
+export GAME_ROOT=/opt/game-servers
+safe-deploy.sh --server-id 1001 --version 1.0.0 --backup
 ```
 
-Windows 使用同等 stop → backup → swap → start → health gate 的 `scripts/safe-deploy.ps1`。凭据仅通过 HTTP 请求头和 runner 子进程环境传递，不进入节点状态 JSON、心跳请求体或日志。
+Linux 生产部署需安装 `rsync`。安全 runner 暂存新包，校验实例进程并等待退出，再替换程序、启动及执行健康检查；`rsync` 路径保留实例的 `data/`、`logs/`、`run/`。停服超时默认中止，正常发布禁止自动强杀。详见 [安全部署及平台边界](docs/SAFE_DEPLOY.md)。
 
-审批流：operator 上传并「提交审批」→ admin「正式发布」或「驳回」
+`express233-cli pull` / `deploy` 当前行为相同：直接解包到 `--dest`，默认执行 `post_hook`，只有 `--skip-hook` 才跳过。它们本身不提供完整的 stop → swap → start 隔离流程。运行中的游戏服应通过安全 runner 或控制台的 SSH 部署入口更新。
 
-多租户：默认租户 `default`；`root` 登录后可 `POST /api/tenants` 创建新租户。每租户独立 `server.yaml` 与项目空间。
+持续运行的 Pull Agent 示例：
 
-配置覆盖（`server.yaml`）示例——只覆盖必要字段：
+```bash
+express233-cli agent --project game-demo --server-id 1001 \
+  --role logic --environment production --root /opt/game-servers --interval 1m
+```
+
+Windows 节点使用 [safe-deploy.ps1](scripts/safe-deploy.ps1)，其停进程语义与 Linux SIGTERM 不同；完整接入与适用条件见 [Pull Agent 指南](internal/api/guide/agent.md)。
+
+## 分服配置的边界
+
+版本包里的配置 basename 必须唯一。例如不同目录不能各有一个 `application.yaml`。配置覆盖按租户共享，同一个 `server_id` 被多个项目使用时，修改会影响这些项目的后续交付。
 
 ```yaml
-replacements:
-  application.yaml:
-    mysql:
-      url: jdbc:mysql://db-a:3306/game
-      password: secret
+servers:
+  "1001":
+    replacements:
+      application.yaml:
+        game:
+          serverId: "1001"
+          listenPort: 9001
+  "1002":
+    replacements:
+      application.yaml:
+        game:
+          serverId: "1002"
+          listenPort: 9002
 ```
 
-同名配置文件须为同一格式（`.yaml` 用嵌套对象，`.properties` 用扁平或嵌套展平为 dotted 键）。
+没有分服差异可跳过覆盖字段与预览，但 Pull / Agent 仍要求先注册 `server_id`，可使用空的 `replacements`。预览下拉框列出的是共享分服配置，不等同于项目的 SSH 部署目标。`server.yaml` 不随版本包冻结，回滚时仍会使用当前配置。配置路径和 `post_hook` 约定见 [配置示例](configs/server.yaml.example) 与 [脚本契约](docs/DEPLOYMENT_SCRIPT_CONTRACT.md)。
 
-## 本地脚本
+## 运维与升级
 
-**仓库根目录（Windows 双击 / 命令行）：**
+| 命令 / 入口 | 用途 |
+| --- | --- |
+| `express233-server status` / `version` | 确认服务状态与运行版本 |
+| `start` / `stop` / `restart` | 服务生命周期；安装原生服务后优先使用原生控制方式 |
+| `port` / `set-port 32380` | 查看或修改监听地址；修改默认会重启 |
+| `enable-autostart` / `autostart-status` | Linux systemd、macOS launchd、Windows 计划任务 |
+| `update --version vX.Y.Z` | 中央服自更新；运行前遵循生产升级检查 |
+| `reload-config` | 校验并热重载租户 `server.yaml` |
+| `backup-config` / `restore-config` | 配置备份与恢复，不等同于完整数据备份 |
+| 控制台“系统设置” | 日常账号、改密和审计 |
+| 控制台“存储空间” | 查看占用与删除计划；删除已发布版本会影响后续拉取与回滚 |
 
-| 脚本 | 说明 |
-|------|------|
-| [run-server.cmd](run-server.cmd) / [run-server.sh](run-server.sh) | 启动中央服 `:23380`（若本机已有 express233-server 会先自动停止） |
-| [install-unicli.cmd](install-unicli.cmd) | 安装 [neko233-com/unicli](https://github.com/neko233-com/unicli)（端口/进程工具，推荐） |
-| [install-gh.cmd](install-gh.cmd) | 安装 [GitHub CLI](https://cli.github.com/)（CI 日志、发布门禁） |
-| [test-server.cmd](test-server.cmd) / [test-server.sh](test-server.sh) | `go test ./...` |
-| [build-all.cmd](build-all.cmd) / [build-all.sh](build-all.sh) | 构建 CLI + Server 到 `bin/` |
-| [git-deploy.cmd](git-deploy.cmd) / [git-deploy.sh](git-deploy.sh) | 本地模拟 CI（vet/测试/构建/冒烟）；`git-deploy.cmd --push` 再推送 |
-| [visual-e2e.cmd](visual-e2e.cmd) / [visual-e2e.sh](visual-e2e.sh) | **浏览器全流程**（Playwright）；**不参与发布/ git-deploy** |
+升级中央服必须保留原 `EXPRESS233_DATA`、数据库、租户配置和服务配置。备份策略可以按运维要求决定，但不能通过清空数据目录完成升级。游戏服包备份与中央服数据备份是两件事，详见 [生产升级与数据保留](docs/DEPLOY.md)。
 
-可视化验收技能：[.cursor/skills/express233-visual-verify/SKILL.md](.cursor/skills/express233-visual-verify/SKILL.md)
+## 文档导航
 
-**子目录（同上逻辑）：**
+| 需要完成的事 | 文档 |
+| --- | --- |
+| 第一次使用 / 日常发布 | [控制台工作流](docs/CONSOLE_WORKFLOW.md) |
+| 接入 SSH 机器、绑定区服 | [SSH Push 部署](docs/SSH_PUSH_DEPLOY.md) |
+| 规划 Push / Pull 与多服拓扑 | [交付控制平面](docs/DELIVERY_CONTROL_PLANE.md) |
+| 停服、换包、健康检查与回滚 | [安全部署](docs/SAFE_DEPLOY.md) · [脚本契约](docs/DEPLOYMENT_SCRIPT_CONTRACT.md) |
+| 安装、Docker / K8s、升级 | [部署文档](docs/DEPLOY.md) |
+| CI 上传、发布及自动化 | [HTTP 示例](docs/HTTP_AUTOMATION_DEMO.md) · [Gitea](docs/GITEA_PRODUCTION.md) · [GitHub Actions](docs/GITHUB_ACTIONS.md) |
+| 标签、平台和架构过滤 | [文件标签](docs/FILE_TAGS.md) |
+| Cloudflare 入口 | [Cloudflare](docs/CLOUDFLARE.md) |
+| API 与内置帮助 | [OpenAPI](docs/openapi.yaml) · [静态指南](internal/api/guide/overview.md) |
 
-| 目录 | 说明 |
-|------|------|
-| [run/run.sh](run/run.sh) / [run/run.cmd](run/run.cmd) | 启动 `express233-server`（`:23380`，数据目录 `EXPRESS233_DATA` 或 `.data`） |
-| [test/test.sh](test/test.sh) / [test/test.cmd](test/test.cmd) | 运行 `go test ./...` |
-| [deploy-github/deploy-github.sh](deploy-github/deploy-github.sh) / [.cmd](deploy-github/deploy-github.cmd) | 本地模拟 CI：vet、测试、构建、冒烟（需 Git Bash 跑 smoke） |
+运行中的中央服在 `/docs/` 提供 Swagger UI，在 `/api/agent/guide` 提供只读、脱敏的内置指南。全部入口与维护约定见 [文档目录](docs/README.md)。
 
-## 项目协作与邀请
+## 开发与发布
 
-- 创建项目后，创建者自动成为 **项目管理员**（读写）。
-- 项目管理员在 Web「团队与邀请」生成链接，形如：`https://中央服务/#invite?token=...`
-- 被邀请人登录同一租户账号后打开链接 → **接受邀请**。
-- **只读成员**（`viewer`）：预览、列表、拉取已发布版本；不能上传/发布。
-- **项目管理员**（`admin`）：在该项目内可上传、审批、发布。
-- 租户级 `root` 可查看租户内全部项目；普通用户仅能看到已加入的项目。
-
-运维：`GET /metrics`（Prometheus）、`GET /api/audit-logs`（管理员）、`scripts/backup-data.sh`
-
-## Docker 本地中央服
+工具链为 Go 1.26、Node.js 24 LTS（浏览器测试）和 golangci-lint v2。
 
 ```bash
-docker compose up --build
-# http://localhost:23380
+go test ./...
+golangci-lint run --timeout=5m
+# 浏览器验收是独立流程：
+cd test/visual
+npm ci
+npx playwright install chromium
+npm test
 ```
 
-## Cloudflare
+本地脚本包括 [build-all.cmd](build-all.cmd) / [build-all.sh](build-all.sh)、[visual-e2e.cmd](visual-e2e.cmd) / [visual-e2e.sh](visual-e2e.sh)。开发脚本启用 `EXPRESS233_WEB_DIR=internal/api/web` 后，静态页面修改可通过刷新查看。
 
-Cloudflare Workers / Pages 不能直接运行 `express233-server` Go 二进制；推荐用 Worker 作为现有中央服的 HTTPS 反向代理，或 Pages 托管静态控制台并把 `/api/*` 代理到中央服。示例见 [docs/CLOUDFLARE.md](docs/CLOUDFLARE.md) 与 [examples/cloudflare/worker-proxy](examples/cloudflare/worker-proxy)。
+只有目标 commit 的 `golangci-lint`、三平台 `test`、`build binaries`、`validate scripts` 全部成功，才能推送发布标签。Release 工作流会再次检查；浏览器测试独立运行，不代替发布门禁或真实游戏服验收。详见 [GitHub Actions](docs/GITHUB_ACTIONS.md) 与 [AGENTS.md](AGENTS.md)。
 
-## HTTP 自动化 Demo
-
-管理端受保护 API 现在支持两种方式：
-
-- `POST /api/login` 获取 Cookie / JWT
-- 直接用 HTTP Basic Auth
-
-多版本、整包上传、`server_id` 注册与替换预览、diff、发布、拉取的完整 curl 演示见 [docs/HTTP_AUTOMATION_DEMO.md](docs/HTTP_AUTOMATION_DEMO.md)。
-
-## Ansible 批量
-
-[examples/ansible/](examples/ansible/)：`inventory.ini` 中为每台逻辑服设置 `express233_server_id` 与 `express233_dest`。
-
-## 开发
-
-```bash
-make test
-make build
-make smoke      # 本地冒烟（同 CI）
-make lint       # golangci-lint v2（.golangci.yml version: "2"）
-make run-server # :23380
-```
-
-`run-server` 会设置 `EXPRESS233_WEB_DIR=internal/api/web`：开发时修改 `html`/`css`/`js` 后刷新浏览器即可，无需重启 Go 进程。
-
-重复启动时脚本会探测 `http://127.0.0.1:23380/healthz`，仅停止进程名或命令行含 `express233-server` 的实例（不会误杀 `proxysss` 等）。跳过：`set EXPRESS233_NO_KILL=1`。
-
-## GitHub Actions
-
-| Workflow | 触发 | 作用 |
-|----------|------|------|
-| [ci.yml](.github/workflows/ci.yml) | push/PR | 三平台测试、vet、构建、冒烟、ShellCheck |
-| [lint.yml](.github/workflows/lint.yml) | push/PR | golangci-lint |
-| [codeql.yml](.github/workflows/codeql.yml) | push/PR/每周 | 安全扫描 |
-| [release.yml](.github/workflows/release.yml) | tag `v*` / 手动 | 多平台 CLI + Server 发布 |
-| [docker.yml](.github/workflows/docker.yml) | push/PR/tag | 构建并推送 `express233-server` 镜像 |
-| [helm.yml](.github/workflows/helm.yml) | Helm 变更 | `helm lint` + template |
-
-详见 [docs/GITHUB_ACTIONS.md](docs/GITHUB_ACTIONS.md)。
-
-## 存储空间（Web）
-
-左侧导航 **存储空间** 提供中央服数据目录的可视化运维：
-
-| 功能 | API | 说明 |
-|------|-----|------|
-| 占用总览 | `GET /api/storage/overview` | 分类统计（userdata / blobs / SQLite / run）、Blob 去重、可用磁盘 |
-| 目录树 | `GET /api/storage/tree?path=` | 租户 `userdata/{slug}/...` 与 `blobs/` 结构 |
-| 索引搜索 | `GET /api/storage/search?q=` | SQLite `storage_index` 表，重建：`POST /api/storage/reindex` |
-| 关联删除 | `GET /api/storage/delete-plan` + `DELETE /api/storage/items` | 草稿文件、版本、项目；孤立 blob 需 admin |
-
-数据布局：`{dataDir}/userdata/{slug}/projects/{name}/{version}/`；去重块在 `{dataDir}/blobs/`。
-
-## 文档
-
-- [AGENTS.md](AGENTS.md) — Agent 指南与 **New API 暗黑 UI** 规范
-- [configs/server.yaml.example](configs/server.yaml.example) — 嵌套 `replacements`（按配置文件 basename）
-- [configs/post-hook.yaml.example](configs/post-hook.yaml.example) — 拉取后处理（`when: os == ...` / `else`）
-- 校验夹具：`testdata/validation-tree/`（双服、树形配置、拉取替换与 post-hook 集成测试）
-- [docs/DEPLOY.md](docs/DEPLOY.md) — Helm / K8s / CLI 配置
-- [docs/CLOUDFLARE.md](docs/CLOUDFLARE.md) — Cloudflare Worker / Pages 入口适配
-- [docs/HTTP_AUTOMATION_DEMO.md](docs/HTTP_AUTOMATION_DEMO.md) — Basic Auth 自动化演示（多版本 / 模板替换 / 整包上传）
-- [docs/openapi.yaml](docs/openapi.yaml) — OpenAPI 3（运行时 `/api/openapi.yaml`）
-- [scripts/deploy-on-host.sh](scripts/deploy-on-host.sh)
-- 在线 Swagger：`http://<central>/docs/`
-
-
-Go **1.26** · MIT
+MIT License，见 [LICENSE](LICENSE)。
