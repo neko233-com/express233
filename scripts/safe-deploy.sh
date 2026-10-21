@@ -272,18 +272,21 @@ stop_server() {
   fi
 }
 
-# ═══════════════ Step 2: 停服前备份（不占用停机窗口）═══════════════════
+# ═══════════════ Step 2: 停服前发布文件备份（不占用停机窗口）═══════════
 if $BACKUP && [[ -d "$FINAL_DIR" ]] && ! $DRY_RUN; then
   mkdir -p "$BACKUP_DIR"
   ts=$(date '+%Y%m%d_%H%M%S')_$$
   BACKUP_ARCHIVE="${BACKUP_DIR}/${SERVER_ID}_${ts}.tar.gz"
-  log "Step 2/5: preparing rollback archive before downtime: $BACKUP_ARCHIVE"
+  log "Step 2/5: preparing rollback archive before downtime (release files only; root data/logs/run excluded): $BACKUP_ARCHIVE"
   tar -czf "$BACKUP_ARCHIVE" \
-    --exclude='logs' \
-    --exclude='run' \
+    --anchored \
+    --exclude="${SERVER_ID}/data" \
+    --exclude="${SERVER_ID}/logs" \
+    --exclude="${SERVER_ID}/run" \
     -C "$(dirname "$FINAL_DIR")" \
     "$(basename "$FINAL_DIR")"
   tar -tzf "$BACKUP_ARCHIVE" >/dev/null
+  log "release rollback archive verified; database/data backup is a separate responsibility"
   mapfile -t old_backups < <(
     find "$BACKUP_DIR" -maxdepth 1 -type f -name "${SERVER_ID}_*.tar.gz" -printf '%T@ %p\n' |
       sort -nr | tail -n "+$((BACKUP_KEEP + 1))" | cut -d' ' -f2-

@@ -1,6 +1,9 @@
 package scripts
 
 import (
+	"archive/tar"
+	"compress/gzip"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -12,6 +15,59 @@ import (
 	"testing"
 	"time"
 )
+
+func assertReleaseRollbackArchives(t *testing.T, root, serverID string, count int) {
+	t.Helper()
+	archives, err := filepath.Glob(filepath.Join(root, ".backup", serverID, "*.tar.gz"))
+	if err != nil || len(archives) != count {
+		t.Fatalf("release rollback archive count=%d want=%d err=%v", len(archives), count, err)
+	}
+	for _, archive := range archives {
+		file, err := os.Open(archive)
+		if err != nil {
+			t.Fatal(err)
+		}
+		compressed, err := gzip.NewReader(file)
+		if err != nil {
+			_ = file.Close()
+			t.Fatal(err)
+		}
+		reader := tar.NewReader(compressed)
+		members := map[string]bool{}
+		for {
+			header, err := reader.Next()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			name := strings.TrimSuffix(header.Name, "/")
+			members[name] = true
+			for _, excluded := range []string{"data", "logs", "run"} {
+				prefix := serverID + "/" + excluded
+				if name == prefix || strings.HasPrefix(name, prefix+"/") {
+					t.Fatalf("release archive contains root runtime state: %s", name)
+				}
+			}
+		}
+		// Read through the gzip trailer too, checking CRC rather than only tar headers.
+		if _, err := io.Copy(io.Discard, compressed); err != nil {
+			t.Fatal(err)
+		}
+		if err := compressed.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := file.Close(); err != nil {
+			t.Fatal(err)
+		}
+		for _, required := range []string{".env", "config/application.yaml", "config/local-secret.yaml", "assets/data/keep.txt", "assets/logs/keep.txt", "assets/run/keep.txt", "assets/" + serverID + "/data/keep.txt"} {
+			if !members[serverID+"/"+required] {
+				t.Fatalf("release archive lost configured/nested release content: %s", required)
+			}
+		}
+	}
+}
 
 // Run a real executable from the instance directory so the deployment script can
 // verify /proc/PID/exe without weakening its unrelated-process protection.
@@ -274,6 +330,17 @@ func TestSafeDeployGracefulStopAndIdempotentReplay(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(finalDir, "config", "local-secret.yaml"), []byte("local: retained\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(finalDir, ".env"), []byte("FIXTURE_MODE=local\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, relative := range []string{"assets/data", "assets/logs", "assets/run", "assets/" + serverID + "/data"} {
+		if err := os.MkdirAll(filepath.Join(finalDir, relative), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(finalDir, relative, "keep.txt"), []byte("old-release-asset"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := os.MkdirAll(filepath.Join(finalDir, "legacy-wrapper", "data"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -294,6 +361,10 @@ while [[ $# -gt 0 ]]; do
   if [[ "$1" == "--dest" ]]; then dest="$2"; shift 2; else shift; fi
 done
 mkdir -p "$dest/scripts" "$dest/.express233" "$dest/config"
+for relative in assets/data assets/logs assets/run "assets/$EXPRESS233_SERVER_ID/data"; do
+  mkdir -p "$dest/$relative"
+  printf current-release-asset >"$dest/$relative/keep.txt"
+done
 cp "$EXPRESS233_TEST_SERVER_BINARY" "$dest/game-server-fixture"
 printf artifact >"$dest/game.bin"
 printf manifest >"$dest/.express233/manifest.json"
@@ -341,6 +412,7 @@ chmod +x "$dest/scripts/restart.sh" "$dest/scripts/healthcheck.sh"
 		return string(output)
 	}
 	firstOutput := run()
+	assertReleaseRollbackArchives(t, root, serverID, 1)
 	if !strings.Contains(firstOutput, "waiting for graceful exit") {
 		t.Fatalf("missing graceful stop phase:\n%s", firstOutput)
 	}
@@ -397,5 +469,53 @@ chmod +x "$dest/scripts/restart.sh" "$dest/scripts/healthcheck.sh"
 	secondPID, err := os.ReadFile(filepath.Join(runDir, "server.pid"))
 	if err != nil || string(secondPID) != string(pidBytes) {
 		t.Fatalf("idempotent run restarted process: first=%q second=%q err=%v", pidBytes, secondPID, err)
+	}
+	// A failed release must restore code/config from the release archive while
+	// retaining the latest persistent data instead of restoring an online copy.
+	if err := os.WriteFile(filepath.Join(finalDir, "data", "players.db"), []byte("latest-live-data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	failedPullBody := strings.Replace(fakePullBody, "printf artifact >", "printf broken-artifact >", 1)
+	failedPullBody = strings.Replace(failedPullBody, "schema: new", "schema: broken", 1)
+	failedPullBody = strings.Replace(failedPullBody, `test -f "$GAME_ROOT/new-process-ready"`, "exit 1", 1)
+	if err := os.WriteFile(fakePull, []byte(failedPullBody), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	failed := exec.Command("bash", "safe-deploy.sh", "--backup", "--server-id", serverID, "--stop-timeout", "5")
+	failed.Env = append(os.Environ(), "GAME_ROOT="+root, "EXPRESS233_BIN="+fakePull,
+		"EXPRESS233_TEST_SERVER_BINARY="+oldProcess.Path, "EXPRESS233_SERVER_ID="+serverID,
+		"EXPRESS233_HEALTH_CHECK_TIMEOUT_SECONDS=1", "EXPRESS233_HEALTH_CHECK_POLL_INTERVAL_SECONDS=0.05")
+	output, failure := failed.CombinedOutput()
+	t.Cleanup(func() {
+		current, err := os.ReadFile(filepath.Join(runDir, "server.pid"))
+		if err != nil {
+			return
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(string(current)))
+		if err == nil {
+			if process, err := os.FindProcess(pid); err == nil {
+				_ = process.Kill()
+			}
+		}
+	})
+	if failure == nil || !strings.Contains(string(output), "ROLLBACK complete") {
+		t.Fatalf("failed health check must fail deployment and roll back release: err=%v\n%s", failure, output)
+	}
+	assertReleaseRollbackArchives(t, root, serverID, 2)
+	data, err = os.ReadFile(filepath.Join(finalDir, "data", "players.db"))
+	if err != nil || string(data) != "latest-live-data" {
+		t.Fatalf("rollback reverted persistent data: %q err=%v", data, err)
+	}
+	artifact, err := os.ReadFile(filepath.Join(finalDir, "game.bin"))
+	if err != nil || string(artifact) != "artifact" {
+		t.Fatalf("rollback did not restore previous code: %q err=%v", artifact, err)
+	}
+	application, err = os.ReadFile(filepath.Join(finalDir, "config", "application.yaml"))
+	if err != nil || !strings.Contains(string(application), "schema: new") || strings.Contains(string(application), "schema: broken") {
+		t.Fatalf("rollback did not restore previous release config: %q err=%v", application, err)
+	}
+	localConfig, err = os.ReadFile(filepath.Join(finalDir, "config", "local-secret.yaml"))
+	if err != nil || string(localConfig) != "local: retained\n" {
+		t.Fatalf("rollback lost local release config: %q err=%v", localConfig, err)
 	}
 }
