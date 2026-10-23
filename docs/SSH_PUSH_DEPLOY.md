@@ -6,6 +6,8 @@
 
 ## 安全要求
 
+SSH Push 会快照所选租户、所选 `server_id` 的 `post_hook_env`，通过 SSH 标准输入传入 `safe-deploy.sh` 及下游启动脚本。变量名必须是合法环境变量名，值按字面量引用，不展开命令；发布器固定的项目、服号、版本和目录优先于自定义同名变量。参数不写入进程参数或任务日志；自定义脚本仍须避免主动打印环境值。
+
 - 控制台初始用户名是 `root`；本地开发初始密码是 `root`，生产首次登录后必须立即轮换。
 - 登录密码使用 bcrypt；SSH 密码和私钥使用 `EXPRESS233_PUSH_CREDENTIAL_KEY`（base64 编码的 32 字节随机值）进行 AES-256-GCM 加密。MD5 不适合密码或凭据储存，不能使用。
 - 新建 SSH 目标必须提供 OpenSSH `host_key`。仅在受控首次登记时可设置 `EXPRESS233_PUSH_ALLOW_TOFU=1`；已登记的指纹永不自动替换。

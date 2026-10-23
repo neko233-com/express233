@@ -412,7 +412,13 @@ func (s *Server) runPushDeployment(id, tenantID int64, projectName string) {
 			_ = s.Store.MarkPushTarget(target.ID, "failed", err.Error())
 			continue
 		}
-		output, err := s.pushExecutor.Deploy(withPushCommand(withAPIStore(context.Background(), s.Store), pushCommand{CentralURL: centralURL, Project: projectName, Version: d.Version, ServerID: binding.ServerID, PullToken: user.Token, DeploymentID: strconv.FormatInt(d.ID, 10), IdempotencyKey: d.IdempotencyKey, TargetTag: pushTargetTag(projectName, binding.ServerID)}), *host, *binding, d.Version, nil)
+		hookEnv := make(map[string]string)
+		if entry := s.getServerFile(tenantID).Entry(binding.ServerID); entry != nil {
+			for key, value := range entry.PostHookEnv {
+				hookEnv[key] = value
+			}
+		}
+		output, err := s.pushExecutor.Deploy(withPushCommand(withAPIStore(context.Background(), s.Store), pushCommand{CentralURL: centralURL, Project: projectName, Version: d.Version, ServerID: binding.ServerID, PullToken: user.Token, DeploymentID: strconv.FormatInt(d.ID, 10), IdempotencyKey: d.IdempotencyKey, TargetTag: pushTargetTag(projectName, binding.ServerID), HookEnv: hookEnv}), *host, *binding, d.Version, nil)
 		status := "success"
 		if err != nil {
 			status = "failed"

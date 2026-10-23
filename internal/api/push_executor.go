@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -27,6 +28,7 @@ type sshPushExecutor struct{ credentials *pushCredentialCipher }
 type pushCommand struct {
 	CentralURL, Project, Version, ServerID, PullToken string
 	DeploymentID, IdempotencyKey, TargetTag           string
+	HookEnv                                           map[string]string
 }
 type pushCommandContextKey struct{}
 
@@ -92,7 +94,10 @@ func (e sshPushExecutor) Deploy(ctx context.Context, host store.PushHost, bindin
 	// pre-installed host script.  A controller must never overwrite a running
 	// game binary directly. The pull token is an environment value rather than
 	// an argv argument so ordinary process listings do not disclose it.
-	script := buildPushDeployScript(command, binding)
+	script, err := buildPushDeployScript(command, binding)
+	if err != nil {
+		return "", err
+	}
 	// Feed the script over stdin so the pull token and other environment values
 	// never appear in the remote shell process argv or ordinary process lists.
 	session.Stdin = strings.NewReader(script)
@@ -102,14 +107,39 @@ func (e sshPushExecutor) Deploy(ctx context.Context, host store.PushHost, bindin
 	return output.String(), nil
 }
 
-func buildPushDeployScript(command pushCommand, binding store.PushServerBinding) string {
+func buildPushDeployScript(command pushCommand, binding store.PushServerBinding) (string, error) {
 	backupFlag := "--backup "
 	if binding.SkipBackup {
 		backupFlag = ""
 	}
+	keys := make([]string, 0, len(command.HookEnv))
+	for key := range command.HookEnv {
+		if !validPushHookEnvName(key) || strings.IndexByte(command.HookEnv[key], 0) >= 0 {
+			return "", fmt.Errorf("invalid post-hook environment variable name")
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	environment := "env "
+	for _, key := range keys {
+		environment += shellQuote(key+"="+command.HookEnv[key]) + " "
+	}
 	return "set -eu\n" +
 		"command -v safe-deploy.sh >/dev/null 2>&1 || { echo 'safe-deploy.sh is required on the target'; exit 127; }\n" +
-		"EXPRESS233_SERVER=" + shellQuote(command.CentralURL) + " EXPRESS233_TOKEN=" + shellQuote(command.PullToken) + " EXPRESS233_PROJECT=" + shellQuote(command.Project) + " EXPRESS233_SERVER_ID=" + shellQuote(command.ServerID) + " VERSION=" + shellQuote(command.Version) + " EXPRESS233_TAGS=" + shellQuote(strings.Join(splitCSV(binding.ContentTags), ",")) + " GAME_ROOT=" + shellQuote(binding.RemoteRoot) + " EXPRESS233_DEPLOYMENT_ID=" + shellQuote(command.DeploymentID) + " EXPRESS233_IDEMPOTENCY_KEY=" + shellQuote(command.IdempotencyKey) + " EXPRESS233_TARGET_TAG=" + shellQuote(command.TargetTag) + " safe-deploy.sh " + backupFlag + "--server-id " + shellQuote(command.ServerID) + "\n"
+		environment + "EXPRESS233_SERVER=" + shellQuote(command.CentralURL) + " EXPRESS233_TOKEN=" + shellQuote(command.PullToken) + " EXPRESS233_PROJECT=" + shellQuote(command.Project) + " EXPRESS233_SERVER_ID=" + shellQuote(command.ServerID) + " VERSION=" + shellQuote(command.Version) + " EXPRESS233_TAGS=" + shellQuote(strings.Join(splitCSV(binding.ContentTags), ",")) + " GAME_ROOT=" + shellQuote(binding.RemoteRoot) + " EXPRESS233_DEPLOYMENT_ID=" + shellQuote(command.DeploymentID) + " EXPRESS233_IDEMPOTENCY_KEY=" + shellQuote(command.IdempotencyKey) + " EXPRESS233_TARGET_TAG=" + shellQuote(command.TargetTag) + " safe-deploy.sh " + backupFlag + "--server-id " + shellQuote(command.ServerID) + "\n", nil
+}
+
+func validPushHookEnvName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, char := range name {
+		if char == '_' || char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || i > 0 && char >= '0' && char <= '9' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (e sshPushExecutor) clientConfig(ctx context.Context, host store.PushHost) (*ssh.ClientConfig, func(), error) {
