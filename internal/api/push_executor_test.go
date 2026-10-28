@@ -1,11 +1,52 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/neko233-com/express233/internal/store"
+	"golang.org/x/crypto/ssh"
 )
+
+func TestPushSSHRetryOnlyTransientFailures(t *testing.T) {
+	attempts := 0
+	_, err := dialPushSSHWithRetry(context.Background(), func(context.Context) (*ssh.Client, error) {
+		attempts++
+		if attempts < 3 {
+			return nil, syscall.ECONNRESET
+		}
+		return nil, nil
+	}, []time.Duration{0, 0, 0})
+	if err != nil || attempts != 3 {
+		t.Fatalf("reset retry: attempts=%d err=%v", attempts, err)
+	}
+	attempts = 0
+	authError := errors.New("SSH host key mismatch")
+	_, err = dialPushSSHWithRetry(context.Background(), func(context.Context) (*ssh.Client, error) {
+		attempts++
+		return nil, authError
+	}, []time.Duration{0, 0})
+	if !errors.Is(err, authError) || attempts != 1 {
+		t.Fatalf("host key failure retried: attempts=%d err=%v", attempts, err)
+	}
+}
+
+func TestPushSSHRetryHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	attempts := 0
+	_, err := dialPushSSHWithRetry(ctx, func(context.Context) (*ssh.Client, error) {
+		attempts++
+		cancel()
+		return nil, syscall.ECONNRESET
+	}, []time.Duration{time.Hour})
+	if !errors.Is(err, context.Canceled) || attempts != 1 {
+		t.Fatalf("cancellation: attempts=%d err=%v", attempts, err)
+	}
+}
 
 func TestBuildPushDeployScriptUsesBindingBackupPolicy(t *testing.T) {
 	command := pushCommand{CentralURL: "https://express.example.com", Project: "game", Version: "1.0.0", ServerID: "1001"}

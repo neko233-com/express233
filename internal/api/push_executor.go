@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/neko233-com/express233/internal/store"
@@ -75,7 +77,9 @@ func (e sshPushExecutor) Deploy(ctx context.Context, host store.PushHost, bindin
 	}
 	defer cleanup()
 	addr := net.JoinHostPort(host.Address, strconv.Itoa(host.Port))
-	conn, err := ssh.Dial("tcp", addr, config)
+	conn, err := dialPushSSHWithRetry(ctx, func(ctx context.Context) (*ssh.Client, error) {
+		return dialPushSSH(ctx, addr, config)
+	}, []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second})
 	if err != nil {
 		return "", fmt.Errorf("connect %s: %w", host.Name, err)
 	}
@@ -105,6 +109,64 @@ func (e sshPushExecutor) Deploy(ctx context.Context, host store.PushHost, bindin
 		return output.String(), fmt.Errorf("remote CLI deploy: %w", err)
 	}
 	return output.String(), nil
+}
+
+// dialPushSSHWithRetry retries only transient connection failures, before any
+// remote session or deployment command has been created.
+func dialPushSSHWithRetry(ctx context.Context, dial func(context.Context) (*ssh.Client, error), delays []time.Duration) (*ssh.Client, error) {
+	for attempt := 0; ; attempt++ {
+		client, err := dial(ctx)
+		if err == nil {
+			return client, nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		var networkError net.Error
+		transient := errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || (errors.As(err, &networkError) && networkError.Timeout())
+		if !transient || attempt >= len(delays) {
+			return nil, err
+		}
+		timer := time.NewTimer(delays[attempt])
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+// dialPushSSH applies the connection timeout to the SSH handshake as well as
+// the TCP connection, and closes a stalled connection when the task cancels.
+func dialPushSSH(ctx context.Context, addr string, config *ssh.ClientConfig) (*ssh.Client, error) {
+	dialer := net.Dialer{Timeout: config.Timeout}
+	connection, err := dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	stop := context.AfterFunc(ctx, func() { _ = connection.Close() })
+	defer stop()
+	if config.Timeout > 0 {
+		if err := connection.SetDeadline(time.Now().Add(config.Timeout)); err != nil {
+			_ = connection.Close()
+			return nil, err
+		}
+	}
+	sshConnection, channels, requests, err := ssh.NewClientConn(connection, addr, config)
+	if err != nil {
+		_ = connection.Close()
+		return nil, err
+	}
+	if err := connection.SetDeadline(time.Time{}); err != nil {
+		_ = sshConnection.Close()
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		_ = sshConnection.Close()
+		return nil, err
+	}
+	return ssh.NewClient(sshConnection, channels, requests), nil
 }
 
 func buildPushDeployScript(command pushCommand, binding store.PushServerBinding) (string, error) {
