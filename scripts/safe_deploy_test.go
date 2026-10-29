@@ -16,8 +16,11 @@ import (
 	"time"
 )
 
-func assertReleaseRollbackArchives(t *testing.T, root, serverID string, count int) {
+func assertReleaseRollbackArchives(t *testing.T, root, serverID string, count int, requiredFiles ...string) {
 	t.Helper()
+	if len(requiredFiles) == 0 {
+		requiredFiles = []string{".env", "config/application.yaml", "config/local-secret.yaml", "assets/data/keep.txt", "assets/logs/keep.txt", "assets/run/keep.txt", "assets/" + serverID + "/data/keep.txt"}
+	}
 	archives, err := filepath.Glob(filepath.Join(root, ".backup", serverID, "*.tar.gz"))
 	if err != nil || len(archives) != count {
 		t.Fatalf("release rollback archive count=%d want=%d err=%v", len(archives), count, err)
@@ -61,7 +64,7 @@ func assertReleaseRollbackArchives(t *testing.T, root, serverID string, count in
 		if err := file.Close(); err != nil {
 			t.Fatal(err)
 		}
-		for _, required := range []string{".env", "config/application.yaml", "config/local-secret.yaml", "assets/data/keep.txt", "assets/logs/keep.txt", "assets/run/keep.txt", "assets/" + serverID + "/data/keep.txt"} {
+		for _, required := range requiredFiles {
 			if !members[serverID+"/"+required] {
 				t.Fatalf("release archive lost configured/nested release content: %s", required)
 			}
@@ -346,7 +349,7 @@ chmod +x "$dest/scripts/restart.sh"
 	if _, err := os.Stat(filepath.Join(finalDir, "candidate")); err != nil {
 		t.Fatalf("candidate runtime must be preserved: %v", err)
 	}
-	assertReleaseRollbackArchives(t, root, "111", 1)
+	assertReleaseRollbackArchives(t, root, "111", 1, "scripts/restart.sh")
 	retry := exec.Command("bash", "safe-deploy.sh", "--backup", "--server-id", "111")
 	retry.Env = command.Env
 	retryOutput, retryErr := retry.CombinedOutput()
