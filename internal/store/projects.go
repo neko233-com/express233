@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -336,17 +337,27 @@ func isDirEmpty(dir string) (bool, error) {
 	return len(entries) == 0, nil
 }
 
-// DeleteVersion 删除版本（需已确认）。
+// ErrVersionInDeployment 表示版本仍被未完成的部署固定。
+var ErrVersionInDeployment = errors.New("version is pinned by a queued or running deployment")
+
+// DeleteVersion 删除版本（需已确认），在途部署使用的版本不可删除。
 func (s *Store) DeleteVersion(tenantID, projectID int64, projectName, version string) error {
 	if !s.ProjectBelongsToTenant(projectID, tenantID) {
 		return ErrWrongTenant
 	}
-	res, err := s.db.Exec(`DELETE FROM versions WHERE project_id = ? AND version = ?`, projectID, version)
+	res, err := s.db.Exec(`DELETE FROM versions WHERE project_id = ? AND version = ? AND NOT EXISTS(SELECT 1 FROM push_deployments WHERE project_id=? AND version=? AND status IN ('queued','running'))`, projectID, version, projectID, version)
 	if err != nil {
 		return err
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
+		var active int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM push_deployments WHERE project_id=? AND version=? AND status IN ('queued','running')`, projectID, version).Scan(&active); err != nil {
+			return err
+		}
+		if active > 0 {
+			return ErrVersionInDeployment
+		}
 		return sql.ErrNoRows
 	}
 	if err := s.deleteVersionFileModes(tenantID, projectName, version); err != nil {
@@ -403,6 +414,9 @@ func (s *Store) PrunePublishedVersions(tenantID, projectID int64, projectName st
 	removed := make([]string, 0, removedCapacity)
 	for _, version := range versions[retainCount:] {
 		if err := s.DeleteVersion(tenantID, projectID, projectName, version.Version); err != nil {
+			if errors.Is(err, ErrVersionInDeployment) {
+				continue
+			}
 			return removed, err
 		}
 		removed = append(removed, version.Version)

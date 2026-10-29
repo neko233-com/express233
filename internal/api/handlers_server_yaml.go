@@ -86,6 +86,11 @@ func (s *Server) handleGetServerYAML(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePutServerYAML(w http.ResponseWriter, r *http.Request) {
+	if !s.pushConfigMu.TryLock() {
+		errJSON(w, http.StatusConflict, "server configuration is frozen by an active deployment")
+		return
+	}
+	defer s.pushConfigMu.Unlock()
 	var body struct {
 		Content string `json:"content"`
 	}
@@ -160,6 +165,11 @@ func (s *Server) handleGetServerEntry(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePutServerEntry(w http.ResponseWriter, r *http.Request) {
+	if !s.pushConfigMu.TryLock() {
+		errJSON(w, http.StatusConflict, "server configuration is frozen by an active deployment")
+		return
+	}
+	defer s.pushConfigMu.Unlock()
 	tid, ok := s.tenantFromSession(r)
 	if !ok {
 		errJSON(w, http.StatusUnauthorized, "login required")
@@ -193,6 +203,11 @@ func (s *Server) handlePutServerEntry(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteServerEntry(w http.ResponseWriter, r *http.Request) {
+	if !s.pushConfigMu.TryLock() {
+		errJSON(w, http.StatusConflict, "server configuration is frozen by an active deployment")
+		return
+	}
+	defer s.pushConfigMu.Unlock()
 	tid, ok := s.tenantFromSession(r)
 	if !ok {
 		errJSON(w, http.StatusUnauthorized, "login required")

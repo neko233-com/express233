@@ -4,7 +4,7 @@
 
 ## 前置条件与实例隔离
 
-目标为 Linux，安装 Bash、`express233-cli`、`flock`、GNU tar/coreutils 和 **rsync**。使用 `/proc/{pid}/exe` 校验进程归属。生产要求安装 rsync：脚本虽有复制回退分支，但该分支不能提供与 rsync 相同的包内 `data/`、`.env` 排除保证。
+目标为 Linux，安装 Bash、`express233-cli`、`flock`、GNU tar/coreutils 和 **rsync**。使用 `/proc/{pid}/exe` 校验进程归属。缺少 rsync、restart.sh 或 healthcheck.sh 时在停服前拒绝执行，不再使用忽略复制错误的回退分支。控制器要求节点 `safe-deploy.sh --capabilities` 返回 `express233.safe-deploy/v2`。
 
 每个 `server_id` 必须有独立运行目录，且在同一 `GAME_ROOT` 下唯一；不同项目不能共用同一个实例目录。默认根目录 `/opt/game-servers`：
 
@@ -12,7 +12,7 @@
 GAME_ROOT/
 ├── game-logic-01/
 │   ├── scripts/restart.sh       # 必需：启动并写 PID
-│   ├── scripts/healthcheck.sh   # 建议：业务就绪检查
+│   ├── scripts/healthcheck.sh   # 必需：业务就绪检查
 │   ├── config/                 # 新包同名文件优先，补入旧目录独有文件
 │   ├── data/                   # 原地保留
 │   ├── logs/                   # 原地保留
@@ -36,7 +36,9 @@ GAME_ROOT/
 
 游戏服必须自己处理 SIGTERM、保存玩家数据、完成数据库 Flush、关闭组件并正常退出；脚本只能确认退出，不能证明业务已成功保存。正常发布禁止 SIGKILL；只有人工明确授权的应急处置才可使用 `EXPRESS233_FORCE_KILL_AFTER_TIMEOUT=1`。如实例受 systemd 或其它守护程序管理，还须由游戏服脚本协调自动重启和停止策略，避免守护程序重新拉起旧进程。
 
-`healthcheck.sh` 不存在时，脚本只检查启动脚本的返回值，不能将其等同于真实游戏链路就绪。幂等状态中的 PID 存活检查也不能替代业务健康检查。
+部署 post-hook 返回 75 表示无法确认运行实例已安全停止，外层保留现场和已有回滚归档，不调用旧版本钩子；其他非零状态沿用回滚流程。仅在 post-hook 和目标机 safe-deploy.sh 均支持此约定后，该保护才在线上生效。
+
+`healthcheck.sh` 必须由应用核验固定版本、服号与业务就绪；通用部署器不能推断某个应用的真实客户端握手。幂等状态中的 PID 存活检查不能替代业务健康检查。
 
 ## 单实例命令
 
@@ -77,7 +79,7 @@ bash scripts/batch-deploy.sh --servers 'game-logic-01,game-logic-02' --version 1
 bash scripts/batch-deploy.sh --file servers.txt
 ```
 
-当前批量脚本只有串行模式，单个失败后继续其余目标，最终有失败则返回非零。支持 `--servers`、`--file`、`--version`、`--root`；**没有** `--parallel`、`--backup` 或 `--dry-run`。它调用单实例脚本时默认不备份；需要逐目标备份策略时使用控制台绑定，或明确逐个调用单实例脚本。
+当前批量脚本只有串行模式，首个失败立即停止，后续目标保持不动。支持 `--servers`、`--file`、`--version`、`--root`；**没有** `--parallel`、`--backup` 或 `--dry-run`。它调用单实例脚本时默认不备份；需要逐目标备份策略时使用控制台绑定，或明确逐个调用单实例脚本。
 
 SSH 手工示例使用未跟踪的本机 SSH alias；远端环境文件由运维预先配置并限制访问，不把真实连接信息或 Secret 放入仓库：
 
@@ -96,7 +98,8 @@ REMOTE
 ## 失败与恢复
 
 - 下载、锁等待或安全停服失败发生在换包前，旧发布文件不被替换。收到 SIGTERM 的旧进程可能仍在退出，需要核查实际状态。
-- 缺少启动脚本、启动失败、健康检查失败，或停机阶段收到 HUP/INT/TERM 时，有备份才会尝试安全停止失败进程、恢复旧发布文件并重新启动；跳过备份时无自动回滚源。
+- 启动失败或健康检查失败且应用允许恢复时，有备份才尝试安全停止失败进程、恢复旧发布文件并重新启动；跳过备份时无自动回滚源。Hook 返回 75 或收到 HUP/INT/TERM 时保留现场，不重放 Hook。
+- `run/deployment-attempt` 原子记录阶段、run_id、项目和版本。中断或阻断后的下一次部署在触碰服务前返回 75；运维先核验进程、刷库和版本，明确选择 `--acknowledge-recovery <原 run_id>` 后才能发起新尝试。此参数仅确认人工已完成核验，不自动证明业务恢复。
 - 正常退出路径会清理本次暂存目录；断电或无法捕获的终止可能留下临时文件。
 - 需要回到某个仍可拉取的旧版本时，重新运行 `safe-deploy.sh --version ...`。不要直接 `express233-cli rollback --dest 运行目录`，也不要向运行目录解压备份。
 - 人工恢复归档必须先核对目标、停止正确实例并确认退出，再按同样的保留规则恢复发布文件；不得顺带回退实时玩家数据。

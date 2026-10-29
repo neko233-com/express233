@@ -160,8 +160,8 @@ func TestPushHostTOFUDoesNotOverwriteKnownKey(t *testing.T) {
 	if err := st.RecordPushHostKey(tid, host.ID, "ssh-ed25519 AAAAfirst", "SHA256:first"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.RecordPushHostKey(tid, host.ID, "ssh-ed25519 AAAAsecond", "SHA256:second"); err != nil {
-		t.Fatal(err)
+	if err := st.RecordPushHostKey(tid, host.ID, "ssh-ed25519 AAAAsecond", "SHA256:second"); err == nil {
+		t.Fatal("changed key must fail enrollment")
 	}
 	got, _, err := st.GetPushHost(tid, host.ID)
 	if err != nil || got.HostKeyFingerprint != "SHA256:first" {

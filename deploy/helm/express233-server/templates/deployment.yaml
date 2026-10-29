@@ -1,3 +1,6 @@
+{{- if ne (int .Values.replicaCount) 1 }}
+{{- fail "SQLite deployment controller requires replicaCount=1; game clusters are deployed as separate targets" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -6,6 +9,8 @@ metadata:
     {{- include "express233-server.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "express233-server.labels" . | nindent 6 }}
@@ -14,6 +19,7 @@ spec:
       labels:
         {{- include "express233-server.labels" . | nindent 8 }}
     spec:
+      terminationGracePeriodSeconds: 960
       containers:
         - name: server
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"

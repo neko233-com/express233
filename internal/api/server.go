@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 	"sync"
+	"sync/atomic"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -27,6 +28,8 @@ type Server struct {
 	updateRunner      func(target, dataDir string) (string, error)
 	pushExecutor      pushExecutor
 	pushDeploymentMu  sync.Mutex
+	pushConfigMu      sync.RWMutex
+	pushDraining      atomic.Bool
 	pushHealthChecker pushHealthChecker
 	pushHealthMu      sync.Mutex
 	pushHealthOnce    sync.Once

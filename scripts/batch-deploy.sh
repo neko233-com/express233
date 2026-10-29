@@ -16,7 +16,7 @@
 #   - 日志目录: GAME_ROOT/{server_id}/logs/
 #   - PID 文件: GAME_ROOT/{server_id}/run/server.pid
 #
-# 部署策略: 串行执行（避免同时停多个服），单个失败不阻断其余。
+# 部署策略: 串行执行，首个失败立即阻断后续目标。
 #
 set -euo pipefail
 
@@ -26,6 +26,7 @@ GAME_ROOT="${GAME_ROOT:-/opt/game-servers}"
 VERSION_ARGS=()
 SERVERS=""
 FAILURES=()
+SUCCESSES=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -61,15 +62,18 @@ for sid in "${SERVER_LIST[@]}"; do
       --server-id "$sid" \
       "${VERSION_ARGS[@]}"; then
     echo "  ✓ $sid deployed"
+    SUCCESSES=$((SUCCESSES + 1))
   else
     echo "  ✗ $sid FAILED (exit $?)"
     FAILURES+=("$sid")
+    echo "  remaining targets skipped; fleet rollout stopped"
+    break
   fi
 done
 
 echo ""
 echo "=========================================="
-echo " Results: $((TOTAL - ${#FAILURES[@]}))/$TOTAL succeeded"
+echo " Results: $SUCCESSES/$TOTAL succeeded"
 if [[ ${#FAILURES[@]} -gt 0 ]]; then
   echo " Failed: ${FAILURES[*]}"
   exit 1

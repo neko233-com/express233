@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -11,6 +12,25 @@ import (
 	"github.com/neko233-com/express233/internal/store"
 	"golang.org/x/crypto/ssh"
 )
+
+func TestDeploymentOutputSerializesStreamsAndBoundsMemory(t *testing.T) {
+	var output deploymentOutput
+	var writers sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		writers.Add(1)
+		go func() {
+			defer writers.Done()
+			for j := 0; j < 100; j++ {
+				_, _ = output.Write([]byte(strings.Repeat("x", 4096)))
+			}
+		}()
+	}
+	writers.Wait()
+	_, _ = output.Write([]byte(strings.Repeat("y", 9*1024*1024) + "final-receipt"))
+	if text := output.String(); len(text) > 8*1024*1024 || !strings.HasSuffix(text, "final-receipt") {
+		t.Fatal("bounded output lost final receipt")
+	}
+}
 
 func TestPushSSHRetryOnlyTransientFailures(t *testing.T) {
 	attempts := 0

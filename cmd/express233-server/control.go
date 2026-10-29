@@ -28,6 +28,7 @@ import (
 
 	"github.com/neko233-com/express233/internal/api"
 	"github.com/neko233-com/express233/internal/config"
+	"github.com/neko233-com/express233/internal/instancelock"
 	"github.com/neko233-com/express233/internal/store"
 	"github.com/neko233-com/express233/internal/version"
 )
@@ -57,6 +58,11 @@ func serve(listen, dataDir string) error {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return err
 	}
+	releaseOwnership, err := instancelock.Acquire(filepath.Join(dataDir, "controller.lock"))
+	if err != nil {
+		return err
+	}
+	defer releaseOwnership()
 	ensureServerYAML(dataDir)
 	if err := saveRuntimeConfig(dataDir, runtimeConfig{Addr: listen}); err != nil {
 		return err
@@ -67,6 +73,9 @@ func serve(listen, dataDir string) error {
 		return err
 	}
 	defer func() { _ = st.Close() }()
+	if err := st.InterruptPushDeployments(); err != nil {
+		return err
+	}
 
 	logger, logCloser, err := setupServerLogger(dataDir)
 	if err != nil {
@@ -113,6 +122,8 @@ func serve(listen, dataDir string) error {
 	var shutdownOnce sync.Once
 	shutdownServer := func(reason string) {
 		shutdownOnce.Do(func() {
+			srvAPI.BeginDeploymentDrain()
+			stopMonitor()
 			logger.Info("server graceful shutdown requested", "reason", reason)
 			go func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -150,6 +161,8 @@ func serve(listen, dataDir string) error {
 	}
 	logger.Info("root account available; rotate the initial password with reset-root-password")
 	err = server.ListenAndServe()
+	srvAPI.BeginDeploymentDrain()
+	srvAPI.WaitForDeployments()
 	if errors.Is(err, http.ErrServerClosed) {
 		logger.Info("server stopped")
 		return nil

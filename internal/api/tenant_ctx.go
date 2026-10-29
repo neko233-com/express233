@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/neko233-com/express233/internal/config"
@@ -57,6 +58,10 @@ func (s *Server) reloadServerYAML(tenantID int64) {
 
 // ReloadAllServerYAML 从磁盘重新加载所有租户的 server.yaml。
 func (s *Server) ReloadAllServerYAML() error {
+	if !s.pushConfigMu.TryLock() {
+		return fmt.Errorf("server configuration is frozen by an active deployment")
+	}
+	defer s.pushConfigMu.Unlock()
 	list, err := s.Store.ListTenants()
 	if err != nil {
 		return err

@@ -265,6 +265,7 @@ cat >"$dest/scripts/restart.sh" <<'SCRIPT'
 #!/bin/bash
 printf started >"$GAME_ROOT/restart-called"
 SCRIPT
+printf '#!/bin/bash\nexit 0\n' >"$dest/scripts/healthcheck.sh"
 chmod +x "$dest/scripts/restart.sh"
 `
 	if err := os.WriteFile(fakePull, []byte(fakePullBody), 0o755); err != nil {
@@ -296,6 +297,61 @@ chmod +x "$dest/scripts/restart.sh"
 	}
 	if err := oldProcess.Process.Signal(syscall.Signal(0)); err != nil {
 		t.Fatalf("old process was killed: %v", err)
+	}
+}
+
+func TestSafeDeployBlockedHookPreservesRuntimeWithoutRollback(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("safe-deploy.sh executes on Linux targets")
+	}
+	for _, command := range []string{"bash", "flock", "tar", "sha256sum", "rsync"} {
+		if _, err := exec.LookPath(command); err != nil {
+			t.Skipf("%s unavailable", command)
+		}
+	}
+	root := t.TempDir()
+	finalDir := filepath.Join(root, "111")
+	if err := os.MkdirAll(filepath.Join(finalDir, "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldHook := "#!/bin/bash\ntouch \"$GAME_ROOT/rollback-hook-ran\"\n"
+	if err := os.WriteFile(filepath.Join(finalDir, "scripts", "restart.sh"), []byte(oldHook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakePull := filepath.Join(root, "express233-cli")
+	fakePullBody := `#!/bin/bash
+set -eu
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" == "--dest" ]]; then dest="$2"; shift 2; else shift; fi
+done
+mkdir -p "$dest/scripts"
+printf candidate >"$dest/candidate"
+printf '#!/bin/bash\nexit 75\n' >"$dest/scripts/restart.sh"
+printf '#!/bin/bash\nexit 0\n' >"$dest/scripts/healthcheck.sh"
+chmod +x "$dest/scripts/restart.sh"
+`
+	if err := os.WriteFile(fakePull, []byte(fakePullBody), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command("bash", "safe-deploy.sh", "--backup", "--server-id", "111")
+	command.Env = append(os.Environ(), "GAME_ROOT="+root, "EXPRESS233_BIN="+fakePull)
+	output, err := command.CombinedOutput()
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok || exitErr.ExitCode() != 75 || !strings.Contains(string(output), "recovery blocked") {
+		t.Fatalf("blocked recovery not propagated: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(filepath.Join(root, "rollback-hook-ran")); !os.IsNotExist(err) {
+		t.Fatalf("old hook must not run: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(finalDir, "candidate")); err != nil {
+		t.Fatalf("candidate runtime must be preserved: %v", err)
+	}
+	assertReleaseRollbackArchives(t, root, "111", 1)
+	retry := exec.Command("bash", "safe-deploy.sh", "--backup", "--server-id", "111")
+	retry.Env = command.Env
+	retryOutput, retryErr := retry.CombinedOutput()
+	if exitErr, ok := retryErr.(*exec.ExitError); !ok || exitErr.ExitCode() != 75 || !strings.Contains(string(retryOutput), "requires runtime verification") {
+		t.Fatalf("blocked attempt was replayed: %v\n%s", retryErr, retryOutput)
 	}
 }
 
@@ -483,6 +539,7 @@ chmod +x "$dest/scripts/restart.sh" "$dest/scripts/healthcheck.sh"
 	}
 	failed := exec.Command("bash", "safe-deploy.sh", "--backup", "--server-id", serverID, "--stop-timeout", "5")
 	failed.Env = append(os.Environ(), "GAME_ROOT="+root, "EXPRESS233_BIN="+fakePull,
+		"EXPRESS233_PROJECT=game-server-sf",
 		"EXPRESS233_TEST_SERVER_BINARY="+oldProcess.Path, "EXPRESS233_SERVER_ID="+serverID,
 		"EXPRESS233_HEALTH_CHECK_TIMEOUT_SECONDS=1", "EXPRESS233_HEALTH_CHECK_POLL_INTERVAL_SECONDS=0.05")
 	output, failure := failed.CombinedOutput()

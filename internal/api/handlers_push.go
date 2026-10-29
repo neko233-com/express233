@@ -3,10 +3,12 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/neko233-com/express233/internal/store"
@@ -309,6 +311,22 @@ func (s *Server) createPushDeployment(r *http.Request, pc projectCtx, req create
 	if err != nil {
 		return nil, err
 	}
+	for _, serverID := range req.ServerIDs {
+		found := false
+		for _, target := range targets {
+			if target.ServerID == strings.TrimSpace(serverID) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("requested server_id is not in the resolved deployment plan")
+		}
+	}
+	targets, err = s.freezePushPlan(pc.TenantID, pid, pc.ProjectName, req.Version, targets)
+	if err != nil {
+		return nil, err
+	}
 	selector, _ := json.Marshal(req)
 	sess, _ := s.currentSession(r)
 	d, err := s.Store.CreatePushDeployment(store.PushDeployment{TenantID: pc.TenantID, ProjectID: pid, TaskID: taskID, TaskName: taskName, IdempotencyKey: req.IdempotencyKey, Version: req.Version, RequestedBy: sess.Username, Selector: string(selector)}, targets)
@@ -328,7 +346,9 @@ func (s *Server) createPushDeployment(r *http.Request, pc projectCtx, req create
 	return d, nil
 }
 func (s *Server) completePushDryRun(id int64) {
-	_ = s.Store.MarkPushDeploymentRunning(id)
+	if err := s.Store.MarkPushDeploymentRunning(id); err != nil {
+		return
+	}
 	d, err := s.Store.GetPushDeploymentByID(id)
 	if err != nil {
 		return
@@ -378,7 +398,14 @@ func (s *Server) runPushDeployment(id, tenantID int64, projectName string) {
 	// the same gateway or game-server node concurrently.
 	s.pushDeploymentMu.Lock()
 	defer s.pushDeploymentMu.Unlock()
-	_ = s.Store.MarkPushDeploymentRunning(id)
+	if s.pushDraining.Load() {
+		return
+	}
+	s.pushConfigMu.RLock()
+	defer s.pushConfigMu.RUnlock()
+	if err := s.Store.MarkPushDeploymentRunning(id); err != nil {
+		return
+	}
 	d, err := s.Store.GetPushDeploymentByID(id)
 	if err != nil {
 		return
@@ -391,42 +418,71 @@ func (s *Server) runPushDeployment(id, tenantID int64, projectName string) {
 		_ = s.Store.CompletePushDeployment(id)
 		return
 	}
-	// A single request is intentionally serial. This avoids stopping multiple
-	// game servers concurrently when several bindings point to one host.
+	// Validate the entire frozen fleet before touching its first node.
+	prepared := make([]preparedPushTarget, 0, len(d.Targets))
 	for _, target := range d.Targets {
-		_ = s.Store.MarkPushTarget(target.ID, "running", "")
-		binding, err := s.Store.GetPushBinding(tenantID, target.BindingID)
-		if err != nil {
-			_ = s.Store.MarkPushTarget(target.ID, "failed", err.Error())
-			continue
+		binding, bindingErr := s.Store.GetPushBinding(tenantID, target.BindingID)
+		host, _, hostErr := s.Store.GetPushHost(tenantID, target.HostID)
+		if bindingErr != nil || hostErr != nil || binding.HostID != target.HostID || binding.ServerID != target.ServerID {
+			s.failPushBeforeExecution(d, "deployment target changed or disappeared")
+			return
 		}
-		host, _, err := s.Store.GetPushHost(tenantID, target.HostID)
-		if err != nil {
-			_ = s.Store.MarkPushTarget(target.ID, "failed", err.Error())
-			continue
+		digest, environment, planErr := s.pushPlanDigest(tenantID, d.ProjectID, projectName, d.Version, *host, *binding)
+		if planErr != nil || target.PlanDigest == "" || target.PlanDigest != digest {
+			s.failPushBeforeExecution(d, "frozen deployment plan changed; create a new deployment")
+			return
 		}
-		// The remote machine installs/runs the same CLI used in pull mode. Its
-		// stdout+stderr includes the CLI, safe deploy, and post-hook output.
-		user, err := s.Store.GetUserByNameInTenant(tenantID, d.RequestedBy)
-		if err != nil {
-			_ = s.Store.MarkPushTarget(target.ID, "failed", err.Error())
-			continue
+		prepared = append(prepared, preparedPushTarget{target, *host, *binding, environment})
+	}
+	user, err := s.Store.GetUserByNameInTenant(tenantID, d.RequestedBy)
+	if err != nil {
+		s.failPushBeforeExecution(d, "deployment requester is no longer available")
+		return
+	}
+	for index, p := range prepared {
+		target, binding, host := p.target, p.binding, p.host
+		if err := s.Store.MarkPushTarget(target.ID, "running", ""); err != nil {
+			return
 		}
-		hookEnv := make(map[string]string)
-		if entry := s.getServerFile(tenantID).Entry(binding.ServerID); entry != nil {
-			for key, value := range entry.PostHookEnv {
-				hookEnv[key] = value
-			}
-		}
-		output, err := s.pushExecutor.Deploy(withPushCommand(withAPIStore(context.Background(), s.Store), pushCommand{CentralURL: centralURL, Project: projectName, Version: d.Version, ServerID: binding.ServerID, PullToken: user.Token, DeploymentID: strconv.FormatInt(d.ID, 10), IdempotencyKey: d.IdempotencyKey, TargetTag: pushTargetTag(projectName, binding.ServerID), HookEnv: hookEnv}), *host, *binding, d.Version, nil)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		output, err := s.pushExecutor.Deploy(withPushCommand(withAPIStore(ctx, s.Store), pushCommand{CentralURL: centralURL, Project: projectName, Version: d.Version, ServerID: binding.ServerID, PullToken: user.Token, DeploymentID: strconv.FormatInt(d.ID, 10), IdempotencyKey: d.IdempotencyKey, TargetTag: pushTargetTag(projectName, binding.ServerID), HookEnv: p.environment}), host, binding, d.Version, nil)
+		cancel()
 		status := "success"
 		if err != nil {
 			status = "failed"
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || errors.Is(err, errPushOutcomeUnknown) {
+				status = "unknown"
+			}
 			output = appendDeploymentError(output, err)
 		}
-		_ = s.Store.MarkPushTarget(target.ID, status, output)
+		if recordErr := s.Store.MarkPushTarget(target.ID, status, output); recordErr != nil {
+			return
+		}
+		if err != nil {
+			for _, remaining := range prepared[index+1:] {
+				_ = s.Store.MarkPushTarget(remaining.target.ID, "skipped", "previous target failed; no SSH command executed")
+			}
+			break
+		}
 	}
 	_ = s.Store.CompletePushDeployment(id)
+}
+
+// BeginDeploymentDrain 停止开始新部署；已执行的目标继续等待持久化结果。
+func (s *Server) BeginDeploymentDrain() { s.pushDraining.Store(true) }
+
+// WaitForDeployments 在退出并关闭 Store 前等待在途部署记录完成。
+func (s *Server) WaitForDeployments() {
+	s.pushDeploymentMu.Lock()
+	defer s.pushDeploymentMu.Unlock()
+	s.pushDraining.Store(true)
+}
+
+func (s *Server) failPushBeforeExecution(d *store.PushDeployment, message string) {
+	for _, target := range d.Targets {
+		_ = s.Store.MarkPushTarget(target.ID, "failed", message+"; no SSH command executed")
+	}
+	_ = s.Store.CompletePushDeployment(d.ID)
 }
 func pushTargetTag(projectName, serverID string) string {
 	return strings.TrimSpace(projectName) + "|" + strings.TrimSpace(serverID)

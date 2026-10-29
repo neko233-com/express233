@@ -48,7 +48,7 @@ Release 的 `verify-checks` 会再次校验 tag 指向的提交，通过后才�
 - `express233-cli-{os}-{arch}[.exe]`
 - `express233-server-{os}-{arch}[.exe]`
 
-另有一份 `PROVENANCE.json` 和一份 `SHA256SUMS`，合计 **12 个资产**。构建 job 生成一个 `dist` artifact，发布 job 下载后交给 `softprops/action-gh-release`。`PROVENANCE.json` 记录版本、repository、ref、commit 和运行来源；`SHA256SUMS` 覆盖二进制及 provenance，自身不在清单内。
+另有 `safe-deploy.sh`、`batch-deploy.sh`、`PROVENANCE.json` 和 `SHA256SUMS`，合计 **14 个资产**。构建 job 生成一个 `dist` artifact，发布 job 下载后交给 `softprops/action-gh-release`。`PROVENANCE.json` 记录版本、repository、ref、commit 和运行来源；`SHA256SUMS` 覆盖二进制、节点脚本及 provenance，自身不在清单内。CLI Shell 安装器从同一固定版本下载全部所需资产，校验全部摘要后才更新目标路径。
 
 下载到隔离目录后先校验，再安装。当前清单中文件名前缀是 `dist/`，不能把全部文件平铺在当前目录后直接校验：
 

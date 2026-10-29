@@ -1,8 +1,10 @@
 # SSH 批量推送部署
 
-推送部署由管理 API 建立目标机和 `project|server_id` 唯一绑定，再按目标顺序串行执行。每台目标机必须预先安装 `express233-cli`、Bash、flock、GNU tar/coreutils、rsync 与仓库中的 `scripts/safe-deploy.sh`（置于 `PATH`）。脚本先拉取到独立暂存目录并计算指纹，取得逐目标锁、检查幂等状态后，才按绑定策略准备回滚包和发送 SIGTERM。旧进程正常退出后换包、启动并执行可选健康脚本。`express233-cli deploy` 与 `pull` 本身都是直接解压并执行 Hook，安全顺序由上述脚本提供。
+推送部署由管理 API 建立目标机和 `project|server_id` 唯一绑定，再按目标顺序串行执行。每台目标机必须预先安装 `express233-cli`、Bash、flock、GNU tar/coreutils、rsync 与 v2 `scripts/safe-deploy.sh`（置于 `PATH`）。脚本先拉取到独立暂存目录并计算指纹，取得逐目标锁、检查幂等状态后，才按绑定策略准备回滚包和发送 SIGTERM。旧进程正常退出后换包、启动并执行应用健康脚本。`express233-cli deploy` 与 `pull` 本身都是直接解压并执行 Hook，安全顺序由上述脚本提供。
 
-缺少启动脚本、启动失败、健康检查失败，或停机阶段收到 HUP/INT/TERM 时，脚本会在存在备份时尝试恢复并启动上一个版本；SSH 断开并不保证远端一定收到可处理的信号，须核查实际进程与日志。默认启用备份并保留最近 5 份（`EXPRESS233_BACKUP_KEEP` 可调）；绑定勾选“跳过旧版备份”后不会创建回滚包，失败时也没有自动回滚源，并向仓库重启脚本注入 `EXPRESS233_SKIP_BACKUP=true`。rsync 换包及回滚保留实时 `data/`、`logs/`、`run/`、`.env`；`config/` 按发布配置规则合并或恢复，详见 [安全部署](SAFE_DEPLOY.md)。
+缺少生命周期脚本会在停服前拒绝；启动或健康检查失败且应用允许恢复时，存在备份才恢复上一个版本。收到 HUP/INT/TERM 或 Hook 返回 75 时保留现场并阻断重试；SSH 断开须核验实际进程与日志。默认启用备份并保留最近 5 份（`EXPRESS233_BACKUP_KEEP` 可调）；绑定勾选“跳过旧版备份”后不会创建回滚包。rsync 换包及回滚保留实时 `data/`、`logs/`、`run/`、`.env`；`config/` 按发布配置规则合并或恢复，详见 [安全部署](SAFE_DEPLOY.md)。
+
+部署创建时持久化完整计划摘要；排队后主机、实例路径、工件或配置改变会使整批执行在首台停服前失败。执行期间配置 API 返回 409，避免节点拉取到另一份配置。目标串行执行且首个失败后其余标记 skipped，SSH 命令派发后的连接丢失标记 unknown，不自动重试；重新启动控制器也不会重放 queued/running 历史任务。在途工件受保护，保留策略跳过该版本。
 
 ## 安全要求
 

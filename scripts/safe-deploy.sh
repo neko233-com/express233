@@ -32,6 +32,7 @@ BACKUP=false
 DOWNSTREAM_SKIP_BACKUP=true
 BACKUP_KEEP="${EXPRESS233_BACKUP_KEEP:-5}"
 VERSION_ARGS=()
+ACKNOWLEDGE_RECOVERY=""
 if [[ -n "${VERSION:-}" ]]; then
   VERSION_ARGS=(--version "$VERSION")
 fi
@@ -47,6 +48,7 @@ fi
 SERVER_ID="${EXPRESS233_SERVER_ID:-}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --capabilities) printf '%s\n' 'express233.safe-deploy/v2'; exit 0 ;;
     --server-id)  SERVER_ID="$2"; shift 2 ;;
     --version)    VERSION_ARGS=(--version "$2"); shift 2 ;;
     --dry-run)    DRY_RUN=true; shift ;;
@@ -54,6 +56,7 @@ while [[ $# -gt 0 ]]; do
     --root)       GAME_ROOT="$2"; shift 2 ;;
     --stop-timeout-seconds) STOP_TIMEOUT="$2"; shift 2 ;;
     --stop-timeout) STOP_TIMEOUT="$2"; shift 2 ;;
+    --acknowledge-recovery) ACKNOWLEDGE_RECOVERY="$2"; shift 2 ;;
     -h|--help)
       sed -n '2,18p' "$0"
       exit 0 ;;
@@ -103,6 +106,11 @@ if [[ ! "$POST_KILL_SETTLE_SECONDS" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
 fi
 
 # ═══════════════ 路径定义 ═══════════════
+if [[ "$GAME_ROOT" != /* || "$GAME_ROOT" == "/" ]]; then
+  echo "error: GAME_ROOT must be an absolute instance parent directory, not filesystem root"
+  exit 1
+fi
+GAME_ROOT=$(realpath -m -- "$GAME_ROOT")
 FINAL_DIR="${GAME_ROOT}/${SERVER_ID}"
 DEPLOY_RUN_ID="$(date '+%Y%m%d%H%M%S')-$$"
 TMP_DIR="${GAME_ROOT}/.tmp/${SERVER_ID}/${DEPLOY_RUN_ID}"
@@ -113,15 +121,24 @@ BACKUP_DIR="${GAME_ROOT}/.backup/${SERVER_ID}"
 LOCK_DIR="${GAME_ROOT}/.locks"
 LOCK_FILE="${LOCK_DIR}/${SERVER_ID}.lock"
 STATE_FILE="${FINAL_DIR}/.express233/deployment-state"
+ATTEMPT_FILE="${RUN_DIR}/deployment-attempt"
 BACKUP_ARCHIVE=""
 STAGED_DIGEST=""
 DOWNTIME_STARTED=0
 DEPLOY_SUCCEEDED=0
 RECOVERY_ACTIVE=0
+STAGING_CREATED=0
 
 log() { echo "[$(date '+%H:%M:%S')] [${SERVER_ID}] $*"; }
-cleanup() { rm -rf -- "$TMP_DIR"; }
+cleanup() { if [[ "$STAGING_CREATED" == "1" ]]; then rm -rf -- "$TMP_DIR"; fi; }
 trap cleanup EXIT
+
+write_attempt() {
+  mkdir -p "$RUN_DIR"
+  local attempt_tmp="${ATTEMPT_FILE}.tmp.$$"
+  printf '%s\n%s\n%s\n%s\n' "$1" "$DEPLOY_RUN_ID" "${EXPRESS233_PROJECT:-}" "${VERSION:-latest}" >"$attempt_tmp"
+  mv -f "$attempt_tmp" "$ATTEMPT_FILE"
+}
 
 tree_digest() {
   if command -v sha256sum >/dev/null 2>&1; then
@@ -166,7 +183,12 @@ wait_for_healthcheck() {
 
 # ═══════════════ Step 1: 拉取到临时目录 ═══════════════
 log "Step 1/5: pulling to staging area..."
+for protected_path in "$FINAL_DIR" "$RUN_DIR" "$LOG_DIR" "${GAME_ROOT}/.tmp" "${GAME_ROOT}/.tmp/${SERVER_ID}" "${GAME_ROOT}/.backup" "$BACKUP_DIR" "$LOCK_DIR"; do
+  [[ ! -L "$protected_path" ]] || { log "ERROR: deployment paths must not be symbolic links"; exit 1; }
+done
+[[ ! -e "$TMP_DIR" && ! -L "$TMP_DIR" ]] || { log "ERROR: staging path already exists"; exit 1; }
 mkdir -p "$TMP_DIR"
+STAGING_CREATED=1
 
 if $DRY_RUN; then
   log "[dry-run] would pull to $TMP_DIR"
@@ -181,11 +203,15 @@ else
   log "pull complete: $(find "$TMP_DIR" -type f | wc -l) files"
   STAGED_DIGEST=$(tree_digest "$TMP_DIR")
   log "staging verified: sha256=$STAGED_DIGEST"
+  for required_script in scripts/restart.sh scripts/healthcheck.sh; do
+    [[ -f "$TMP_DIR/$required_script" && ! -L "$TMP_DIR/$required_script" ]] || { log "ERROR: required lifecycle script missing: $required_script; no service touched"; exit 78; }
+  done
 fi
 
 # 拉取和校验完成后才竞争目标锁；等待锁期间不会影响旧服务。
 if ! $DRY_RUN; then
   command -v flock >/dev/null 2>&1 || { log "ERROR: flock is required"; exit 127; }
+  command -v rsync >/dev/null 2>&1 || { log "ERROR: rsync is required before stopping any service"; exit 127; }
   mkdir -p "$LOCK_DIR"
   exec 9>"$LOCK_FILE"
   if ! flock -w "$DEPLOY_LOCK_TIMEOUT" 9; then
@@ -193,10 +219,33 @@ if ! $DRY_RUN; then
     exit 75
   fi
   log "target lock acquired"
+  if [[ -f "$STATE_FILE" ]]; then
+    previous_project=$(sed -n '2p' "$STATE_FILE")
+    previous_server=$(sed -n '4p' "$STATE_FILE")
+    if [[ "$previous_project" != "${EXPRESS233_PROJECT:-}" || "$previous_server" != "$SERVER_ID" ]]; then
+      log "ERROR: existing installation belongs to a different project or server_id; no service touched"
+      exit 78
+    fi
+  fi
+  if [[ -f "$ATTEMPT_FILE" ]]; then
+    previous_phase=$(sed -n '1p' "$ATTEMPT_FILE")
+    previous_run=$(sed -n '2p' "$ATTEMPT_FILE")
+    case "$previous_phase" in
+      completed|rolled_back|aborted) ;;
+      *)
+        if [[ -z "$ACKNOWLEDGE_RECOVERY" || "$ACKNOWLEDGE_RECOVERY" != "$previous_run" ]]; then
+          log "ERROR: previous attempt requires runtime verification: phase=$previous_phase run=$previous_run; no service touched"
+          exit 75
+        fi
+        log "operator acknowledged recovery for run=$previous_run"
+        ;;
+    esac
+  fi
   if current_release_matches; then
     log "same resolved release is already healthy; idempotent no-op"
     exit 0
   fi
+  write_attempt prepared
 
   # Artifact 内配置是当前中央配置源，冲突时以新文件为准；旧实例额外维护的
   # 配置文件补入暂存目录。持久化 data/ 不进入 Artifact，换包时始终原地保留。
@@ -268,7 +317,7 @@ stop_server() {
   if [[ "$forced" == "1" ]]; then
     log "server was force-killed after $((SECONDS - started))s"
   else
-    log "server exited normally after $((SECONDS - started))s; MySQL flush completed by the server shutdown path"
+    log "server exited normally after $((SECONDS - started))s; application persistence receipt must be verified by its lifecycle hook"
   fi
 }
 
@@ -303,7 +352,6 @@ sync_release_tree() {
   local source_dir="$1"
   local target_dir="$2"
   mkdir -p "$target_dir/data" "$target_dir/logs" "$target_dir/run"
-  if command -v rsync &>/dev/null; then
     # 仅保留发布根目录的持久化目录。未锚定的规则会错误保留历史包装目录
     # 内的 data/logs/run，导致 rsync 无法删除废弃目录并阻断后续发布。
     rsync -a --delete \
@@ -312,13 +360,6 @@ sync_release_tree() {
       --exclude='/run/***' \
       --exclude='/.env' \
       "$source_dir/" "$target_dir/"
-  else
-    find "$target_dir" -mindepth 1 -maxdepth 1 \
-      ! -name 'data' ! -name 'logs' ! -name 'run' ! -name '.env' \
-      -exec rm -rf {} +
-    cp -a "$source_dir/"* "$target_dir/" 2>/dev/null || true
-    cp -a "$source_dir/".[!.]* "$target_dir/" 2>/dev/null || true
-  fi
 }
 
 rollback_release() {
@@ -353,9 +394,11 @@ fail_and_rollback() {
   local reason="$1"
   log "ERROR: $reason"
   if rollback_release; then
+    write_attempt rolled_back
     rm -rf "$TMP_DIR"
     log "deployment failed; previous release restored"
   else
+    write_attempt blocked
     log "CRITICAL: deployment and rollback both failed"
   fi
   exit 1
@@ -364,11 +407,8 @@ fail_and_rollback() {
 recover_interrupted_deployment() {
   local signal_name="$1"
   trap - HUP INT TERM
-  if [[ "$DOWNTIME_STARTED" == "1" && "$DEPLOY_SUCCEEDED" != "1" && "$RECOVERY_ACTIVE" != "1" ]]; then
-    RECOVERY_ACTIVE=1
-    log "WARNING: deployment interrupted by $signal_name; restoring previous release"
-    rollback_release || log "CRITICAL: interrupted deployment could not restore the previous release"
-  fi
+  write_attempt interrupted
+  log "ERROR: deployment interrupted by $signal_name; runtime and rollback archive retained for verification; no hook replayed"
   exit 130
 }
 trap 'recover_interrupted_deployment SIGHUP' HUP
@@ -378,9 +418,11 @@ trap 'recover_interrupted_deployment SIGTERM' TERM
 if $DRY_RUN; then
   log "Step 3/5: [dry-run] would send SIGTERM and wait for normal exit"
 else
+  write_attempt stopping
   DOWNTIME_STARTED=1
   if ! stop_server; then
     DOWNTIME_STARTED=0
+    write_attempt aborted
     log "deployment stopped before file swap; existing release remains untouched"
     exit 1
   fi
@@ -393,6 +435,7 @@ if $DRY_RUN; then
   log "[dry-run] would sync $TMP_DIR → $FINAL_DIR"
 else
   sync_release_tree "$TMP_DIR" "$FINAL_DIR"
+  write_attempt swapped
   log "files synced (data/, logs/, run/ and .env preserved)"
 fi
 
@@ -409,7 +452,15 @@ else
 
   if [[ -n "$HOOK_SCRIPT" ]]; then
     chmod +x "$HOOK_SCRIPT"
-    if ! env SERVER_ID="$SERVER_ID" EXPRESS233_SERVER_ID="$SERVER_ID" EXPRESS233_SKIP_BACKUP="$DOWNSTREAM_SKIP_BACKUP" "$HOOK_SCRIPT" 9>&-; then
+    if env SERVER_ID="$SERVER_ID" EXPRESS233_SERVER_ID="$SERVER_ID" EXPRESS233_SKIP_BACKUP="$DOWNSTREAM_SKIP_BACKUP" "$HOOK_SCRIPT" 9>&-; then
+      :
+    else
+      hook_status=$?
+      if [[ "$hook_status" == "75" ]]; then
+        write_attempt blocked
+        log "ERROR: post_hook reports recovery blocked; preserving runtime and rollback archive without running another hook"
+        exit 75
+      fi
       fail_and_rollback "new release failed to start"
     fi
     log "post_hook executed"
@@ -428,6 +479,7 @@ else
   printf '%s\n%s\n%s\n%s\n%s\n%s\n' "$STAGED_DIGEST" "${EXPRESS233_PROJECT:-}" "${VERSION:-latest}" "$SERVER_ID" "${EXPRESS233_DEPLOYMENT_ID:-}" "${EXPRESS233_IDEMPOTENCY_KEY:-}" >"$state_tmp"
   mv -f "$state_tmp" "$STATE_FILE"
   DEPLOY_SUCCEEDED=1
+  write_attempt completed
   log "release state committed"
 fi
 

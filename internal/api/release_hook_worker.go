@@ -84,6 +84,11 @@ func (s *Server) dispatchReleaseHook(run store.ReleaseHookRun, now time.Time) {
 			fail(targetErr)
 			return
 		}
+		targets, targetErr = s.freezePushPlan(run.Hook.TenantID, run.Hook.ProjectID, projectName, run.Version, targets)
+		if targetErr != nil {
+			fail(targetErr)
+			return
+		}
 		selector, _ := json.Marshal(createPushDeploymentRequest{Version: run.Version, ServerIDs: task.ServerIDs, Tags: task.Tags, TagMatch: task.TagMatch})
 		deployment, err = s.Store.CreatePushDeployment(store.PushDeployment{TenantID: run.Hook.TenantID, ProjectID: run.Hook.ProjectID, TaskID: task.ID, TaskName: task.Name, HookEventID: run.EventID, Version: run.Version, RequestedBy: run.RequestedBy, Selector: string(selector)}, targets)
 		created = err == nil

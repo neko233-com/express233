@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 # express233-cli installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/neko233-com/express233/main/scripts/install.sh | bash
@@ -22,13 +22,13 @@ detect_arch() {
     case "$(uname -m)" in
         x86_64|amd64)   echo "amd64" ;;
         aarch64|arm64)  echo "arm64" ;;
-        *)              echo "amd64" ;;
+        *)              echo "unsupported" ;;
     esac
 }
 
 get_latest_version() {
-    curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | \
-        grep '"tag_name":' | head -1 | sed -E 's/.*"v([^"]+)".*/\1/' || echo "0.1.0"
+    curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | \
+        sed -nE 's/.*"tag_name": *"v([^"]+)".*/\1/p'
 }
 
 normalize_version() {
@@ -48,7 +48,7 @@ install_binary() {
     [ "$os" = "windows" ] && ext=".exe"
 
     local url="https://github.com/${REPO}/releases/download/v${ver}/${asset}${ext}"
-    local install_dir="/usr/local/bin"
+    local install_dir="${EXPRESS233_INSTALL_DIR:-/usr/local/bin}"
     local target="${BINARY_NAME}"
 
     if [ "$os" = "windows" ]; then
@@ -57,33 +57,33 @@ install_binary() {
         mkdir -p "$install_dir"
     fi
 
-    echo "Downloading ${url}..."
-    TMPDIR=$(mktemp -d)
-    curl -fsSL "$url" -o "${TMPDIR}/${target}"
-
-    if [ -w "$install_dir" ]; then
-        mv -f "${TMPDIR}/${target}" "${install_dir}/${target}"
-    else
-        sudo mv -f "${TMPDIR}/${target}" "${install_dir}/${target}"
-    fi
-
-    chmod +x "${install_dir}/${target}" 2>/dev/null || true
-    rm -rf "$TMPDIR"
-
-    echo "Installed to ${install_dir}/${target}"
-
-    if [ "$os" != "windows" ]; then
-        local runner
-        runner=$(mktemp)
-        curl -fsSL "https://raw.githubusercontent.com/${REPO}/v${ver}/scripts/safe-deploy.sh" -o "$runner"
+    local tmp_dir base downloaded expected actual entry name candidate
+    tmp_dir=$(mktemp -d)
+    trap 'rm -rf -- "$tmp_dir"; trap - RETURN' RETURN
+    base="https://github.com/${REPO}/releases/download/v${ver}"
+    curl -fsSL "$base/SHA256SUMS" -o "$tmp_dir/SHA256SUMS"
+    local entries=("${asset}${ext}")
+    if [ "$os" != "windows" ]; then entries+=(safe-deploy.sh batch-deploy.sh); fi
+    for entry in "${entries[@]}"; do
+        downloaded="$tmp_dir/$entry"
+        curl -fsSL "$base/$entry" -o "$downloaded"
+        expected=$(awk -v name="dist/$entry" '$2==name {print $1}' "$tmp_dir/SHA256SUMS")
+        [[ "$expected" =~ ^[a-f0-9]{64}$ ]] || { echo 'missing official artifact checksum' >&2; return 1; }
+        if command -v sha256sum >/dev/null 2>&1; then actual=$(sha256sum "$downloaded" | awk '{print $1}'); else actual=$(shasum -a 256 "$downloaded" | awk '{print $1}'); fi
+        [[ "$actual" == "$expected" ]] || { echo 'official artifact checksum mismatch' >&2; return 1; }
+        if [[ "$entry" == *.sh ]]; then bash -n "$downloaded"; fi
+    done
+    for entry in "${entries[@]}"; do
+        name="$entry"
+        [[ "$entry" != "${asset}${ext}" ]] || name="$target"
+        candidate="$install_dir/.$name.candidate.$$"
         if [ -w "$install_dir" ]; then
-            mv -f "$runner" "${install_dir}/safe-deploy.sh"
+            cp "$tmp_dir/$entry" "$candidate"; chmod 755 "$candidate"; mv -f "$candidate" "$install_dir/$name"
         else
-            sudo mv -f "$runner" "${install_dir}/safe-deploy.sh"
+            sudo cp "$tmp_dir/$entry" "$candidate"; sudo chmod 755 "$candidate"; sudo mv -f "$candidate" "$install_dir/$name"
         fi
-        chmod +x "${install_dir}/safe-deploy.sh" 2>/dev/null || sudo chmod +x "${install_dir}/safe-deploy.sh"
-        echo "Installed safe deployment runner to ${install_dir}/safe-deploy.sh"
-    fi
+        echo "Installed verified artifact: $name"
+    done
     echo "Run: express233-cli --help"
 }
 
@@ -91,7 +91,7 @@ main() {
     OS=$(detect_os)
     ARCH=$(detect_arch)
 
-    if [ "$OS" = "unsupported" ]; then
+    if [ "$OS" = "unsupported" ] || [ "$ARCH" = "unsupported" ]; then
         echo "Unsupported operating system."
         exit 1
     fi
@@ -100,6 +100,7 @@ main() {
         VERSION=$(get_latest_version)
     fi
     VERSION=$(normalize_version "$VERSION")
+    [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9._-]+)?$ ]] || { echo 'invalid release version' >&2; exit 1; }
 
     echo "Detected: ${OS}/${ARCH}"
     echo "Installing express233-cli v${VERSION}..."

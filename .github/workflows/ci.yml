@@ -37,6 +37,10 @@ jobs:
       - name: Run Go tests
         run: go test ./... -count=1 -timeout=10m
 
+      - name: Race check deployment transactions
+        if: runner.os == 'Linux'
+        run: go test -race ./internal/api ./internal/store ./internal/instancelock -run 'FrozenFleet|InterruptedFleet|ControllerOwnership|DeploymentOutput' -count=1 -timeout=5m
+
   scripts:
     name: validate scripts
     runs-on: ubuntu-latest
@@ -96,6 +100,7 @@ jobs:
             env CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -ldflags "${LDFLAGS}" -o "bin/express233-cli-${GOOS}-${GOARCH}${ext}" ./cmd/express233-cli
             env CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -ldflags "${LDFLAGS}" -o "bin/express233-server-${GOOS}-${GOARCH}${ext}" ./cmd/express233-server
           done
+          cp scripts/safe-deploy.sh scripts/batch-deploy.sh bin/
           # Keep source identity next to every downloadable binary. The same
           # fields are also exposed by `version` at runtime and are safe to
           # import into an express233 artifact provenance record.

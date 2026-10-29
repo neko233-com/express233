@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -50,6 +51,8 @@ const pushHostCheckRetention = LogRetention
 // Labels select targets (for example test, canary, cn), while ContentTags
 // select tagged files inside a version bundle.
 type PushServerBinding struct {
+	// PlanDigest 只保存受控部署计划的摘要，不保存钩子环境或凭据。
+	PlanDigest  string `json:"-"`
 	ID          int64  `json:"id"`
 	TenantID    int64  `json:"tenant_id,omitempty"`
 	HostID      int64  `json:"host_id"`
@@ -87,6 +90,7 @@ type PushDeployment struct {
 }
 
 type PushDeploymentTarget struct {
+	PlanDigest   string `json:"-"`
 	ID           int64  `json:"id"`
 	DeploymentID int64  `json:"deployment_id"`
 	HostID       int64  `json:"host_id"`
@@ -226,6 +230,9 @@ CREATE INDEX IF NOT EXISTS idx_push_host_checks_checked_at ON push_host_checks(c
 	_, _ = s.db.Exec(`ALTER TABLE push_deployments ADD COLUMN task_name TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE push_deployments ADD COLUMN hook_event_id INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE push_deployments ADD COLUMN idempotency_key TEXT NOT NULL DEFAULT ''`)
+	if _, err := s.db.Exec(`ALTER TABLE push_deployment_targets ADD COLUMN plan_digest TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return err
+	}
 	_, _ = s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_push_deployments_hook_event ON push_deployments(hook_event_id) WHERE hook_event_id>0`)
 	_, _ = s.db.Exec(`DROP INDEX IF EXISTS idx_push_deployments_idempotency`)
 	_, _ = s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_push_deployments_idempotency ON push_deployments(tenant_id,project_id,idempotency_key) WHERE idempotency_key<>''`)
@@ -653,7 +660,7 @@ func (s *Store) CreatePushDeployment(d PushDeployment, targets []PushServerBindi
 	d.ID, _ = res.LastInsertId()
 	d.Status, d.CreatedAt = "queued", now
 	for _, b := range targets {
-		if _, err := tx.Exec(`INSERT INTO push_deployment_targets(deployment_id,host_id,host_name,binding_id,server_id,labels,status,created_at) VALUES(?,?,?,?,?,?,?,?)`, d.ID, b.HostID, b.HostName, b.ID, b.ServerID, b.Labels, "queued", now); err != nil {
+		if _, err := tx.Exec(`INSERT INTO push_deployment_targets(deployment_id,host_id,host_name,binding_id,server_id,labels,status,created_at,plan_digest) VALUES(?,?,?,?,?,?,?,?,?)`, d.ID, b.HostID, b.HostName, b.ID, b.ServerID, b.Labels, "queued", now, b.PlanDigest); err != nil {
 			return nil, err
 		}
 	}
@@ -693,14 +700,14 @@ func (s *Store) GetPushDeployment(tenantID, projectID, id int64) (*PushDeploymen
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(`SELECT id,deployment_id,host_id,host_name,binding_id,server_id,labels,status,output,created_at,started_at,completed_at FROM push_deployment_targets WHERE deployment_id=? ORDER BY id`, id)
+	rows, err := s.db.Query(`SELECT id,deployment_id,host_id,host_name,binding_id,server_id,labels,status,output,created_at,started_at,completed_at,plan_digest FROM push_deployment_targets WHERE deployment_id=? ORDER BY id`, id)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var t PushDeploymentTarget
-		if err := rows.Scan(&t.ID, &t.DeploymentID, &t.HostID, &t.HostName, &t.BindingID, &t.ServerID, &t.Labels, &t.Status, &t.Output, &t.CreatedAt, &t.StartedAt, &t.CompletedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.DeploymentID, &t.HostID, &t.HostName, &t.BindingID, &t.ServerID, &t.Labels, &t.Status, &t.Output, &t.CreatedAt, &t.StartedAt, &t.CompletedAt, &t.PlanDigest); err != nil {
 			return nil, err
 		}
 		d.Targets = append(d.Targets, t)
@@ -742,8 +749,14 @@ func pushTargetTag(projectName, serverID string) string {
 	return strings.TrimSpace(projectName) + "|" + strings.TrimSpace(serverID)
 }
 func (s *Store) MarkPushDeploymentRunning(id int64) error {
-	_, err := s.db.Exec(`UPDATE push_deployments SET status='running',started_at=? WHERE id=? AND status='queued'`, time.Now().Format(timeLayout), id)
-	return err
+	result, err := s.db.Exec(`UPDATE push_deployments SET status='running',started_at=? WHERE id=? AND status='queued'`, time.Now().Format(timeLayout), id)
+	if err != nil {
+		return err
+	}
+	if n, err := result.RowsAffected(); err != nil || n != 1 {
+		return errors.New("deployment has already been claimed or completed")
+	}
+	return nil
 }
 func (s *Store) MarkPushTarget(id int64, status, output string) error {
 	now := time.Now().Format(timeLayout)
@@ -796,8 +809,22 @@ func validPushAuthMode(mode string) bool {
 // RecordPushHostKey implements trust-on-first-use. It only fills an empty
 // value and can never silently replace an operator-approved fingerprint.
 func (s *Store) RecordPushHostKey(tenantID, hostID int64, publicKey, fingerprint string) error {
-	_, err := s.db.Exec(`UPDATE push_hosts SET host_key=?,host_key_fingerprint=?,updated_at=? WHERE tenant_id=? AND id=? AND host_key=''`, publicKey, fingerprint, time.Now().Format(timeLayout), tenantID, hostID)
-	return err
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`UPDATE push_hosts SET host_key=?,host_key_fingerprint=?,updated_at=? WHERE tenant_id=? AND id=? AND host_key=''`, publicKey, fingerprint, time.Now().Format(timeLayout), tenantID, hostID); err != nil {
+		return err
+	}
+	var enrolled string
+	if err := tx.QueryRow(`SELECT host_key FROM push_hosts WHERE tenant_id=? AND id=?`, tenantID, hostID).Scan(&enrolled); err != nil {
+		return err
+	}
+	if strings.TrimSpace(enrolled) != strings.TrimSpace(publicKey) {
+		return fmt.Errorf("SSH host key conflicts with the enrolled key")
+	}
+	return tx.Commit()
 }
 func labelsMatch(have, want []string, all bool) bool {
 	if len(want) == 0 {

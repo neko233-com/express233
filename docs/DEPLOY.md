@@ -27,9 +27,13 @@ helm upgrade --install express233 ./deploy/helm/express233-server \
 
 默认单副本，PVC 挂载 `/data`；其中保存 SQLite、租户配置与版本文件。保留现有 PVC，不通过更换数据路径“重建”已有控制台。当前 chart 的 `env` 模板只接入 `EXPRESS233_DATA`；需要其它 Secret 时，在受控部署清单中添加 `secretKeyRef`，不要假设任意 `--set env.*` 都会生效。
 
+生产部署控制器采用单写者：同一数据目录有内核进程锁，Helm 拒绝 `replicaCount != 1`，升级使用 Recreate。该约束针对 SQLite 控制面；一套控制器仍可串行部署任意多个已登记游戏节点。跨地域多控制器、共享网络盘上的 SQLite、多主自动切换不在此合同内。
+
+正常停止先拒绝新部署并等待在途目标完成；单目标 SSH 执行上限 15 分钟，systemd `TimeoutStopSec` 至少设置 960 秒。崩溃或断电后的启动把原 running 目标记为 unknown、原 queued 目标记为 skipped，保留原任务且不自动重放；人工先核验远端 `run/deployment-attempt`。SQLite 增量增加计划摘要列，不回退数据库或覆盖当前运行配置。
+
 ### 二进制安装与更新
 
-从官方 Release 获取对应平台的 `express233-server-{os}-{arch}`、`SHA256SUMS` 和 `PROVENANCE.json`，先在独立目录校验摘要、版本和 commit。下载与校验示例见 [GitHub Actions](GITHUB_ACTIONS.md)。安装脚本和内置 `update` 命令不能替代这套验收：当前安装脚本不校验官方摘要，内置更新返回 `scheduled` 也不表示新进程已就绪。
+从官方 Release 获取对应平台的 `express233-server-{os}-{arch}`、`SHA256SUMS` 和 `PROVENANCE.json`，先在独立目录校验摘要、版本和 commit。下载与校验示例见 [GitHub Actions](GITHUB_ACTIONS.md)。CLI Shell 安装器现在验证官方摘要，但控制台安装脚本和内置 `update` 仍不能替代运行版本验收；返回 `scheduled` 不表示新进程已就绪。
 
 已有服务按以下顺序更新：
 

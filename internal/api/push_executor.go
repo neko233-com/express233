@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -33,6 +34,36 @@ type pushCommand struct {
 	HookEnv                                           map[string]string
 }
 type pushCommandContextKey struct{}
+
+var errPushOutcomeUnknown = errors.New("remote deployment outcome unknown; verify runtime before retry")
+
+// deploymentOutput 对 SSH 两条输出流串行化并保留末尾 8 MiB，避免并发写和日志耗尽控制器内存。
+type deploymentOutput struct {
+	mu     sync.Mutex
+	buffer bytes.Buffer
+}
+
+func (o *deploymentOutput) Write(p []byte) (int, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	const limit = 8 * 1024 * 1024
+	n := len(p)
+	if n >= limit {
+		o.buffer.Reset()
+		_, _ = o.buffer.Write(p[n-limit:])
+		return n, nil
+	}
+	if excess := o.buffer.Len() + n - limit; excess > 0 {
+		o.buffer.Next(excess)
+	}
+	_, _ = o.buffer.Write(p)
+	return n, nil
+}
+func (o *deploymentOutput) String() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.buffer.String()
+}
 
 // Check performs exactly one TCP connection and SSH handshake. It intentionally
 // has no retry loop: the scheduler records the result and waits for the next
@@ -89,7 +120,7 @@ func (e sshPushExecutor) Deploy(ctx context.Context, host store.PushHost, bindin
 		return "", err
 	}
 	defer func() { _ = session.Close() }()
-	var output bytes.Buffer
+	var output deploymentOutput
 	session.Stdout, session.Stderr = &output, &output
 	// The command intentionally delegates extraction, safe swap and post hook to
 	// express233-cli. Capturing both streams makes the task log the source of
@@ -105,7 +136,16 @@ func (e sshPushExecutor) Deploy(ctx context.Context, host store.PushHost, bindin
 	// Feed the script over stdin so the pull token and other environment values
 	// never appear in the remote shell process argv or ordinary process lists.
 	session.Stdin = strings.NewReader(script)
+	stopCancellation := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stopCancellation()
 	if err := session.Run("sh -s"); err != nil {
+		if ctx.Err() != nil {
+			return output.String(), ctx.Err()
+		}
+		var exitErr *ssh.ExitError
+		if !errors.As(err, &exitErr) {
+			return output.String(), errPushOutcomeUnknown
+		}
 		return output.String(), fmt.Errorf("remote CLI deploy: %w", err)
 	}
 	return output.String(), nil
@@ -188,6 +228,7 @@ func buildPushDeployScript(command pushCommand, binding store.PushServerBinding)
 	}
 	return "set -eu\n" +
 		"command -v safe-deploy.sh >/dev/null 2>&1 || { echo 'safe-deploy.sh is required on the target'; exit 127; }\n" +
+		"test \"$(safe-deploy.sh --capabilities)\" = 'express233.safe-deploy/v2' || { echo 'safe-deploy.sh v2 is required; no deployment started'; exit 78; }\n" +
 		environment + "EXPRESS233_SERVER=" + shellQuote(command.CentralURL) + " EXPRESS233_TOKEN=" + shellQuote(command.PullToken) + " EXPRESS233_PROJECT=" + shellQuote(command.Project) + " EXPRESS233_SERVER_ID=" + shellQuote(command.ServerID) + " VERSION=" + shellQuote(command.Version) + " EXPRESS233_TAGS=" + shellQuote(strings.Join(splitCSV(binding.ContentTags), ",")) + " GAME_ROOT=" + shellQuote(binding.RemoteRoot) + " EXPRESS233_DEPLOYMENT_ID=" + shellQuote(command.DeploymentID) + " EXPRESS233_IDEMPOTENCY_KEY=" + shellQuote(command.IdempotencyKey) + " EXPRESS233_TARGET_TAG=" + shellQuote(command.TargetTag) + " safe-deploy.sh " + backupFlag + "--server-id " + shellQuote(command.ServerID) + "\n", nil
 }
 
