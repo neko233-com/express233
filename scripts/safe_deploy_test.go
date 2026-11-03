@@ -259,8 +259,9 @@ done
 mkdir -p "$dest/scripts"
 printf '#!/bin/bash\nexit 1\n' >"$dest/scripts/restart.sh"
 printf '#!/bin/bash\nexit 0\n' >"$dest/scripts/healthcheck.sh"
+printf '#!/bin/bash\nprintf x >> "$GAME_ROOT/prestop-count"\n' >"$dest/scripts/prestop.sh"
 printf '#!/bin/bash\ntouch "$GAME_ROOT/rollback-hook-ran"\n' >"$dest/scripts/rollback.sh"
-chmod +x "$dest/scripts/restart.sh" "$dest/scripts/rollback.sh"
+chmod +x "$dest/scripts/restart.sh" "$dest/scripts/prestop.sh" "$dest/scripts/rollback.sh"
 `
 	if err := os.WriteFile(fakePull, []byte(body), 0755); err != nil {
 		t.Fatal(err)
@@ -276,6 +277,9 @@ chmod +x "$dest/scripts/restart.sh" "$dest/scripts/rollback.sh"
 	}
 	if _, err := os.Stat(filepath.Join(finalDir, "old.bin")); err != nil {
 		t.Fatalf("old release was not restored: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "prestop-count")); err != nil || string(got) != "xx" {
+		t.Fatalf("candidate pre-stop must run before swap and rollback: %q %v", got, err)
 	}
 }
 

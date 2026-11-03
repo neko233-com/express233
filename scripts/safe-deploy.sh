@@ -407,6 +407,12 @@ rollback_release() {
     return 1
   fi
   log "ROLLBACK: stopping failed release"
+  local prestop_hook="$TMP_DIR/scripts/prestop.sh"
+  if [[ -e "$prestop_hook" || -L "$prestop_hook" ]]; then
+    [[ -f "$prestop_hook" && ! -L "$prestop_hook" ]] || { log "ROLLBACK failed: invalid candidate pre-stop hook"; return 1; }
+    chmod +x "$prestop_hook"
+    env GAME_ROOT="$GAME_ROOT" SERVER_ID="$SERVER_ID" EXPRESS233_SERVER_ID="$SERVER_ID" "$prestop_hook" 9>&- || { log "ROLLBACK failed: candidate did not stop safely"; return 1; }
+  fi
   if ! stop_server; then
     log "ROLLBACK failed: failed release did not stop safely"
     return 1
