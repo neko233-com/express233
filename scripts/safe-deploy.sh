@@ -389,7 +389,7 @@ sync_release_tree() {
   mkdir -p "$target_dir/data" "$target_dir/logs" "$target_dir/run"
     # 仅保留发布根目录的持久化目录。未锚定的规则会错误保留历史包装目录
     # 内的 data/logs/run，导致 rsync 无法删除废弃目录并阻断后续发布。
-    rsync -a --delete \
+    rsync -a --checksum --delete \
       --exclude='/data/***' \
       --exclude='/logs/***' \
       --exclude='/run/***' \

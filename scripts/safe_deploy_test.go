@@ -172,6 +172,7 @@ func TestSafeDeployLegacyPIDPreservesRuntimeFiles(t *testing.T) {
 		"server.log":         "retained-log",
 		".ai-backup-1/state": "retained-backup",
 		".ai-setup-1/state":  "retained-setup",
+		"same.bin":           "AAAA",
 	} {
 		path := filepath.Join(finalDir, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -193,6 +194,8 @@ while [[ $# -gt 0 ]]; do
 done
 mkdir -p "$dest/scripts"
 printf candidate >"$dest/new.bin"
+printf BBBB >"$dest/same.bin"
+touch -r "$GAME_ROOT/collect/same.bin" "$dest/same.bin"
 printf replacement >"$dest/.operations.env"
 printf '#!/bin/bash\nexit 0\n' >"$dest/scripts/restart.sh"
 printf '#!/bin/bash\nexit 0\n' >"$dest/scripts/healthcheck.sh"
@@ -209,6 +212,9 @@ chmod +x "$dest/scripts/restart.sh"
 	}
 	if !strings.Contains(string(output), "using legacy instance PID file") {
 		t.Fatalf("legacy PID was not used: %s", output)
+	}
+	if got, err := os.ReadFile(filepath.Join(finalDir, "same.bin")); err != nil || string(got) != "BBBB" {
+		t.Fatalf("same-size same-time file was not updated: %q %v", got, err)
 	}
 	for name, want := range map[string]string{
 		".operations.env": "protected", "server.log": "retained-log",
