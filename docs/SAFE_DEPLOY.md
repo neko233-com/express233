@@ -6,6 +6,8 @@
 
 目标为 Linux，安装 Bash、`express233-cli`、`flock`、GNU tar/coreutils 和 **rsync**。使用 `/proc/{pid}/exe` 校验进程归属。缺少 rsync、restart.sh 或 healthcheck.sh 时在停服前拒绝执行，不再使用忽略复制错误的回退分支。控制器要求节点 `safe-deploy.sh --capabilities` 返回 `express233.safe-deploy/v2`。
 
+需要迁移历史 PID 和受保护运行文件的包可在 `post_hook_env` 指定 `EXPRESS233_REQUIRED_DEPLOY_FEATURE=protected-legacy-rollback-v1`。控制器与节点均须支持该特性，缺失时在部署前拒绝。节点保留实例根目录 `.operations.env`、`server.log*`、`.ai-backup-*` 和 `.ai-setup-*`；候选包可提供 `scripts/prestop.sh` 在换包前安全停服，并提供 `scripts/rollback.sh` 启动恢复后的旧包。停服钩子失败时保留现场并停止部署；回滚后仍须通过旧包健康检查。
+
 每个 `server_id` 必须有独立运行目录，且在同一 `GAME_ROOT` 下唯一；不同项目不能共用同一个实例目录。默认根目录 `/opt/game-servers`：
 
 ```text

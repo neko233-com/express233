@@ -49,6 +49,9 @@ SERVER_ID="${EXPRESS233_SERVER_ID:-}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --capabilities) printf '%s\n' 'express233.safe-deploy/v2'; exit 0 ;;
+    --supports-feature)
+      [[ "${2:-}" == "protected-legacy-rollback-v1" ]] || exit 1
+      exit 0 ;;
     --server-id)  SERVER_ID="$2"; shift 2 ;;
     --version)    VERSION_ARGS=(--version "$2"); shift 2 ;;
     --dry-run)    DRY_RUN=true; shift ;;
@@ -258,24 +261,47 @@ fi
 
 # ═══════════════ Step 3: 停止旧服务 ═══════════════
 stop_server() {
-  if [[ ! -f "$PID_FILE" ]]; then
+  local pid_file="$PID_FILE"
+  local legacy_pid_file="$FINAL_DIR/server.pid"
+  if [[ -L "$pid_file" || -L "$legacy_pid_file" ]]; then
+    log "ERROR: PID file must not be a symbolic link"
+    return 1
+  fi
+  if [[ ! -e "$pid_file" && -e "$legacy_pid_file" ]]; then
+    pid_file="$legacy_pid_file"
+    log "Step 3/5: using legacy instance PID file"
+  elif [[ -f "$pid_file" && -f "$legacy_pid_file" ]]; then
+    local legacy_pid canonical_pid
+    legacy_pid=$(cat "$legacy_pid_file")
+    canonical_pid=$(cat "$pid_file")
+    if [[ "$legacy_pid" != "$canonical_pid" && "$legacy_pid" =~ ^[1-9][0-9]*$ ]] && pid_running "$legacy_pid"; then
+      log "ERROR: canonical and legacy PID files identify different live processes"
+      return 1
+    fi
+  fi
+  if [[ -e "$pid_file" && ! -f "$pid_file" ]]; then
+    log "ERROR: PID file must be a regular file"
+    return 1
+  fi
+  if [[ ! -f "$pid_file" ]]; then
     log "Step 3/5: no PID file, skip stop"
     return
   fi
   local pid
-  pid=$(cat "$PID_FILE")
+  pid=$(cat "$pid_file")
   if [[ ! "$pid" =~ ^[1-9][0-9]*$ ]]; then
-    log "ERROR: invalid PID file: $PID_FILE"
+    log "ERROR: invalid PID file: $pid_file"
     return 1
   fi
   if ! pid_running "$pid"; then
     log "Step 3/5: PID $pid not running, remove stale PID file"
-    rm -f "$PID_FILE"
+    rm -f "$pid_file"
     return
   fi
 
-  local executable_path
+  local executable_path working_directory
   executable_path=$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)
+  working_directory=$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)
   case "$executable_path" in
     "$FINAL_DIR"/*) ;;
     *)
@@ -283,6 +309,10 @@ stop_server() {
       return 1
       ;;
   esac
+  if [[ "$pid_file" == "$legacy_pid_file" && "$working_directory" != "$FINAL_DIR" ]]; then
+    log "ERROR: refusing to stop PID=$pid outside the target working directory"
+    return 1
+  fi
 
   log "Step 3/5: sending SIGTERM to PID=$pid; waiting for graceful exit..."
   if $DRY_RUN; then
@@ -313,7 +343,7 @@ stop_server() {
       sleep "$POST_KILL_SETTLE_SECONDS"
     fi
   fi
-  rm -f "$PID_FILE"
+  rm -f "$pid_file"
   if [[ "$forced" == "1" ]]; then
     log "server was force-killed after $((SECONDS - started))s"
   else
@@ -332,6 +362,11 @@ if $BACKUP && [[ -d "$FINAL_DIR" ]] && ! $DRY_RUN; then
     --exclude="${SERVER_ID}/data" \
     --exclude="${SERVER_ID}/logs" \
     --exclude="${SERVER_ID}/run" \
+    --exclude="${SERVER_ID}/server.pid" \
+    --exclude="${SERVER_ID}/server.log*" \
+    --exclude="${SERVER_ID}/.operations.env" \
+    --exclude="${SERVER_ID}/.ai-backup-*" \
+    --exclude="${SERVER_ID}/.ai-setup-*" \
     -C "$(dirname "$FINAL_DIR")" \
     "$(basename "$FINAL_DIR")"
   tar -tzf "$BACKUP_ARCHIVE" >/dev/null
@@ -359,6 +394,10 @@ sync_release_tree() {
       --exclude='/logs/***' \
       --exclude='/run/***' \
       --exclude='/.env' \
+      --exclude='/.operations.env' \
+      --exclude='/.ai-backup-*/***' \
+      --exclude='/.ai-setup-*/***' \
+      --exclude='/server.log*' \
       "$source_dir/" "$target_dir/"
 }
 
@@ -385,8 +424,18 @@ rollback_release() {
     log "ROLLBACK failed: previous restart script missing"
     return 1
   fi
-  chmod +x "$FINAL_DIR/scripts/restart.sh"
-  env SERVER_ID="$SERVER_ID" EXPRESS233_SERVER_ID="$SERVER_ID" "$FINAL_DIR/scripts/restart.sh" 9>&-
+  local rollback_hook="$TMP_DIR/scripts/rollback.sh"
+  if [[ -e "$rollback_hook" || -L "$rollback_hook" ]]; then
+    [[ -f "$rollback_hook" && ! -L "$rollback_hook" ]] || { log "ROLLBACK failed: invalid candidate rollback hook"; return 1; }
+    chmod +x "$rollback_hook"
+  else
+    rollback_hook="$FINAL_DIR/scripts/restart.sh"
+    chmod +x "$rollback_hook"
+  fi
+  env GAME_ROOT="$GAME_ROOT" SERVER_ID="$SERVER_ID" EXPRESS233_SERVER_ID="$SERVER_ID" "$rollback_hook" 9>&- || return 1
+  [[ -f "$FINAL_DIR/scripts/healthcheck.sh" ]] || { log "ROLLBACK failed: previous health check missing"; return 1; }
+  chmod +x "$FINAL_DIR/scripts/healthcheck.sh"
+  wait_for_healthcheck || { log "ROLLBACK failed: previous release health check failed"; return 1; }
   log "ROLLBACK complete"
 }
 
@@ -420,6 +469,20 @@ if $DRY_RUN; then
 else
   write_attempt stopping
   DOWNTIME_STARTED=1
+  prestop_hook="$TMP_DIR/scripts/prestop.sh"
+  if [[ -e "$prestop_hook" || -L "$prestop_hook" ]]; then
+    if [[ ! -f "$prestop_hook" || -L "$prestop_hook" ]]; then
+      write_attempt blocked
+      log "ERROR: invalid pre-stop hook; runtime verification required"
+      exit 75
+    fi
+    chmod +x "$prestop_hook"
+    if ! env GAME_ROOT="$GAME_ROOT" SERVER_ID="$SERVER_ID" EXPRESS233_SERVER_ID="$SERVER_ID" "$prestop_hook" 9>&-; then
+      write_attempt blocked
+      log "ERROR: pre-stop hook failed; no files swapped, runtime verification required"
+      exit 75
+    fi
+  fi
   if ! stop_server; then
     DOWNTIME_STARTED=0
     write_attempt aborted

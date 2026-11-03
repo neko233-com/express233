@@ -23,6 +23,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		},
 		"projects_count":   len(projects),
 		"server_ids_count": len(serverIDs),
+		"features": map[string]bool{
+			"required_deploy_feature": true,
+		},
 		"metrics": map[string]uint64{
 			"pull_total":    metrics.pullTotal.Load(),
 			"pull_errors":   metrics.pullErrors.Load(),

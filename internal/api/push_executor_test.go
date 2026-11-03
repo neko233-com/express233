@@ -88,6 +88,19 @@ func TestBuildPushDeployScriptUsesBindingBackupPolicy(t *testing.T) {
 	}
 }
 
+func TestBuildPushDeployScriptRequiresDeclaredRunnerFeature(t *testing.T) {
+	command := pushCommand{CentralURL: "https://express.example.com", Project: "collect", Version: "1.0.0", ServerID: "collect", HookEnv: map[string]string{"EXPRESS233_REQUIRED_DEPLOY_FEATURE": "protected-legacy-rollback-v1"}}
+	binding := store.PushServerBinding{ServerID: "collect", RemoteRoot: "/opt/collect"}
+	script, err := buildPushDeployScript(command, binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := "safe-deploy.sh --supports-feature 'protected-legacy-rollback-v1'"
+	if !strings.Contains(script, check) || strings.Index(script, check) > strings.LastIndex(script, "safe-deploy.sh --backup") {
+		t.Fatalf("feature check must precede deployment: %s", script)
+	}
+}
+
 func TestBuildPushDeployScriptForwardsQuotedHookEnvironment(t *testing.T) {
 	command := pushCommand{CentralURL: "https://express.example.com", Project: "game", Version: "1.0.0", ServerID: "1001", HookEnv: map[string]string{"RESTART_MODE": "force", "LITERAL": "line one\n$(touch /tmp/forbidden)'end", "VERSION": "untrusted"}}
 	script, err := buildPushDeployScript(command, store.PushServerBinding{ServerID: "1001", RemoteRoot: "/opt/game"})

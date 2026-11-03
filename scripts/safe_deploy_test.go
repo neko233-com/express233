@@ -115,6 +115,7 @@ func startSafeDeployFixture(t *testing.T, finalDir, mode, stoppedMarker string) 
 	}
 	readyMarker := filepath.Join(finalDir, "run", "fixture-ready")
 	process := exec.Command(serverExecutable, "-test.run=^TestSafeDeployFixtureProcess$")
+	process.Dir = finalDir
 	process.Env = append(os.Environ(),
 		"EXPRESS233_SAFE_DEPLOY_TEST_PROCESS="+mode,
 		"EXPRESS233_SAFE_DEPLOY_TEST_READY="+readyMarker,
@@ -149,6 +150,174 @@ func startSafeDeployFixture(t *testing.T, finalDir, mode, stoppedMarker string) 
 			t.Fatal("fixture process did not become ready")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestSafeDeployLegacyPIDPreservesRuntimeFiles(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("safe-deploy.sh executes on Linux targets")
+	}
+	for _, command := range []string{"bash", "flock", "rsync", "sha256sum", "tar"} {
+		if _, err := exec.LookPath(command); err != nil {
+			t.Skipf("%s unavailable", command)
+		}
+	}
+	root := t.TempDir()
+	finalDir := filepath.Join(root, "collect")
+	if err := os.MkdirAll(filepath.Join(finalDir, "run"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		".operations.env":    "protected",
+		"server.log":         "retained-log",
+		".ai-backup-1/state": "retained-backup",
+		".ai-setup-1/state":  "retained-setup",
+	} {
+		path := filepath.Join(finalDir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := startSafeDeployFixture(t, finalDir, "graceful", filepath.Join(root, "stopped"))
+	if err := os.WriteFile(filepath.Join(finalDir, "server.pid"), []byte(strconv.Itoa(old.Process.Pid)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	fakePull := filepath.Join(root, "express233-cli")
+	body := `#!/bin/bash
+set -eu
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" == "--dest" ]]; then dest="$2"; shift 2; else shift; fi
+done
+mkdir -p "$dest/scripts"
+printf candidate >"$dest/new.bin"
+printf replacement >"$dest/.operations.env"
+printf '#!/bin/bash\nexit 0\n' >"$dest/scripts/restart.sh"
+printf '#!/bin/bash\nexit 0\n' >"$dest/scripts/healthcheck.sh"
+chmod +x "$dest/scripts/restart.sh"
+`
+	if err := os.WriteFile(fakePull, []byte(body), 0755); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command("bash", "safe-deploy.sh", "--backup", "--server-id", "collect", "--stop-timeout", "5")
+	command.Env = append(os.Environ(), "GAME_ROOT="+root, "EXPRESS233_BIN="+fakePull)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("legacy deployment failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "using legacy instance PID file") {
+		t.Fatalf("legacy PID was not used: %s", output)
+	}
+	for name, want := range map[string]string{
+		".operations.env": "protected", "server.log": "retained-log",
+		".ai-backup-1/state": "retained-backup", ".ai-setup-1/state": "retained-setup",
+	} {
+		got, err := os.ReadFile(filepath.Join(finalDir, name))
+		if err != nil || string(got) != want {
+			t.Fatalf("%s was not preserved: %q %v", name, got, err)
+		}
+	}
+}
+
+func TestSafeDeployUsesCandidateRollbackHook(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("safe-deploy.sh executes on Linux targets")
+	}
+	for _, command := range []string{"bash", "flock", "rsync", "sha256sum", "tar"} {
+		if _, err := exec.LookPath(command); err != nil {
+			t.Skipf("%s unavailable", command)
+		}
+	}
+	root := t.TempDir()
+	finalDir := filepath.Join(root, "collect")
+	if err := os.MkdirAll(filepath.Join(finalDir, "scripts"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"old.bin":                "old",
+		"scripts/restart.sh":     "#!/bin/bash\ntouch \"$GAME_ROOT/old-hook-ran\"\n",
+		"scripts/healthcheck.sh": "#!/bin/bash\ntest -f \"$GAME_ROOT/rollback-hook-ran\"\n",
+	} {
+		if err := os.WriteFile(filepath.Join(finalDir, name), []byte(content), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fakePull := filepath.Join(root, "express233-cli")
+	body := `#!/bin/bash
+set -eu
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" == "--dest" ]]; then dest="$2"; shift 2; else shift; fi
+done
+mkdir -p "$dest/scripts"
+printf '#!/bin/bash\nexit 1\n' >"$dest/scripts/restart.sh"
+printf '#!/bin/bash\nexit 0\n' >"$dest/scripts/healthcheck.sh"
+printf '#!/bin/bash\ntouch "$GAME_ROOT/rollback-hook-ran"\n' >"$dest/scripts/rollback.sh"
+chmod +x "$dest/scripts/restart.sh" "$dest/scripts/rollback.sh"
+`
+	if err := os.WriteFile(fakePull, []byte(body), 0755); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command("bash", "safe-deploy.sh", "--backup", "--server-id", "collect")
+	command.Env = append(os.Environ(), "GAME_ROOT="+root, "EXPRESS233_BIN="+fakePull)
+	output, err := command.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "previous release restored") {
+		t.Fatalf("expected failed deployment with verified rollback: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(filepath.Join(root, "old-hook-ran")); !os.IsNotExist(err) {
+		t.Fatalf("untrusted legacy restart hook was executed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(finalDir, "old.bin")); err != nil {
+		t.Fatalf("old release was not restored: %v", err)
+	}
+}
+
+func TestSafeDeployPreStopFailureDoesNotSwap(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("safe-deploy.sh executes on Linux targets")
+	}
+	for _, command := range []string{"bash", "flock", "rsync", "sha256sum", "tar"} {
+		if _, err := exec.LookPath(command); err != nil {
+			t.Skipf("%s unavailable", command)
+		}
+	}
+	root := t.TempDir()
+	finalDir := filepath.Join(root, "collect")
+	if err := os.MkdirAll(finalDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(finalDir, "old.bin"), []byte("old"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	fakePull := filepath.Join(root, "express233-cli")
+	body := `#!/bin/bash
+set -eu
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" == "--dest" ]]; then dest="$2"; shift 2; else shift; fi
+done
+mkdir -p "$dest/scripts"
+printf candidate >"$dest/new.bin"
+printf '#!/bin/bash\nexit 1\n' >"$dest/scripts/prestop.sh"
+printf '#!/bin/bash\nexit 0\n' >"$dest/scripts/restart.sh"
+printf '#!/bin/bash\nexit 0\n' >"$dest/scripts/healthcheck.sh"
+chmod +x "$dest/scripts/prestop.sh" "$dest/scripts/restart.sh"
+`
+	if err := os.WriteFile(fakePull, []byte(body), 0755); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command("bash", "safe-deploy.sh", "--backup", "--server-id", "collect")
+	command.Env = append(os.Environ(), "GAME_ROOT="+root, "EXPRESS233_BIN="+fakePull)
+	output, err := command.CombinedOutput()
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok || exitErr.ExitCode() != 75 || !strings.Contains(string(output), "no files swapped") {
+		t.Fatalf("pre-stop failure did not block deployment: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(filepath.Join(finalDir, "old.bin")); err != nil {
+		t.Fatalf("old release was changed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(finalDir, "new.bin")); !os.IsNotExist(err) {
+		t.Fatalf("candidate was swapped: %v", err)
 	}
 }
 

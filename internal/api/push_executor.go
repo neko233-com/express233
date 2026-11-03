@@ -226,9 +226,14 @@ func buildPushDeployScript(command pushCommand, binding store.PushServerBinding)
 	for _, key := range keys {
 		environment += shellQuote(key+"="+command.HookEnv[key]) + " "
 	}
+	featureCheck := ""
+	if feature := command.HookEnv["EXPRESS233_REQUIRED_DEPLOY_FEATURE"]; feature != "" {
+		featureCheck = "safe-deploy.sh --supports-feature " + shellQuote(feature) + " >/dev/null 2>&1 || { echo 'required safe-deploy feature is unavailable; no deployment started'; exit 78; }\n"
+	}
 	return "set -eu\n" +
 		"command -v safe-deploy.sh >/dev/null 2>&1 || { echo 'safe-deploy.sh is required on the target'; exit 127; }\n" +
 		"test \"$(safe-deploy.sh --capabilities)\" = 'express233.safe-deploy/v2' || { echo 'safe-deploy.sh v2 is required; no deployment started'; exit 78; }\n" +
+		featureCheck +
 		environment + "EXPRESS233_SERVER=" + shellQuote(command.CentralURL) + " EXPRESS233_TOKEN=" + shellQuote(command.PullToken) + " EXPRESS233_PROJECT=" + shellQuote(command.Project) + " EXPRESS233_SERVER_ID=" + shellQuote(command.ServerID) + " VERSION=" + shellQuote(command.Version) + " EXPRESS233_TAGS=" + shellQuote(strings.Join(splitCSV(binding.ContentTags), ",")) + " GAME_ROOT=" + shellQuote(binding.RemoteRoot) + " EXPRESS233_DEPLOYMENT_ID=" + shellQuote(command.DeploymentID) + " EXPRESS233_IDEMPOTENCY_KEY=" + shellQuote(command.IdempotencyKey) + " EXPRESS233_TARGET_TAG=" + shellQuote(command.TargetTag) + " safe-deploy.sh " + backupFlag + "--server-id " + shellQuote(command.ServerID) + "\n", nil
 }
 
