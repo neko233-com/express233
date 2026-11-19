@@ -149,6 +149,7 @@ await withBrowser(async ({ base, batch, api, capture, dir, fixturePassword }) =>
   const [errors] = batch("390px 布局、深链保留和退出登录", [
     ["set", "viewport", "390", "844"], ["open", `${route}/versions?version=${draft.version}`],
     text("#verDetailTitle", draft.version), noOverflow,
+    ["wait", `${tid("workspace-next")}:enabled`], text(tid("workspace-next"), "检查并发布"),
     ["click", tid("workspace-next")], ready("publish-flow-panel"), noOverflow,
     ["reload"], ready("publish-flow-panel"), noOverflow, ...capture("mobile-390"),
     ["find", "role", "button", "click", "--name", "退出"], ready("login-panel"),
