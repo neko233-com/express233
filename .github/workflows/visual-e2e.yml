@@ -1,12 +1,13 @@
-# 浏览器可视化全流程 — 仅手动/可选触发，不参与发布与默认 CI
-name: Visual E2E
+name: Headless browser verification
 
 on:
   workflow_dispatch:
   pull_request:
     paths:
-      - "test/visual/**"
-      - "internal/api/web/**"
+      - "test/browser/**"
+      - "frontend/**"
+      - "internal/api/static.go"
+      - ".github/actions/build-console/**"
       - ".github/workflows/visual-e2e.yml"
 
 permissions:
@@ -14,39 +15,23 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  CGO_ENABLED: "0"
 
 jobs:
-  playwright:
-    name: browser flows
+  browser:
+    name: console flows
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-
+      - uses: ./.github/actions/build-console
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.x"
           cache: true
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: test/visual/package.json
-
-      - name: Install Playwright
-        working-directory: test/visual
-        run: |
-          npm install
-          npx playwright install --with-deps chromium
-
-      - name: Run visual E2E
-        working-directory: test/visual
-        env:
-          CI: "true"
-        run: npx playwright test
-
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: playwright-report
-          path: test/visual/playwright-report/
+      - name: Install Agent Browser CLI
+        run: npm --prefix test/browser ci --ignore-scripts
+      - name: Install Chrome if unavailable
+        run: command -v google-chrome || npm --prefix test/browser run install-browser
+      - name: Verify packaged console headlessly
+        run: npm --prefix test/browser run verify

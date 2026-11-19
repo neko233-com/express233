@@ -12,7 +12,7 @@ fi
 
 if [[ "$OWN_SERVER" = 1 ]]; then
   mkdir -p "$DATA"
-  "$ROOT/bin/express233-server" -addr ":39233" -data "$DATA" &
+  "$ROOT/bin/express233-server" -addr "$ADDR" -data "$DATA" &
   PID=$!
   trap 'kill $PID 2>/dev/null || true' EXIT
 fi
@@ -33,16 +33,9 @@ curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X POST "$BASE/api/login" \
   -H 'Content-Type: application/json' \
   -d '{"username":"root","password":"root"}' >/dev/null
 
-curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X POST "$BASE/api/projects" \
+PID_NUM=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X POST "$BASE/api/projects" \
   -H 'Content-Type: application/json' \
-  -d '{"name":"smoke"}' >/dev/null
-
-PID_NUM=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" "$BASE/api/projects" | python3 -c "
-import json,sys
-for p in json.load(sys.stdin):
-    if p.get('name')=='smoke':
-        print(p['id']); break
-")
+  -d '{"name":"smoke"}' | node -e "process.stdout.write(String(JSON.parse(require('node:fs').readFileSync(0, 'utf8')).id ?? ''))")
 [ -n "$PID_NUM" ]
 
 curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X POST "$BASE/api/projects/${PID_NUM}/versions" \
@@ -57,22 +50,18 @@ printf '#!/bin/sh\necho restarted\n' > "$BUNDLE_DIR/scripts/restart.sh"
 printf 'Write-Output restarted\n' > "$BUNDLE_DIR/scripts/restart.ps1"
 printf '\177ELFexpress233-smoke\n' > "$BUNDLE_DIR/bin/game-server"
 tar -C "$BUNDLE_DIR" -czf "$BUNDLE_DIR/bundle.tar.gz" game.properties conf scripts bin
-curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X POST \
-  "$BASE/api/projects/${PID_NUM}/versions/1.0.0/files" \
-  -F "file=@$BUNDLE_DIR/bundle.tar.gz;filename=bundle.tar.gz" >/dev/null
+(
+  cd "$BUNDLE_DIR"
+  curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X POST \
+    "$BASE/api/projects/${PID_NUM}/versions/1.0.0/files" \
+    -F 'file=@bundle.tar.gz;filename=bundle.tar.gz' >/dev/null
+)
 
-python3 - <<'PY' | curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X PUT "$BASE/api/server-yaml" \
+curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X PUT "$BASE/api/server-yaml" \
   -H 'Content-Type: application/json' \
-  -d @-
-import json
-print(json.dumps({"content": """servers:
-  s1:
-    replacements:
-      game.properties:
-        port: "9001"
-    post_hook: restart.sh
-"""}))
-PY
+  -d @- >/dev/null <<'JSON'
+{"content":"servers:\n  s1:\n    replacements:\n      game.properties:\n        port: \"9001\"\n    post_hook: restart.sh\n"}
+JSON
 
 curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
   "$BASE/api/deploy/preview?project=smoke&version=1.0.0&server_id=s1" | grep -q '"after":"9001"'
@@ -80,18 +69,13 @@ curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
 curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X POST \
   "$BASE/api/projects/${PID_NUM}/versions/1.0.0/publish" >/dev/null
 
-TOKEN=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" "$BASE/api/users" | python3 -c "
-import json,sys
-print(json.load(sys.stdin)[0]['token'])
-")
-[ -n "$TOKEN" ]
-
-curl -fsS -o /tmp/smoke.tgz "$BASE/api/pull?token=${TOKEN}&project=smoke&server_id=s1"
-[ -s /tmp/smoke.tgz ]
-tar -tzf /tmp/smoke.tgz | grep -qx 'conf/app/application.yaml'
-tar -tzf /tmp/smoke.tgz | grep -qx 'scripts/restart.sh'
-tar -tzf /tmp/smoke.tgz | grep -qx 'scripts/restart.ps1'
-tar -tzf /tmp/smoke.tgz | grep -qx 'bin/game-server'
+curl -fsS -b "$COOKIE_JAR" -o "$BUNDLE_DIR/pulled.tgz" "$BASE/api/pull?project=smoke&server_id=s1"
+[ -s "$BUNDLE_DIR/pulled.tgz" ]
+tar -tzf "$BUNDLE_DIR/pulled.tgz" > "$BUNDLE_DIR/pulled.txt"
+grep -qx 'conf/app/application.yaml' "$BUNDLE_DIR/pulled.txt"
+grep -qx 'scripts/restart.sh' "$BUNDLE_DIR/pulled.txt"
+grep -qx 'scripts/restart.ps1' "$BUNDLE_DIR/pulled.txt"
+grep -qx 'bin/game-server' "$BUNDLE_DIR/pulled.txt"
 rm -rf "$BUNDLE_DIR"
 
 echo "ci-smoke OK"

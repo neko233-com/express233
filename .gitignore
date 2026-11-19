@@ -5,9 +5,10 @@
 .playwright-cli/
 .tmp-*/
 /dist/
-test/visual/node_modules/
-test/visual/test-results/
-test/visual/playwright-report/
+/test/browser/node_modules/
+/frontend/node_modules/
+/internal/api/web/dist/
+/.codegraph233/
 *.exe
 *.db
 .DS_Store

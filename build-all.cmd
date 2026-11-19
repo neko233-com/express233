@@ -1,6 +1,9 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+set "CGO_ENABLED=0"
+call scripts\build-console.cmd
+if errorlevel 1 exit /b 1
 
 for /f %%i in ('git rev-parse --short HEAD 2^>nul') do set COMMIT=%%i
 if not defined COMMIT set COMMIT=local

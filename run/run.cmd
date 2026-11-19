@@ -4,7 +4,11 @@ cd /d "%~dp0.."
 
 if not defined EXPRESS233_ADDR set "EXPRESS233_ADDR=127.0.0.1:23380"
 if not defined EXPRESS233_DATA set "EXPRESS233_DATA=%CD%\.data"
-if not defined EXPRESS233_WEB_DIR set "EXPRESS233_WEB_DIR=%CD%\internal\api\web"
+set "CGO_ENABLED=0"
+if not defined EXPRESS233_WEB_DIR (
+  call scripts\build-console.cmd
+  if errorlevel 1 exit /b 1
+)
 if not exist "%EXPRESS233_DATA%" mkdir "%EXPRESS233_DATA%"
 
 for /f "tokens=1,2 delims=:" %%a in ("%EXPRESS233_ADDR%") do (
@@ -40,7 +44,6 @@ echo.
 echo -----------------
 echo 访问地址 = http://%HOST%:%PORT%
 echo 数据目录 = %EXPRESS233_DATA%
-echo 静态热重载 = %EXPRESS233_WEB_DIR%
 echo 默认账号 = root / root
 echo -----------------
 echo.
@@ -50,7 +53,7 @@ exit /b %errorlevel%
 
 :stop_previous_server
 set "STOP_PORT=%~1"
-powershell -NoProfile -Command ^
+pwsh -NoProfile -Command ^
   "$port=%STOP_PORT%; $unicli='%UNICLI%';" ^
   "try { $r = Invoke-WebRequest -Uri \"http://127.0.0.1:$port/healthz\" -TimeoutSec 2 -UseBasicParsing; if ($r.Content.Trim() -ne 'ok') { exit 0 } } catch { exit 0 };" ^
   "$pids = @(Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique);" ^
@@ -65,6 +68,6 @@ powershell -NoProfile -Command ^
 exit /b 0
 
 :warn_port_conflict
-powershell -NoProfile -Command ^
+pwsh -NoProfile -Command ^
   "try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:%1/healthz' -TimeoutSec 2 -UseBasicParsing; if ($r.Content.Trim() -eq 'ok') { exit 2 } else { exit 1 } } catch { exit 0 }"
 exit /b %errorlevel%

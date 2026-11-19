@@ -3,6 +3,9 @@
 .cursor
 .playwright-cli
 .visual-e2e-data
+.data*
+.tmp-*
+.codegraph233
 output
 test
 **/*.test
@@ -12,3 +15,5 @@ test
 coverage*
 test-results
 playwright-report
+frontend/node_modules
+internal/api/web/dist

@@ -14,12 +14,14 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  CGO_ENABLED: "0"
 
 jobs:
   analyze:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/build-console
 
       - uses: actions/setup-go@v5
         with:

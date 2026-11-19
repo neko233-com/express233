@@ -3,6 +3,9 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+export CGO_ENABLED=0
+bash scripts/build-console.sh
+npm --prefix frontend run check
 
 VERSION="${VERSION:-0.0.0-local}"
 COMMIT="${COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo local)}"

@@ -55,10 +55,12 @@ func (s *Store) StorageIndexMeta() (StorageIndexMeta, error) {
 
 // RebuildStorageIndex 全量重建租户可见的本地存储索引。
 func (s *Store) RebuildStorageIndex(tenantID int64) (int, error) {
+	s.indexMu.Lock()
+	defer s.indexMu.Unlock()
 	if _, err := s.db.Exec(`DELETE FROM storage_index WHERE tenant_id = ?`, tenantID); err != nil {
 		return 0, err
 	}
-	if _, err := s.db.Exec(`DELETE FROM storage_index WHERE tenant_id = 0 AND kind LIKE 'blob%'`); err != nil {
+	if _, err := s.db.Exec(`DELETE FROM storage_index WHERE tenant_id = 0 AND (rel_path = 'blobs' OR rel_path LIKE 'blobs/%')`); err != nil {
 		return 0, err
 	}
 
@@ -149,19 +151,18 @@ func (s *Store) indexTenantTree(tenantID int64, now string) (int, error) {
 }
 
 func (s *Store) indexBlobs(now string) (int, error) {
-	count := 0
-	blobsRoot := s.blobsRoot()
-	relRoot := "blobs"
-	if st, err := os.Stat(blobsRoot); err == nil && st.IsDir() {
-		_, err := s.db.Exec(
-			`INSERT INTO storage_index(tenant_id, rel_path, name, kind, size_bytes, updated_at) VALUES(0,?,?,?,?,?)`,
-			relRoot, "blobs", "folder", dirSize(blobsRoot), now,
-		)
-		if err != nil {
-			return 0, err
-		}
-		count++
+	stats, err := s.BlobStats()
+	if err != nil {
+		return 0, err
 	}
+	_, err = s.db.Exec(
+		`INSERT INTO storage_index(tenant_id, rel_path, name, kind, size_bytes, updated_at) VALUES(0,'blobs','blobs','folder',?,?)`,
+		stats.TotalBytes, now,
+	)
+	if err != nil {
+		return 0, err
+	}
+	count := 1
 	rows, err := s.db.Query(`SELECT hash, size, ref_count FROM blobs ORDER BY hash`)
 	if err != nil {
 		return 0, err
@@ -184,8 +185,7 @@ func (s *Store) indexBlobs(now string) (int, error) {
 		return 0, err
 	}
 	for _, r := range blobRows {
-		relFromRoot, _ := filepath.Rel(s.dataDir, s.blobPath(r.hash))
-		relFromRoot = filepath.ToSlash(relFromRoot)
+		relFromRoot := blobKey(r.hash)
 		kind := "blob"
 		if r.refs == 0 {
 			kind = "orphan_blob"

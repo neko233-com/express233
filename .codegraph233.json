@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "strategy": "generic",
+  "profile": "code",
+  "roots": [
+    {
+      "key": "express233",
+      "path": ".",
+      "role": "backend"
+    }
+  ],
+  "languages": [
+    "go",
+    "typescript",
+    "powershell"
+  ],
+  "extra_extensions": {
+    "mjs": "typescript"
+  },
+  "exclude": [
+    ".git",
+    ".codegraph233",
+    "node_modules",
+    "dist",
+    "bin",
+    ".data",
+    "test-results"
+  ]
+}

@@ -390,10 +390,11 @@ func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tid, pname := pc.TenantID, pc.ProjectName
-	if err := r.ParseMultipartForm(512 << 20); err != nil {
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		errJSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	defer func() { _ = r.MultipartForm.RemoveAll() }()
 	rel := r.FormValue("path")
 	file, hdr, err := r.FormFile("file")
 	if err != nil {
@@ -410,49 +411,36 @@ func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 	uploadDetail := "project=" + pname + " version=" + ver + " file=" + rel
 	filename := strings.ToLower(hdr.Filename)
 	if strings.HasSuffix(filename, ".zip") {
-		buf, err := io.ReadAll(file)
-		if err != nil {
+		if err := s.Store.ExtractZipToVersion(tid, pname, ver, file, hdr.Size); err != nil {
 			s.recordUploadEvent(r, pc, ver, "zip", hdr.Size, 0, rel, err)
-			errJSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		ra := bytes.NewReader(buf)
-		if err := s.Store.ExtractZipToVersion(tid, pname, ver, ra, int64(len(buf))); err != nil {
-			s.recordUploadEvent(r, pc, ver, "zip", int64(len(buf)), 0, rel, err)
 			errJSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		paths := zipFilePaths(ra)
+		paths := zipFilePaths(file, hdr.Size)
 		if len(tags) > 0 {
 			for _, path := range paths {
 				_ = s.Store.SetVersionFileTags(tid, pname, ver, path, tags)
 			}
 		}
-		s.recordUploadEvent(r, pc, ver, "zip", int64(len(buf)), int64(len(paths)), rel, nil)
+		s.recordUploadEvent(r, pc, ver, "zip", hdr.Size, int64(len(paths)), rel, nil)
 		s.auditSession(r, "version.upload.zip", uploadDetail)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "zip extracted"})
 		return
 	}
 	if strings.HasSuffix(filename, ".tar.gz") || strings.HasSuffix(filename, ".tgz") || strings.HasSuffix(filename, ".tar") {
-		buf, err := io.ReadAll(file)
-		if err != nil {
-			s.recordUploadEvent(r, pc, ver, "tar", hdr.Size, 0, rel, err)
-			errJSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
 		compressed := strings.HasSuffix(filename, ".tar.gz") || strings.HasSuffix(filename, ".tgz")
-		if err := s.Store.ExtractTarToVersion(tid, pname, ver, bytes.NewReader(buf), compressed); err != nil {
-			s.recordUploadEvent(r, pc, ver, "tar", int64(len(buf)), 0, rel, err)
+		if err := s.Store.ExtractTarToVersion(tid, pname, ver, io.NewSectionReader(file, 0, hdr.Size), compressed); err != nil {
+			s.recordUploadEvent(r, pc, ver, "tar", hdr.Size, 0, rel, err)
 			errJSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		paths := tarFilePaths(bytes.NewReader(buf), compressed)
+		paths := tarFilePaths(io.NewSectionReader(file, 0, hdr.Size), compressed)
 		if len(tags) > 0 {
 			for _, path := range paths {
 				_ = s.Store.SetVersionFileTags(tid, pname, ver, path, tags)
 			}
 		}
-		s.recordUploadEvent(r, pc, ver, "tar", int64(len(buf)), int64(len(paths)), rel, nil)
+		s.recordUploadEvent(r, pc, ver, "tar", hdr.Size, int64(len(paths)), rel, nil)
 		s.auditSession(r, "version.upload.tar", uploadDetail)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "archive extracted"})
 		return
@@ -471,8 +459,8 @@ func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"path": rel})
 }
 
-func zipFilePaths(r *bytes.Reader) []string {
-	zr, err := zip.NewReader(r, int64(r.Len()))
+func zipFilePaths(r io.ReaderAt, size int64) []string {
+	zr, err := zip.NewReader(r, size)
 	if err != nil {
 		return nil
 	}

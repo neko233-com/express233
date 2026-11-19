@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-cd "$ROOT/test/visual"
-if [[ ! -d node_modules ]]; then
-  echo "== npm install =="
-  npm install
-  npx playwright install chromium
+cd "$ROOT"
+bash scripts/build-console.sh
+if [[ ! -x test/browser/node_modules/.bin/agent-browser || test/browser/package-lock.json -nt test/browser/node_modules/.package-lock.json ]]; then
+  npm --prefix test/browser ci --ignore-scripts
 fi
-echo "== playwright visual e2e (not run on publish / git-deploy) =="
-exec npx playwright test "$@"
+exec npm --prefix test/browser run verify

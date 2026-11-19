@@ -1,9 +1,11 @@
 package store
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,163 +14,92 @@ import (
 	"time"
 )
 
-// blobs 表按内容 SHA-256 去重；版本目录内文件通过硬链指向 blob，ref_count 归零时删除实体。
-func (s *Store) blobsRoot() string {
-	return filepath.Join(s.dataDir, "blobs")
+func (s *Store) BlobStorageName() string { return s.blobs.Name() }
+
+func blobKey(hash string) string { return "blobs/" + hash[:2] + "/" + hash }
+
+func (s *Store) putBlob(hash string, size int64, data io.Reader) error {
+	if err := s.blobs.Put(context.Background(), hash, size, data); err != nil {
+		return fmt.Errorf("store artifact: %w", err)
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO blobs(hash, size, ref_count, created_at) VALUES(?,?,1,?)
+		ON CONFLICT(hash) DO UPDATE SET ref_count = ref_count + 1
+	`, hash, size, time.Now().Format(timeLayout))
+	return err
 }
 
-func (s *Store) blobPath(hash string) string {
-	if len(hash) < 2 {
-		return filepath.Join(s.blobsRoot(), hash)
-	}
-	return filepath.Join(s.blobsRoot(), hash[:2], hash)
-}
-
-func (s *Store) ingestBlob(data []byte) (hash string, err error) {
-	sum := sha256.Sum256(data)
-	hash = hex.EncodeToString(sum[:])
-	blobPath := s.blobPath(hash)
-	now := time.Now().Format(timeLayout)
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	var ref int
-	err = tx.QueryRow(`SELECT ref_count FROM blobs WHERE hash = ?`, hash).Scan(&ref)
-	switch {
-	case err == sql.ErrNoRows:
-		if err := s.writeBlobFile(blobPath, data); err != nil {
-			return "", err
+func (s *Store) materializeBlob(hash, dest string) error {
+	if local, ok := s.blobs.(localBlobStorage); ok {
+		staging, err := os.MkdirTemp(filepath.Dir(dest), ".artifact-link-*")
+		if err != nil {
+			return err
 		}
-		if _, err := tx.Exec(
-			`INSERT INTO blobs(hash, size, ref_count, created_at) VALUES(?,?,1,?)`,
-			hash, len(data), now,
-		); err != nil {
-			_ = os.Remove(blobPath)
-			return "", err
-		}
-	case err != nil:
-		return "", err
-	default:
-		// 数据库记录可能因人工恢复、磁盘故障或旧版本清理缺陷而残留，
-		// 但实体文件已经丢失。当前上传携带完整内容，可安全自愈后再增加引用。
-		if err := s.writeBlobFile(blobPath, data); err != nil {
-			return "", err
-		}
-		if _, err := tx.Exec(`UPDATE blobs SET ref_count = ref_count + 1 WHERE hash = ?`, hash); err != nil {
-			return "", err
+		tmp := filepath.Join(staging, "file")
+		defer func() {
+			_ = os.Remove(tmp)
+			_ = os.Remove(staging)
+		}()
+		if err := os.Link(local.path(hash), tmp); err == nil {
+			return os.Rename(tmp, dest)
 		}
 	}
-
-	if err := tx.Commit(); err != nil {
-		return "", err
-	}
-	return hash, nil
-}
-
-func (s *Store) ingestBlobFromReader(r io.Reader) (hash string, err error) {
-	h := sha256.New()
-	data, err := io.ReadAll(io.TeeReader(r, h))
-	if err != nil {
-		return "", err
-	}
-	hash = hex.EncodeToString(h.Sum(nil))
-	blobPath := s.blobPath(hash)
-	now := time.Now().Format(timeLayout)
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	var ref int
-	err = tx.QueryRow(`SELECT ref_count FROM blobs WHERE hash = ?`, hash).Scan(&ref)
-	switch {
-	case err == sql.ErrNoRows:
-		if err := s.writeBlobFile(blobPath, data); err != nil {
-			return "", err
-		}
-		if _, err := tx.Exec(
-			`INSERT INTO blobs(hash, size, ref_count, created_at) VALUES(?,?,1,?)`,
-			hash, len(data), now,
-		); err != nil {
-			_ = os.Remove(blobPath)
-			return "", err
-		}
-	case err != nil:
-		return "", err
-	default:
-		if err := s.writeBlobFile(blobPath, data); err != nil {
-			return "", err
-		}
-		if _, err := tx.Exec(`UPDATE blobs SET ref_count = ref_count + 1 WHERE hash = ?`, hash); err != nil {
-			return "", err
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return "", err
-	}
-	return hash, nil
-}
-
-func (s *Store) writeBlobFile(blobPath string, data []byte) error {
-	if _, err := os.Stat(blobPath); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(blobPath), 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(blobPath), ".blob-*")
+	in, err := s.blobs.Open(context.Background(), hash)
 	if err != nil {
 		return err
 	}
-	tmpPath := tmp.Name()
-	cleanup := true
+	defer func() { _ = in.Close() }()
+	return writeArtifactAtomically(dest, in)
+}
+
+func (s *Store) replaceArtifact(path string, r io.Reader) error {
+	// Spool once to compute the content key without sizing memory by upload size.
+	f, err := os.CreateTemp("", "express233-artifact-*")
+	if err != nil {
+		return err
+	}
 	defer func() {
-		_ = tmp.Close()
-		if cleanup {
-			_ = os.Remove(tmpPath)
-		}
+		_ = f.Close()
+		_ = os.Remove(f.Name())
 	}()
-	if _, err := tmp.Write(data); err != nil {
+	h := sha256.New()
+	size, err := io.Copy(io.MultiWriter(f, h), r)
+	if err != nil {
 		return err
 	}
-	if err := tmp.Close(); err != nil {
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	cleanup = false
-	if err := os.Rename(tmpPath, blobPath); err != nil {
-		if _, statErr := os.Stat(blobPath); statErr == nil {
-			return nil
-		}
+	hash := hex.EncodeToString(h.Sum(nil))
+
+	s.artifactMu.Lock()
+	defer s.artifactMu.Unlock()
+	oldHash, err := hashFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	if err := s.putBlob(hash, size, f); err != nil {
+		return err
+	}
+	if err := s.materializeBlob(hash, path); err != nil {
+		return errors.Join(err, s.decrementBlobRef(hash))
+	}
+	if oldHash != "" {
+		return s.decrementBlobRef(oldHash)
 	}
 	return nil
 }
 
-func (s *Store) linkBlobToVersion(hash, versionPath string) error {
-	blobPath := s.blobPath(hash)
-	if err := os.Remove(versionPath); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	if err := os.Link(blobPath, versionPath); err == nil {
-		return nil
-	}
-	return copyBlobFile(blobPath, versionPath)
-}
-
 func (s *Store) releaseBlobLink(path string) error {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
+	s.artifactMu.Lock()
+	defer s.artifactMu.Unlock()
+	hash, err := hashFile(path)
+	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
-	hash, err := s.hashFile(path)
 	if err != nil {
 		return err
 	}
@@ -179,7 +110,7 @@ func (s *Store) releaseBlobLink(path string) error {
 }
 
 func (s *Store) releaseVersionDir(root string) error {
-	if _, err := os.Stat(root); os.IsNotExist(err) {
+	if _, err := os.Stat(root); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
@@ -193,43 +124,40 @@ func (s *Store) releaseVersionDir(root string) error {
 	})
 }
 
-func (s *Store) releaseProjectDir(root string) error {
-	return s.releaseVersionDir(root)
-}
-
 func (s *Store) decrementBlobRef(hash string) error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	var ref int
-	err = tx.QueryRow(`SELECT ref_count FROM blobs WHERE hash = ?`, hash).Scan(&ref)
-	if err == sql.ErrNoRows {
-		return tx.Commit()
-	}
-	if err != nil {
-		return err
-	}
-	ref--
-	if ref <= 0 {
-		if _, err := tx.Exec(`DELETE FROM blobs WHERE hash = ?`, hash); err != nil {
-			return err
-		}
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-		_ = os.Remove(s.blobPath(hash))
+	var refs int
+	err := s.db.QueryRow(`UPDATE blobs SET ref_count = MAX(0, ref_count - 1) WHERE hash = ? RETURNING ref_count`, hash).Scan(&refs)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && refs > 0) {
 		return nil
 	}
-	if _, err := tx.Exec(`UPDATE blobs SET ref_count = ? WHERE hash = ?`, ref, hash); err != nil {
+	if err != nil {
 		return err
 	}
-	return tx.Commit()
+	// A physical cleanup failure leaves the zero-reference row available
+	// through the storage index, without failing the committed version change.
+	_ = s.deleteUnreferencedBlob(hash)
+	return nil
 }
 
-func (s *Store) hashFile(path string) (string, error) {
+// The caller holds artifactMu. A failed delete leaves a zero-reference row
+// so a later upload can reuse the object or an operator can retry cleanup.
+func (s *Store) deleteUnreferencedBlob(hash string) error {
+	var refs int
+	err := s.db.QueryRow(`SELECT ref_count FROM blobs WHERE hash = ?`, hash).Scan(&refs)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if refs > 0 {
+		return fmt.Errorf("blob still has %d references", refs)
+	}
+	if err := s.blobs.Delete(context.Background(), hash); err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`DELETE FROM blobs WHERE hash = ? AND ref_count = 0`, hash)
+	return err
+}
+
+func hashFile(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
@@ -242,63 +170,7 @@ func (s *Store) hashFile(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func (s *Store) isLinkedToBlob(path string) (bool, error) {
-	hash, err := s.hashFile(path)
-	if err != nil {
-		return false, err
-	}
-	bp := s.blobPath(hash)
-	st1, err1 := os.Stat(path)
-	st2, err2 := os.Stat(bp)
-	if err1 != nil || err2 != nil {
-		return false, nil
-	}
-	return os.SameFile(st1, st2), nil
-}
-
-func (s *Store) adoptFileToBlob(path string) error {
-	linked, err := s.isLinkedToBlob(path)
-	if err != nil {
-		return err
-	}
-	if linked {
-		return nil
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	hash, err := s.ingestBlob(data)
-	if err != nil {
-		return err
-	}
-	if err := os.Remove(path); err != nil {
-		return err
-	}
-	return s.linkBlobToVersion(hash, path)
-}
-
-func copyBlobFile(src, dst string) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = in.Close() }()
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = out.Close() }()
-	if _, err := io.Copy(out, in); err != nil {
-		return err
-	}
-	return out.Close()
-}
-
-// BlobStats 返回 blob 去重存储统计（调试/运维）。
+// BlobStats 返回 blob 去重存储统计。
 type BlobStats struct {
 	BlobCount  int   `json:"blob_count"`
 	TotalBytes int64 `json:"total_bytes"`
@@ -318,32 +190,5 @@ func isVersionDataFile(userdataRoot, path string) bool {
 		return false
 	}
 	parts := strings.Split(filepath.ToSlash(rel), "/")
-	// {slug}/projects/{project}/{version}/...
-	if len(parts) < 5 || parts[1] != "projects" {
-		return false
-	}
-	return true
-}
-
-func (s *Store) writeVersionBlob(tenantID int64, projectName, version, relPath string, r io.Reader) error {
-	path, err := s.versionFilePath(tenantID, projectName, version, relPath)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	if _, err := os.Stat(path); err == nil {
-		if err := s.releaseBlobLink(path); err != nil {
-			return err
-		}
-	}
-	hash, err := s.ingestBlobFromReader(r)
-	if err != nil {
-		return fmt.Errorf("blob ingest: %w", err)
-	}
-	if err := s.linkBlobToVersion(hash, path); err != nil {
-		return err
-	}
-	return s.setVersionFileMode(tenantID, projectName, version, relPath, defaultFileMode)
+	return len(parts) >= 5 && parts[1] == "projects"
 }

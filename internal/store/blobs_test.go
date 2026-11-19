@@ -1,6 +1,8 @@
 package store
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,16 +122,17 @@ func TestIngestBlobRepairsMissingBlobFile(t *testing.T) {
 	defer st.Close()
 
 	payload := []byte("repair-missing-blob\n")
-	hash, err := st.ingestBlob(payload)
-	if err != nil {
+	dest := filepath.Join(dir, "test-projection")
+	hash := fmt.Sprintf("%x", sha256.Sum256(payload))
+	if err := st.replaceArtifact(dest, strings.NewReader(string(payload))); err != nil {
 		t.Fatal(err)
 	}
-	path := st.blobPath(hash)
+	path := filepath.Join(dir, filepath.FromSlash(blobKey(hash)))
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := st.ingestBlobFromReader(strings.NewReader(string(payload))); err != nil {
+	if err := st.replaceArtifact(dest, strings.NewReader(string(payload))); err != nil {
 		t.Fatal(err)
 	}
 	repaired, err := os.ReadFile(path)
@@ -166,8 +169,12 @@ func TestBlobMigrationAdoptsExistingFiles(t *testing.T) {
 		t.Fatalf("migration stats: %+v", stats)
 	}
 
-	linked, err := st.isLinkedToBlob(filepath.Join(userdata, "cfg", "game.properties"))
-	if err != nil || !linked {
-		t.Fatalf("expected migrated file linked to blob: linked=%v err=%v", linked, err)
+	projection, err := os.Stat(filepath.Join(userdata, "cfg", "game.properties"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob, err := os.Stat(filepath.Join(dir, filepath.FromSlash(blobKey(fmt.Sprintf("%x", sha256.Sum256(payload))))))
+	if err != nil || !os.SameFile(projection, blob) {
+		t.Fatalf("expected migrated file linked to blob: %v", err)
 	}
 }

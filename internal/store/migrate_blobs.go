@@ -2,6 +2,8 @@ package store
 
 import (
 	"database/sql"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -39,10 +41,37 @@ CREATE TABLE IF NOT EXISTS version_file_modes (
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(s.blobsRoot(), 0o755); err != nil {
+	if err := s.checkBlobStorage(); err != nil {
 		return err
 	}
+	if local, ok := s.blobs.(localBlobStorage); ok {
+		if err := os.MkdirAll(local.root, 0o755); err != nil {
+			return err
+		}
+	}
 	return s.migrateExistingFilesToBlobs()
+}
+
+func (s *Store) checkBlobStorage() error {
+	var name string
+	err := s.db.QueryRow(`SELECT value FROM store_meta WHERE key = 'blob_storage'`).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		name = s.BlobStorageName()
+		var count int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM blobs`).Scan(&count); err != nil {
+			return err
+		}
+		if count > 0 {
+			name = "local"
+		}
+	} else if err != nil {
+		return err
+	}
+	if name != s.BlobStorageName() {
+		return fmt.Errorf("artifact storage mismatch: data uses %q, configured %q", name, s.BlobStorageName())
+	}
+	_, err = s.db.Exec(`INSERT OR IGNORE INTO store_meta(key, value) VALUES('blob_storage', ?)`, name)
+	return err
 }
 
 func (s *Store) migrateExistingFilesToBlobs() error {
@@ -70,12 +99,36 @@ func (s *Store) migrateExistingFilesToBlobs() error {
 		if !isVersionDataFile(userdata, path) {
 			return nil
 		}
-		return s.adoptFileToBlob(path)
+		return s.adoptLegacyArtifact(path, info)
 	})
 	if err != nil {
 		return err
 	}
 	return s.markBlobsMigrated()
+}
+
+func (s *Store) adoptLegacyArtifact(path string, info os.FileInfo) error {
+	hash, err := hashFile(path)
+	if err != nil {
+		return err
+	}
+	if local, ok := s.blobs.(localBlobStorage); ok {
+		if original, err := os.Stat(local.path(hash)); err == nil && os.SameFile(original, info) {
+			return nil
+		}
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	putErr := s.putBlob(hash, info.Size(), f)
+	if err := errors.Join(putErr, f.Close()); err != nil {
+		return err
+	}
+	if err := s.materializeBlob(hash, path); err != nil {
+		return errors.Join(err, s.decrementBlobRef(hash))
+	}
+	return nil
 }
 
 func (s *Store) markBlobsMigrated() error {

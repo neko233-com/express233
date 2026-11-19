@@ -113,10 +113,12 @@ express233-server status
 
 默认访问 [http://127.0.0.1:23380](http://127.0.0.1:23380)。数据目录优先使用 `EXPRESS233_DATA`，否则为 `~/.express233-server`。使用管理员分配的账号登录；首次安装应先完成管理员改密并创建日常账号，再开放网络入口。
 
-也可从源码体验：安装 Go 1.26 后运行 [run-server.cmd](run-server.cmd) 或 [run-server.sh](run-server.sh)。这些开发脚本可能停止已有本地 Express233 实例；隔离启动可使用独立端口和数据目录：
+从源码运行需要 Go 1.26 和 Node.js 24 LTS。开发脚本 [run-server.cmd](run-server.cmd) 和 [run-server.sh](run-server.sh) 先构建 Web 控制台，再启动服务。如果需要与已有实例隔离，可以指定独立端口和数据目录。
 
 ```bash
-go run ./cmd/express233-server serve --addr 127.0.0.1:23381 --data .data-demo
+npm --prefix frontend ci
+npm --prefix frontend run build
+CGO_ENABLED=0 go run ./cmd/express233-server serve --addr 127.0.0.1:23381 --data .data-demo
 ```
 
 ### 游戏服节点
@@ -206,19 +208,19 @@ servers:
 
 ## 开发与发布
 
-工具链为 Go 1.26、Node.js 24 LTS（浏览器测试）和 golangci-lint v2。
+控制台使用 Vite+、React 19、React Compiler、React Router 与 TypeScript，生产构建嵌入纯 Go 服务端。Node.js 24 LTS 用于前端构建与无头浏览器验证。
 
 ```bash
-go test ./...
-golangci-lint run --timeout=5m
-# 浏览器验收是独立流程：
-cd test/visual
-npm ci
-npx playwright install chromium
-npm test
+CGO_ENABLED=0 go test ./...
+CGO_ENABLED=0 golangci-lint run --timeout=5m
+npm --prefix frontend ci
+npm --prefix frontend run check
+bash visual-e2e.sh
 ```
 
-本地脚本包括 [build-all.cmd](build-all.cmd) / [build-all.sh](build-all.sh)、[visual-e2e.cmd](visual-e2e.cmd) / [visual-e2e.sh](visual-e2e.sh)。开发脚本启用 `EXPRESS233_WEB_DIR=internal/api/web` 后，静态页面修改可通过刷新查看。
+Windows 使用 [build-all.cmd](build-all.cmd) 和 [visual-e2e.cmd](visual-e2e.cmd)。浏览器验证使用无头 Agent Browser 和 Chrome。首次需要安装 Chrome 时运行 `npm --prefix test/browser run install-browser`。前端开发可运行 `npm --prefix frontend run dev`，默认代理到 `127.0.0.1:23380`，可用 `EXPRESS233_DEV_BACKEND` 覆盖。
+
+项目级 CodeGraph233 MCP 从仓库根目录读取 `.codegraph233.json`。索引通过 `cg233_status` 和 `cg233_index` 查看与维护。默认制品存储和后续对象存储接入方式见 [制品存储策略](docs/ARTIFACT_STORAGE.md)。
 
 只有目标 commit 的 `golangci-lint`、三平台 `test`、`build binaries`、`validate scripts` 全部成功，才能推送发布标签。Release 工作流会再次检查；浏览器测试独立运行，不代替发布门禁或真实游戏服验收。详见 [GitHub Actions](docs/GITHUB_ACTIONS.md) 与 [AGENTS.md](AGENTS.md)。
 

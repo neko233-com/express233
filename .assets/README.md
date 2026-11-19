@@ -1,44 +1,23 @@
 # README 截图
 
-这些图片由 `test/visual/tests/readme-assets.spec.ts` 使用 Chromium 截取当前真实 Web UI，分辨率为 **1440 × 900**，未拼接或替换页面内容。截图基于 v1.2.1 工作流，生成于 2026-10-14。
-
-全部数据均为独立本地测试实例中的虚构演示数据：项目 `game-demo`，区服 `1001`、`1002`、`1003`，机器 `game-node-a`、`game-node-b`。版本包中的程序和重启脚本只是文档夹具，不是可部署的游戏程序。页面中的 `root @ default` 是隔离测试实例自动建立的演示账号。
-
-重新生成时，脚本会为 `game-demo` 项目名追加随机后缀，避免与已有测试数据或上次失败留下的项目冲突；测试结束后清理本次创建的主机并恢复触及的分服配置。含预演历史的截图项目保留在本次隔离数据目录，便于排查，不依赖项目删除 API。
+这些截图由无头 Agent Browser 在 Express233 v1.4.0 的本地隔离实例上生成，桌面尺寸为 **1440 × 900**。数据来自虚构项目 `game-demo`、区服 `1001` 至 `1003` 和保留测试网段里的机器绑定。部署预演仅解析目标，正式部署确认在截图后取消。
 
 | 图片 | 内容 |
 | --- | --- |
-| `deployment-workflow.png` | 当前项目、最新已发布版本、3 个 SSH 目标及真实预演结果 |
-| `deployment-confirm.png` | 正式部署前逐一核对版本、server_id、机器和备份策略；截图后取消 |
-| `multi-version.png` | 2 个已发布版本、1 个草稿，最新版本与文件内容 |
-| `server-config.png` | 以表单编辑分服参数，显示 3 个 server_id |
-| `template-replacement.png` | 原始模板与 1001 分服覆盖后的真实配置对照 |
-| `file-tags.png` | 草稿文件树和平台标签 |
-| `version-diff.png` | 1.2.0 与 1.2.1 的真实配置差异 |
-| `storage-space.png` | 本地存储统计、版本目录和文件详情 |
+| `deployment-workflow.png` | 最新已发布版本、SSH 目标及预演结果 |
+| `deployment-confirm.png` | 逐个核对本次部署目标、版本和备份策略 |
+| `multi-version.png` | 两个已发布版本、一个草稿与文件浏览 |
+| `server-config.png` | 按 server_id 编辑覆盖参数 |
+| `template-replacement.png` | 原始配置和替换后的配置 |
+| `file-tags.png` | 上传标签和批量处理 |
+| `version-diff.png` | 已发布版本之间的配置差异 |
+| `storage-space.png` | 容量、目录和关联删除范围 |
 
-## 重新生成
-
-前提：Go、Node.js 24 或更新版本，以及 Playwright Chromium 已安装。在仓库根目录用 PowerShell 执行：
+从仓库根目录运行以下命令，先把截图写入独立目录，检查可读性后再更新 README 图片。
 
 ```powershell
-$captureStamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$captureRoot = Join-Path (Get-Location) ".tmp-readme-assets/$captureStamp"
-$env:CI = '1'
-$env:EXPRESS233_VISUAL_PORT = '39493'
-$env:EXPRESS233_BASE_URL = 'http://127.0.0.1:39493'
-$env:EXPRESS233_VISUAL_DATA_DIR = Join-Path $captureRoot 'data'
-$env:PLAYWRIGHT_HTML_REPORT = Join-Path $captureRoot 'report'
-Push-Location test/visual
-try {
-  npx playwright test tests/readme-assets.spec.ts --retries=0 --output="$captureRoot/results"
-} finally {
-  Pop-Location
-}
+$env:EXPRESS233_BROWSER_CAPTURE = Join-Path $PWD '.tmp-readme-screenshots'
+.\visual-e2e.cmd
 ```
 
-`CI=1` 禁止复用已运行的服务；数据目录每次独立创建。测试自动启动本地 Go 服务并在结束后关闭。仅允许 loopback 地址，主机使用保留测试网段且关闭健康检查，只执行 `dry_run=true` 预演，正式部署确认框会取消，不连接 SSH、不调用外部 Hook。
-
-脚本通过真实本地 API 准备数据，通过页面交互选择版本和配置。每张截图前校验对应内容、等待字体和 toast 消失。生成后仍需逐张检查可读性；这些 PNG 会覆盖本目录同名文件，报告与测试临时数据留在 Git 忽略的 `.tmp-readme-assets` 中。
-
-只验证截图流程、不更新已选定图片时，可在运行前设置 `$env:EXPRESS233_README_ASSETS_DIR = Join-Path $captureRoot 'screenshots'`，把图片写入临时目录。
+已安装 Chrome 时可直接运行。需要下载时先执行 `npm --prefix test/browser ci` 和 `npm --prefix test/browser run install-browser`。可以设置 `EXPRESS233_BROWSER_SERVER`，用同一脚本验收已下载的正式发行二进制。

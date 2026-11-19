@@ -210,6 +210,7 @@ func (s *Server) Router() http.Handler {
 	})
 
 	r.Get("/*", s.handleStatic)
+	r.Head("/*", s.handleStatic)
 	return r
 }
 

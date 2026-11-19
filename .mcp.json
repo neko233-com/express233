@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "codegraph233": {
+      "type": "stdio",
+      "command": "codegraph233",
+      "args": [
+        "serve",
+        "--root",
+        "."
+      ]
+    }
+  }
+}

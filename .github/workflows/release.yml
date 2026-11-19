@@ -48,19 +48,21 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
+      - uses: ./.github/actions/build-console
+
       - name: Resolve version
         id: ver
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          if [ -n "${{ github.event.inputs.tag }}" ]; then
-            echo "version=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          fi
+          tag="${INPUT_TAG:-${GITHUB_REF_NAME}}"
+          echo "version=${tag}" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Build artifacts
         env:
           VERSION: ${{ steps.ver.outputs.version }}
-          COMMIT: ${{ github.sha }}
+          COMMIT: ${{ steps.ver.outputs.commit }}
         run: |
           set -euo pipefail
           LDFLAGS="-s -w \
@@ -84,7 +86,7 @@ jobs:
               "schema": "express233.artifact-provenance/v1",
               "version": os.environ["VERSION"],
               "repository": os.environ["GITHUB_SERVER_URL"] + "/" + os.environ["GITHUB_REPOSITORY"],
-              "ref": os.environ["GITHUB_REF"],
+              "ref": "refs/tags/" + os.environ["VERSION"],
               "commit": os.environ["COMMIT"],
               "run_id": os.environ["GITHUB_RUN_ID"],
               "run_url": os.environ["GITHUB_SERVER_URL"] + "/" + os.environ["GITHUB_REPOSITORY"] + "/actions/runs/" + os.environ["GITHUB_RUN_ID"],
@@ -115,12 +117,10 @@ jobs:
 
       - name: Resolve tag name
         id: tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          if [ -n "${{ github.event.inputs.tag }}" ]; then
-            echo "name=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          fi
+          echo "name=${INPUT_TAG:-${GITHUB_REF_NAME}}" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

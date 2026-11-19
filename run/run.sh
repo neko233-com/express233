@@ -4,7 +4,10 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 export EXPRESS233_DATA="${EXPRESS233_DATA:-$ROOT/.data}"
 export EXPRESS233_ADDR="${EXPRESS233_ADDR:-127.0.0.1:23380}"
-export EXPRESS233_WEB_DIR="${EXPRESS233_WEB_DIR:-$ROOT/internal/api/web}"
+export CGO_ENABLED=0
+if [[ -z "${EXPRESS233_WEB_DIR:-}" ]]; then
+  bash scripts/build-console.sh
+fi
 mkdir -p "$EXPRESS233_DATA"
 
 HOST="${HOST:-127.0.0.1}"
@@ -49,7 +52,7 @@ echo ""
 echo "-----------------"
 echo "访问地址 = http://${HOST}:${PORT}"
 echo "数据目录 = ${EXPRESS233_DATA}"
-echo "静态热重载 = ${EXPRESS233_WEB_DIR}"
+echo "控制台资源 = ${EXPRESS233_WEB_DIR:-嵌入式前端构建}"
 echo "默认账号 = root / root"
 echo "-----------------"
 echo ""

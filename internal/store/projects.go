@@ -108,7 +108,7 @@ func (s *Store) DeleteProject(tenantID, id int64) error {
 		return err
 	}
 	projDir := filepath.Join(root, name)
-	_ = s.releaseProjectDir(projDir)
+	_ = s.releaseVersionDir(projDir)
 	_ = os.RemoveAll(projDir)
 	return nil
 }

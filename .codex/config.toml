@@ -1,0 +1,3 @@
+[mcp_servers.codegraph233]
+command = "codegraph233"
+args = ["serve", "--root", "."]

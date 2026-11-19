@@ -27,7 +27,14 @@ func (s *Store) WriteVersionFile(tenantID int64, projectName, version, relPath s
 	if err := CheckConfigBasenameConflict(root, relPath); err != nil {
 		return err
 	}
-	return s.writeVersionBlob(tenantID, projectName, version, relPath, r)
+	dest, err := SafeJoinVersion(root, relPath)
+	if err != nil {
+		return err
+	}
+	if err := s.replaceArtifact(dest, r); err != nil {
+		return err
+	}
+	return s.setVersionFileMode(tenantID, projectName, version, relPath, defaultFileMode)
 }
 
 // DeleteVersionFile 删除版本内文件（仅 draft）。
@@ -104,25 +111,14 @@ func (s *Store) ExtractZipToVersion(tenantID int64, projectName, version string,
 				return fmt.Errorf("zip path escape: %s", f.Name)
 			}
 		}
-		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-			return err
-		}
-		if _, err := os.Stat(dest); err == nil {
-			if err := s.releaseBlobLink(dest); err != nil {
-				return err
-			}
-		}
 		rc, err := f.Open()
 		if err != nil {
 			return err
 		}
-		hash, ingestErr := s.ingestBlobFromReader(rc)
+		ingestErr := s.replaceArtifact(dest, rc)
 		_ = rc.Close()
 		if ingestErr != nil {
 			return ingestErr
-		}
-		if err := s.linkBlobToVersion(hash, dest); err != nil {
-			return err
 		}
 		if err := s.setVersionFileMode(tenantID, projectName, version, name, f.Mode()); err != nil {
 			return err
@@ -185,19 +181,7 @@ func (s *Store) ExtractTarToVersion(tenantID int64, projectName, version string,
 				return fmt.Errorf("tar path escape: %s", hdr.Name)
 			}
 		}
-		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-			return err
-		}
-		if _, err := os.Stat(dest); err == nil {
-			if err := s.releaseBlobLink(dest); err != nil {
-				return err
-			}
-		}
-		hash, err := s.ingestBlobFromReader(tr)
-		if err != nil {
-			return err
-		}
-		if err := s.linkBlobToVersion(hash, dest); err != nil {
+		if err := s.replaceArtifact(dest, tr); err != nil {
 			return err
 		}
 		if err := s.setVersionFileMode(tenantID, projectName, version, name, os.FileMode(hdr.Mode)); err != nil {

@@ -1,52 +1,15 @@
 ---
 name: express233-ui
-description: >-
-  优化 express233 Web 控制台 UI/UX。遵循 AGENTS.md 与 New API 暗黑风格：深灰侧栏、翠绿主色、
-  左项目栏 + 内横向 Tab。修改 internal/api/web 前必读。
+description: 维护 Express233 React 控制台、Geist 暗色配色、路由和 UI 行为。
 ---
 
-# express233 控制台 UI
+# Express233 控制台
 
-## 何时使用
+源码在 `frontend/src`。先阅读 [AGENTS.md](../../../AGENTS.md)，按影响范围使用项目 CodeGraph233 MCP 查询路由、组件和 API 调用。控制台使用 Vite+、React 19、React Compiler、React Router 与 TypeScript。
 
-- 用户抱怨 UI 丑、难用、要暗黑 / New API 风格。
-- 改 `internal/api/web/index.html`、`style.css`、`app.js` 的布局或视觉。
+- 使用 `style.css` 的黑、灰、白设计令牌。白色用于主操作，蓝色用于选中和焦点，绿、红、琥珀用于语义状态。
+- 保留侧栏项目列表和工作区页签语义。新页签使用路由，并验证深链刷新。
+- 通过 `api.ts` 访问原有 HTTP API，保持鉴权、上传、错误和发布契约。
+- 保留 `data-testid`、键盘操作，以及移动端和长输出的滚动边界。
 
-## 必读
-
-1. 仓库根目录 [AGENTS.md](../../../AGENTS.md) — 设计令牌、布局、禁止项。
-2. 勿破坏 `data-testid`（见 `test/visual/tests/server-flows.spec.ts`）。
-
-## New API 暗黑要点（执行清单）
-
-- 背景：`#09090b` 主区，`#0f0f11` 侧栏，`#18181b` 卡片（zinc 暗色）。
-- 边框：`rgba(255,255,255,0.06)`，不用黑色硬边。
-- 主色：`#10b981`；悬停 `#34d399`。
-- 文字：主 `#fafafa`，次 `#a1a1aa`（`--text-muted`）。
-- 紧凑：12.5px 正文、`--space-*` 间距、侧栏 232px。
-- 侧栏项：hover 微亮底；选中 = 左侧 3px 主色条 + `rgba(34,197,94,0.12)` 底。
-- 项目 Tab：底部 2px 主色指示条，非「白底蓝字」。
-- 登录：居中暗色卡片 + 弱光晕，禁止浅色 Apple 卡片。
-
-## 文件职责
-
-| 文件 | 职责 |
-|------|------|
-| `index.html` | 结构、侧栏、Tab、`data-testid` |
-| `style.css` | 全部视觉（仅改变量 + 类） |
-| `app.js` | 逻辑；样式用 class 而非内联 |
-
-## 禁止
-
-- 引入 React/Vue 构建链（保持静态 embed）。
-- 删除 JWT / 登录分流逻辑。
-- 把发布流程绑进 Playwright 默认 CI。
-
-## 验收
-
-```cmd
-run-server.cmd
-visual-e2e.cmd
-```
-
-浏览器：登录 → 建项目 → 版本 → 预览 → 发布；侧栏与 Tab 切换无错位。
+从仓库根目录运行 `npm --prefix frontend run check`，然后执行 `visual-e2e.cmd` 或 `bash visual-e2e.sh`，用无头 Agent Browser 验证打包后的 Go 服务。详见 [浏览器验收](../express233-visual-verify/SKILL.md)。

@@ -20,6 +20,8 @@
 
 ## 参考与示例
 
+- [制品存储策略](ARTIFACT_STORAGE.md)说明默认本地布局、引用管理和后续对象存储的接入方式。
+
 - [OpenAPI](openapi.yaml)：运行时同一份规范位于 `/api/openapi.yaml`，Swagger UI 位于 `/docs/`。
 - [分服配置示例](../configs/server.yaml.example)：`servers.<server_id>.replacements`，按 basename 覆盖。
 - [post-hook 示例](../configs/post-hook.yaml.example)：交付后的脚本条件与参数。

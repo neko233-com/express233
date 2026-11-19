@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -15,12 +17,24 @@ import (
 
 // Store SQLite 持久化与文件布局。
 type Store struct {
-	db      *sql.DB
-	dataDir string
+	db         *sql.DB
+	dataDir    string
+	blobs      BlobStorage
+	artifactMu sync.Mutex
+	indexMu    sync.Mutex
 }
 
 // Open 打开或创建数据目录。
 func Open(dataDir string) (*Store, error) {
+	return OpenWithBlobStorage(dataDir, localBlobStorage{root: filepath.Join(dataDir, "blobs")})
+}
+
+// OpenWithBlobStorage opens metadata and version projections in dataDir and
+// uses the supplied backend for content-addressed objects.
+func OpenWithBlobStorage(dataDir string, backend BlobStorage) (*Store, error) {
+	if backend == nil || strings.TrimSpace(backend.Name()) == "" {
+		return nil, fmt.Errorf("artifact storage backend name required")
+	}
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -34,7 +48,7 @@ func Open(dataDir string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	s := &Store{db: db, dataDir: dataDir}
+	s := &Store{db: db, dataDir: dataDir, blobs: backend}
 	if err := s.migrate(); err != nil {
 		_ = db.Close()
 		return nil, err

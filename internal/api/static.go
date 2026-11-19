@@ -1,115 +1,102 @@
 package api
 
 import (
+	"bytes"
 	"embed"
 	"io/fs"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
-//go:embed web/*
+// Embed the directory so Go-only tests and tools can compile from a clean checkout.
+// The server build pipeline must generate web/dist before packaging.
+//
+//go:embed web
 var webFS embed.FS
 
-// webDir 非空时从磁盘读取 web 静态文件（开发热重载），由 EXPRESS233_WEB_DIR 设置。
-var webDir string
+var webDir = resolveWebDir(os.Getenv("EXPRESS233_WEB_DIR"))
 
-func init() {
-	if d := os.Getenv("EXPRESS233_WEB_DIR"); d != "" {
-		if abs, err := filepath.Abs(d); err == nil {
-			webDir = abs
-		} else {
-			webDir = d
-		}
+func resolveWebDir(dir string) string {
+	if dir == "" {
+		return ""
 	}
+	if absolute, err := filepath.Abs(dir); err == nil {
+		return absolute
+	}
+	return dir
 }
 
-// DevWebDir 返回开发静态目录；空表示使用 go:embed。
-func DevWebDir() string {
-	return webDir
-}
+// DevWebDir returns the optional frontend build directory served from disk.
+func DevWebDir() string { return webDir }
 
 func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	if webDir != "" {
-		s.serveStaticFromDisk(w, r)
-		return
-	}
-	s.serveStaticEmbedded(w, r)
-}
-
-func (s *Server) serveStaticEmbedded(w http.ResponseWriter, r *http.Request) {
-	sub, err := fs.Sub(webFS, "web")
-	if err != nil {
-		http.Error(w, "static fs", 500)
-		return
-	}
-	path := staticPath(r.URL.Path)
-	data, err := fs.ReadFile(sub, path)
-	if err != nil {
-		data, err = fs.ReadFile(sub, "index.html")
+		root, err := os.OpenRoot(webDir)
 		if err != nil {
-			http.NotFound(w, r)
+			http.Error(w, "console build directory unavailable", http.StatusServiceUnavailable)
 			return
 		}
+		defer func() { _ = root.Close() }()
+		serveConsole(w, r, root.FS(), true)
+		return
 	}
-	writeStatic(w, path, data, false)
+
+	dist, err := fs.Sub(webFS, "web/dist")
+	if err != nil {
+		http.Error(w, "console build unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	serveConsole(w, r, dist, false)
 }
 
-func (s *Server) serveStaticFromDisk(w http.ResponseWriter, r *http.Request) {
-	path := staticPath(r.URL.Path)
-	full, err := safeStaticFile(webDir, path)
-	if err != nil {
-		full, err = safeStaticFile(webDir, "index.html")
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		path = "index.html"
+func serveConsole(w http.ResponseWriter, r *http.Request, assets fs.FS, dev bool) {
+	name := strings.TrimPrefix(r.URL.Path, "/")
+	if name == "" {
+		name = "index.html"
 	}
-	data, err := os.ReadFile(full)
-	if err != nil {
+	// Assets and API paths must not resolve to the SPA shell when absent.
+	isAsset := strings.HasPrefix(name, "assets/") || name == "assets" || filepath.Ext(name) != ""
+	if name == "api" || strings.HasPrefix(name, "api/") || strings.Contains(name, "\\") ||
+		(name != "." && !fs.ValidPath(strings.TrimSuffix(name, "/"))) {
 		http.NotFound(w, r)
 		return
 	}
-	writeStatic(w, path, data, true)
-}
-
-func staticPath(urlPath string) string {
-	path := strings.TrimPrefix(urlPath, "/")
-	if path == "" || path == "/" {
-		return "index.html"
+	if !isAsset {
+		name = "index.html"
 	}
-	return path
-}
-
-func safeStaticFile(root, name string) (string, error) {
-	clean := filepath.Clean(name)
-	if clean == "." || strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
-		return "", os.ErrInvalid
+	data, err := fs.ReadFile(assets, name)
+	if err != nil {
+		if name == "index.html" {
+			http.Error(w, "console assets missing: run npm --prefix frontend ci and npm --prefix frontend run build before building the server", http.StatusServiceUnavailable)
+		} else {
+			http.NotFound(w, r)
+		}
+		return
 	}
-	full := filepath.Join(root, clean)
-	rel, err := filepath.Rel(root, full)
-	if err != nil || strings.HasPrefix(rel, "..") {
-		return "", os.ErrInvalid
+	contentType := mime.TypeByExtension(filepath.Ext(name))
+	switch filepath.Ext(name) {
+	case ".html":
+		contentType = "text/html"
+	case ".js":
+		contentType = "application/javascript"
+	case ".css":
+		contentType = "text/css"
 	}
-	if _, err := os.Stat(full); err != nil {
-		return "", err
+	if contentType != "" {
+		w.Header().Set("Content-Type", contentType)
 	}
-	return full, nil
-}
-
-func writeStatic(w http.ResponseWriter, path string, data []byte, dev bool) {
-	ctype := "text/html"
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	switch {
-	case strings.HasSuffix(path, ".js"):
-		ctype = "application/javascript"
-	case strings.HasSuffix(path, ".css"):
-		ctype = "text/css"
-	}
-	w.Header().Set("Content-Type", ctype)
-	if dev {
+	case dev:
 		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+	case strings.HasPrefix(name, "assets/"):
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	default:
+		w.Header().Set("Cache-Control", "no-cache")
 	}
-	_, _ = w.Write(data)
+	http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(data))
 }

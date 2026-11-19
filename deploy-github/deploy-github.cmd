@@ -2,6 +2,11 @@
 REM 不含 test/visual Playwright；可视化验收请单独运行 visual-e2e.cmd
 setlocal
 cd /d "%~dp0.."
+set "CGO_ENABLED=0"
+call scripts\build-console.cmd
+if errorlevel 1 exit /b 1
+call npm --prefix frontend run check
+if errorlevel 1 exit /b 1
 
 for /f %%i in ('git rev-parse --short HEAD 2^>nul') do set COMMIT=%%i
 if not defined COMMIT set COMMIT=local

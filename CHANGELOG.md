@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.4.0 — 2026-11-19
+
+- 用 Vite+、React 19、React Compiler 和 React Router 重构整个控制台。更新为 Geist 暗色配色，支持项目、版本和工作区深链接。
+- 保留 HTTP API、CLI、鉴权与现有项目数据。制品存储使用可注入的 Blob 策略，本地 SHA-256 去重仍为默认。流式处理上传归档。
+- CI、Docker 与发行二进制统一嵌入前端产物，使用纯 Go 构建。项目级 CodeGraph233 MCP 和无头 Agent Browser 支持维护与控制台验收。
+
 ## v1.3.0 — 2026-10-29
 
 - 生产集群部署固定工件、目标、配置和 Hook 环境摘要，执行前验证完整计划；首个目标失败停止后续发布。

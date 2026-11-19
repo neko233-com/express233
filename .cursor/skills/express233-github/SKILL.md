@@ -21,7 +21,7 @@ description: >-
 ## Node.js 24（强制）
 
 - 所有 `.github/workflows/*.yml` 设置 `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true`。
-- `test/visual` 与 Playwright workflow：**仅使用 Node 24 LTS**（`engines.node: ">=24"`）。
+- Vite+ 构建和 `test/browser` 的无头 Agent Browser 使用 Node 24 LTS。
 - 禁止在 workflow 中降级到 Node 20/22。
 
 ## CI / Lint
@@ -71,7 +71,7 @@ golangci-lint run --timeout=5m
 - [ ] `go test ./...`
 - [ ] `golangci-lint run --timeout=5m`（配置 v2）
 - [ ] 若改 workflow：已含 `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24`
-- [ ] 若改 `test/visual`：Node 24
+- [ ] 若改控制台：在 Node 24 下构建，并用无头 Agent Browser 核验
 - [ ] 发布前：`require-green-checks.sh` 或确认 GitHub Checks 全绿
 
 ## 相关文档

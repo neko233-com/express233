@@ -11,6 +11,7 @@ permissions:
 
 env:
   GO_VERSION: "1.26.x"
+  CGO_ENABLED: "0"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -37,9 +38,9 @@ jobs:
       - name: Run Go tests
         run: go test ./... -count=1 -timeout=10m
 
-      - name: Race check deployment transactions
+      - name: Stress deployment transactions with pure Go
         if: runner.os == 'Linux'
-        run: go test -race ./internal/api ./internal/store ./internal/instancelock -run 'FrozenFleet|InterruptedFleet|ControllerOwnership|DeploymentOutput' -count=1 -timeout=5m
+        run: go test ./internal/api ./internal/store ./internal/instancelock -run 'FrozenFleet|InterruptedFleet|ControllerOwnership|DeploymentOutput|ArtifactStorage' -shuffle=on -count=3 -timeout=5m
 
   scripts:
     name: validate scripts
@@ -77,6 +78,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/build-console
+        with:
+          check: "true"
 
       - uses: actions/setup-go@v5
         with:

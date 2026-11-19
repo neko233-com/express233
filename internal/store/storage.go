@@ -2,6 +2,8 @@ package store
 
 import (
 	"database/sql"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,25 +19,25 @@ type StorageCategory struct {
 
 // StorageOverview 存储总览。
 type StorageOverview struct {
-	DataDir          string            `json:"data_dir"`
-	TotalBytes       int64             `json:"total_bytes"`
-	AvailableBytes   int64             `json:"available_bytes,omitempty"`
-	Categories       []StorageCategory `json:"categories"`
-	BlobStats        BlobStats         `json:"blob_stats"`
-	IndexEntryCount  int               `json:"index_entry_count"`
-	IndexUpdatedAt   string            `json:"index_updated_at,omitempty"`
-	ProjectCount     int               `json:"project_count"`
-	VersionCount     int               `json:"version_count"`
+	DataDir         string            `json:"data_dir"`
+	TotalBytes      int64             `json:"total_bytes"`
+	AvailableBytes  int64             `json:"available_bytes,omitempty"`
+	Categories      []StorageCategory `json:"categories"`
+	BlobStats       BlobStats         `json:"blob_stats"`
+	IndexEntryCount int               `json:"index_entry_count"`
+	IndexUpdatedAt  string            `json:"index_updated_at,omitempty"`
+	ProjectCount    int               `json:"project_count"`
+	VersionCount    int               `json:"version_count"`
 }
 
 // StorageTreeNode 存储树节点。
 type StorageTreeNode struct {
-	Name      string             `json:"name"`
-	Path      string             `json:"path"`
-	Kind      string             `json:"kind"`
-	SizeBytes int64              `json:"size_bytes"`
-	Meta      map[string]string  `json:"meta,omitempty"`
-	Children  []StorageTreeNode  `json:"children,omitempty"`
+	Name      string            `json:"name"`
+	Path      string            `json:"path"`
+	Kind      string            `json:"kind"`
+	SizeBytes int64             `json:"size_bytes"`
+	Meta      map[string]string `json:"meta,omitempty"`
+	Children  []StorageTreeNode `json:"children,omitempty"`
 }
 
 // StorageDeletePlan 关联删除预览。
@@ -55,17 +57,29 @@ func (s *Store) StorageOverviewForTenant(tenantID int64) (StorageOverview, error
 	ov.DataDir = s.dataDir
 	ov.AvailableBytes = diskAvailable(s.dataDir)
 
+	blobSt, err := s.BlobStats()
+	if err != nil {
+		return ov, err
+	}
+	ov.BlobStats = blobSt
+	var localBlobs string
+	if local, ok := s.blobs.(localBlobStorage); ok {
+		localBlobs = local.root
+	}
+
 	cats := []struct {
 		name, label, path string
 	}{
 		{"userdata", "项目数据", filepath.Join(s.dataDir, "userdata")},
-		{"blobs", "Blob 去重", s.blobsRoot()},
+		{"blobs", "Blob 去重", localBlobs},
 		{"database", "SQLite", filepath.Join(s.dataDir, "express233.db")},
 		{"run", "运行态", filepath.Join(s.dataDir, "run")},
 	}
 	for _, c := range cats {
 		var bytes int64
-		if fi, err := os.Stat(c.path); err == nil {
+		if c.name == "blobs" && c.path == "" {
+			bytes = blobSt.TotalBytes
+		} else if fi, err := os.Stat(c.path); err == nil {
 			if fi.IsDir() {
 				bytes = dirSize(c.path)
 			} else {
@@ -75,12 +89,6 @@ func (s *Store) StorageOverviewForTenant(tenantID int64) (StorageOverview, error
 		ov.Categories = append(ov.Categories, StorageCategory{Name: c.name, Label: c.label, Bytes: bytes})
 		ov.TotalBytes += bytes
 	}
-
-	blobSt, err := s.BlobStats()
-	if err != nil {
-		return ov, err
-	}
-	ov.BlobStats = blobSt
 
 	idx, err := s.StorageIndexMeta()
 	if err != nil {
@@ -117,6 +125,11 @@ func (s *Store) StorageTreeAt(tenantID int64, relPath string) (StorageTreeNode, 
 	}
 	if relPath != tenantPrefix && !strings.HasPrefix(relPath, tenantPrefix+"/") && relPath != "blobs" && !strings.HasPrefix(relPath, "blobs/") {
 		return StorageTreeNode{}, fmt.Errorf("path out of tenant scope")
+	}
+	if isBlobPath(relPath) {
+		if _, local := s.blobs.(localBlobStorage); !local {
+			return s.blobTreeAt(relPath)
+		}
 	}
 	abs := filepath.Join(s.dataDir, filepath.FromSlash(relPath))
 	if !pathWithin(s.dataDir, abs) {
@@ -232,6 +245,9 @@ func mustListVersions(s *Store, projectID int64) []Version {
 func (s *Store) PlanStorageDelete(tenantID int64, relPath string, tenantRole string) (StorageDeletePlan, error) {
 	relPath = strings.Trim(filepath.ToSlash(strings.TrimSpace(relPath)), "/")
 	plan := StorageDeletePlan{Path: relPath}
+	if isBlobPath(relPath) {
+		return s.planBlobDelete(plan, tenantRole)
+	}
 	abs := filepath.Join(s.dataDir, filepath.FromSlash(relPath))
 	if !pathWithin(s.dataDir, abs) {
 		plan.DenyReason = "invalid path"
@@ -254,32 +270,6 @@ func (s *Store) PlanStorageDelete(tenantID int64, relPath string, tenantRole str
 		return plan, err
 	}
 	tenantPrefix := filepath.ToSlash(filepath.Join("userdata", t.Slug))
-	if strings.HasPrefix(relPath, "blobs/") || relPath == "blobs" {
-		if tenantRole != RoleAdmin {
-			plan.DenyReason = "admin required for blob storage"
-			return plan, nil
-		}
-		if plan.Kind == "orphan_blob" || plan.Kind == "blob" {
-			hash := filepath.Base(abs)
-			var refs int
-			err := s.db.QueryRow(`SELECT ref_count FROM blobs WHERE hash = ?`, hash).Scan(&refs)
-			if err == sql.ErrNoRows {
-				plan.Allowed = true
-				plan.Warnings = append(plan.Warnings, "删除未索引的 blob 文件")
-				return plan, nil
-			}
-			if refs > 0 {
-				plan.DenyReason = fmt.Sprintf("blob 仍被 %d 个版本文件引用", refs)
-				plan.Related = append(plan.Related, fmt.Sprintf("ref_count=%d", refs))
-				return plan, nil
-			}
-			plan.Allowed = true
-			plan.Warnings = append(plan.Warnings, "删除孤立 blob 可释放磁盘")
-			return plan, nil
-		}
-		plan.DenyReason = "cannot delete blob folder directly"
-		return plan, nil
-	}
 	if !strings.HasPrefix(relPath, tenantPrefix) {
 		plan.DenyReason = "path out of tenant scope"
 		return plan, nil
@@ -365,8 +355,7 @@ func (s *Store) ExecuteStorageDelete(tenantID int64, relPath string) error {
 		}
 		return fmt.Errorf("delete not allowed")
 	}
-	abs := filepath.Join(s.dataDir, filepath.FromSlash(relPath))
-	parts := strings.Split(relPath, "/")
+	parts := strings.Split(plan.Path, "/")
 
 	switch plan.Kind {
 	case "version":
@@ -388,15 +377,92 @@ func (s *Store) ExecuteStorageDelete(tenantID int64, relPath string) error {
 		fileRel := strings.Join(parts[5:], "/")
 		return s.DeleteVersionFile(tenantID, projectName, version, fileRel)
 	case "blob", "orphan_blob":
-		hash := filepath.Base(abs)
-		if err := os.Remove(abs); err != nil {
-			return err
-		}
-		_, _ = s.db.Exec(`DELETE FROM blobs WHERE hash = ? AND ref_count = 0`, hash)
-		return nil
+		s.artifactMu.Lock()
+		defer s.artifactMu.Unlock()
+		return s.deleteUnreferencedBlob(parts[2])
 	default:
 		return fmt.Errorf("unsupported kind %s", plan.Kind)
 	}
+}
+
+func isBlobPath(path string) bool { return path == "blobs" || strings.HasPrefix(path, "blobs/") }
+
+func (s *Store) planBlobDelete(plan StorageDeletePlan, role string) (StorageDeletePlan, error) {
+	if role != RoleAdmin {
+		plan.DenyReason = "admin required for blob storage"
+		return plan, nil
+	}
+	hash := filepath.Base(plan.Path)
+	if _, err := hex.DecodeString(hash); err != nil || len(hash) != 64 || hash != strings.ToLower(hash) || blobKey(hash) != plan.Path {
+		plan.DenyReason = "invalid blob path"
+		return plan, nil
+	}
+	plan.Kind = "blob"
+	var refs int
+	err := s.db.QueryRow(`SELECT size, ref_count FROM blobs WHERE hash = ?`, hash).Scan(&plan.SizeBytes, &refs)
+	if errors.Is(err, sql.ErrNoRows) {
+		plan.DenyReason = "not found"
+		if local, ok := s.blobs.(localBlobStorage); ok {
+			if fi, err := os.Stat(local.path(hash)); err == nil && fi.Mode().IsRegular() {
+				plan.SizeBytes = fi.Size()
+				plan.DenyReason = ""
+			}
+		}
+	} else if err != nil {
+		return plan, err
+	}
+	if refs > 0 {
+		plan.DenyReason = fmt.Sprintf("blob 仍被 %d 个版本文件引用", refs)
+		plan.Related = []string{fmt.Sprintf("ref_count=%d", refs)}
+	}
+	if plan.DenyReason == "" {
+		plan.Kind = "orphan_blob"
+		plan.Allowed = true
+		plan.Warnings = []string{"删除孤立 Blob"}
+	}
+	return plan, nil
+}
+
+func (s *Store) blobTreeAt(relPath string) (StorageTreeNode, error) {
+	root := StorageTreeNode{Name: "blobs", Path: "blobs", Kind: "folder"}
+	rows, err := s.db.Query(`SELECT hash, size FROM blobs ORDER BY hash`)
+	if err != nil {
+		return root, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var hash string
+		var size int64
+		if err := rows.Scan(&hash, &size); err != nil {
+			return root, err
+		}
+		key := blobKey(hash)
+		node := StorageTreeNode{Name: hash, Path: key, Kind: "blob", SizeBytes: size}
+		if relPath == key {
+			return node, nil
+		}
+		folderPath := "blobs/" + hash[:2]
+		i := len(root.Children) - 1
+		if i < 0 || root.Children[i].Path != folderPath {
+			root.Children = append(root.Children, StorageTreeNode{Name: hash[:2], Path: folderPath, Kind: "folder"})
+			i++
+		}
+		root.Children[i].Children = append(root.Children[i].Children, node)
+		root.Children[i].SizeBytes += size
+		root.SizeBytes += size
+	}
+	if err := rows.Err(); err != nil {
+		return root, err
+	}
+	if relPath == root.Path {
+		return root, nil
+	}
+	for _, child := range root.Children {
+		if child.Path == relPath {
+			return child, nil
+		}
+	}
+	return StorageTreeNode{}, os.ErrNotExist
 }
 
 func dirSize(root string) int64 {
@@ -420,4 +486,3 @@ func pathWithin(base, target string) bool {
 	}
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
-
