@@ -40,7 +40,7 @@ func (s *Server) handleAgentCapabilities(w http.ResponseWriter, _ *http.Request)
 			{Group: "ssh", Method: "POST", Path: "/api/push/hosts/{hostID}/check", Role: "admin", Description: "Perform exactly one SSH health check"},
 			{Group: "ssh", Method: "GET", Path: "/api/push/hosts/{hostID}/checks", Role: "admin", Description: "Read SSH health-check history"},
 			{Group: "ssh", Method: "POST", Path: "/api/push/hosts/{hostID}/servers", Role: "admin", Description: "Bind server_id and remote root"},
-			{Group: "deployment", Method: "POST", Path: "/api/projects/{id}/push-deployments", Role: "project writer", Description: "Select and deploy SSH targets serially"},
+			{Group: "deployment", Method: "POST", Path: "/api/projects/{id}/push-deployments", Role: "project writer; recovery acknowledgement requires tenant admin", Description: "Select and deploy SSH targets serially; an admin may acknowledge one exact, previously verified recovery run for one explicit server_id"},
 			{Group: "deployment", Method: "POST", Path: "/api/projects/{id}/push-tasks", Role: "project writer", Description: "Create a reusable release task"},
 			{Group: "deployment", Method: "PUT", Path: "/api/projects/{id}/push-tasks/{taskID}", Role: "project writer", Description: "Update a reusable release task"},
 			{Group: "deployment", Method: "POST", Path: "/api/projects/{id}/push-tasks/{taskID}/run", Role: "project writer", Description: "Repeat a task and snapshot its selector into immutable logs"},

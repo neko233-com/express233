@@ -26,6 +26,8 @@ SSH Push 会快照所选租户、所选 `server_id` 的 `post_hook_env`，通过
 
 部署 API 的 `dry_run: true` 用于查看选中的版本和目标，保存带预览标记的执行记录，不建立 SSH 连接；它与目标机 `safe-deploy.sh --dry-run` 是不同层的预览，均不能证明真实服务可用。
 
+远端 `run/deployment-attempt` 存在未完成标记时，管理员在人工核验该目标进程、版本、健康、配置和持久化状态后，可在一次明确的单目标 `/push-deployments` 请求中传入 `recovery_acknowledgements: {"<server_id>": "<run_id>"}`。该请求必须同时填写唯一 `server_ids`，不能使用 `all_project_targets` 或 `dry_run`。控制器将确认值写入不可变 selector 和审计日志，并只转发给相同 server_id 的 `safe-deploy.sh`；远端仍会比对精确 run_id，不匹配则拒绝。此字段不构成运行态核验，也不应保存到可重复发布任务或全局环境配置。
+
 凭据写入字段可在创建或更新目标时提供，所有读取接口都不会返回 SSH 密码或私钥。控制台不主动记录凭据，但自定义脚本必须避免输出 Secret；不要打印环境、启用 shell 跟踪或输出完整认证 URL。发布日志、逐目标输出、SSH 检查、上传、拉取、审计与安全记录均按 30 天滑动窗口清理；发布日志不可手工删除，删除任务定义不会影响历史执行快照。
 
 ### 版本发布自动 Hook

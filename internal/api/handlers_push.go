@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -37,14 +38,17 @@ type pushBindingRequest struct {
 	Arch        string `json:"arch"`
 }
 type createPushDeploymentRequest struct {
-	Version           string   `json:"version"`
-	ServerIDs         []string `json:"server_ids"`
-	Tags              []string `json:"tags"`
-	TagMatch          string   `json:"tag_match"`
-	AllProjectTargets bool     `json:"all_project_targets,omitempty"`
-	DryRun            bool     `json:"dry_run"`
-	IdempotencyKey    string   `json:"idempotency_key,omitempty"`
+	Version                  string            `json:"version"`
+	ServerIDs                []string          `json:"server_ids"`
+	Tags                     []string          `json:"tags"`
+	TagMatch                 string            `json:"tag_match"`
+	AllProjectTargets        bool              `json:"all_project_targets,omitempty"`
+	DryRun                   bool              `json:"dry_run"`
+	IdempotencyKey           string            `json:"idempotency_key,omitempty"`
+	RecoveryAcknowledgements map[string]string `json:"recovery_acknowledgements,omitempty"`
 }
+
+var safeRecoveryRunID = regexp.MustCompile(`^[0-9]{14}-[1-9][0-9]*$`)
 
 func (s *Server) pushCipher() (*pushCredentialCipher, error) { return newPushCredentialCipher() }
 
@@ -284,6 +288,15 @@ func applyDeploymentIdempotencyKey(r *http.Request, destination *string) error {
 func (s *Server) createPushDeployment(r *http.Request, pc projectCtx, req createPushDeploymentRequest, taskID int64, taskName string) (*store.PushDeployment, error) {
 	pid := pc.ProjectID
 	var err error
+	if err := validateRecoveryAcknowledgementRequest(req); err != nil {
+		return nil, err
+	}
+	if len(req.RecoveryAcknowledgements) > 0 {
+		role, ok := s.sessionRole(r)
+		if !ok || role != store.RoleAdmin {
+			return nil, fmt.Errorf("admin required to acknowledge deployment recovery")
+		}
+	}
 	if req.TagMatch == "" {
 		req.TagMatch = "all"
 	}
@@ -323,6 +336,9 @@ func (s *Server) createPushDeployment(r *http.Request, pc projectCtx, req create
 			return nil, fmt.Errorf("requested server_id is not in the resolved deployment plan")
 		}
 	}
+	if len(req.RecoveryAcknowledgements) > 0 && (len(targets) != 1 || targets[0].ServerID != req.ServerIDs[0]) {
+		return nil, fmt.Errorf("recovery acknowledgement must resolve to exactly its server_id")
+	}
 	targets, err = s.freezePushPlan(pc.TenantID, pid, pc.ProjectName, req.Version, targets)
 	if err != nil {
 		return nil, err
@@ -333,7 +349,11 @@ func (s *Server) createPushDeployment(r *http.Request, pc projectCtx, req create
 	if err != nil {
 		return nil, err
 	}
-	s.auditSession(r, "push.deploy.create", fmt.Sprintf("project_id=%d task_id=%d task=%s version=%s targets=%d dry_run=%t replay=%t", pid, taskID, taskName, req.Version, len(targets), req.DryRun, d.Replayed))
+	s.auditSession(r, "push.deploy.create", fmt.Sprintf("project_id=%d task_id=%d task=%s version=%s targets=%d dry_run=%t recovery_ack=%t replay=%t", pid, taskID, taskName, req.Version, len(targets), req.DryRun, len(req.RecoveryAcknowledgements) > 0, d.Replayed))
+	if len(req.RecoveryAcknowledgements) > 0 {
+		serverID := req.ServerIDs[0]
+		s.auditSession(r, "push.deploy.recovery_ack", fmt.Sprintf("deployment_id=%d project_id=%d server_id=%s run_id=%s", d.ID, pid, serverID, req.RecoveryAcknowledgements[serverID]))
+	}
 	if d.Replayed {
 		return d, nil
 	}
@@ -344,6 +364,27 @@ func (s *Server) createPushDeployment(r *http.Request, pc projectCtx, req create
 		go s.runPushDeployment(d.ID, pc.TenantID, pc.ProjectName)
 	}
 	return d, nil
+}
+
+func validateRecoveryAcknowledgementRequest(req createPushDeploymentRequest) error {
+	if len(req.RecoveryAcknowledgements) == 0 {
+		return nil
+	}
+	if req.DryRun {
+		return fmt.Errorf("recovery acknowledgement cannot be combined with dry_run")
+	}
+	if req.AllProjectTargets || len(req.ServerIDs) != 1 || len(req.RecoveryAcknowledgements) != 1 {
+		return fmt.Errorf("recovery acknowledgement requires one explicit server_id")
+	}
+	serverID := strings.TrimSpace(req.ServerIDs[0])
+	if serverID == "" || serverID != req.ServerIDs[0] {
+		return fmt.Errorf("recovery acknowledgement server_id is invalid")
+	}
+	runID, ok := req.RecoveryAcknowledgements[serverID]
+	if !ok || !safeRecoveryRunID.MatchString(runID) {
+		return fmt.Errorf("recovery acknowledgement must contain a valid run_id for the selected server_id")
+	}
+	return nil
 }
 func (s *Server) completePushDryRun(id int64) {
 	if err := s.Store.MarkPushDeploymentRunning(id); err != nil {
@@ -410,6 +451,19 @@ func (s *Server) runPushDeployment(id, tenantID int64, projectName string) {
 	if err != nil {
 		return
 	}
+	var request createPushDeploymentRequest
+	if err := json.Unmarshal([]byte(d.Selector), &request); err != nil {
+		s.failPushBeforeExecution(d, "immutable deployment selector is invalid")
+		return
+	}
+	if err := validateRecoveryAcknowledgementRequest(request); err != nil {
+		s.failPushBeforeExecution(d, "immutable recovery acknowledgement is invalid")
+		return
+	}
+	if len(request.RecoveryAcknowledgements) > 0 && (len(d.Targets) != 1 || d.Targets[0].ServerID != request.ServerIDs[0]) {
+		s.failPushBeforeExecution(d, "recovery acknowledgement target does not match the frozen deployment plan")
+		return
+	}
 	centralURL, err := pushPublicURL()
 	if err != nil {
 		for _, target := range d.Targets {
@@ -445,7 +499,7 @@ func (s *Server) runPushDeployment(id, tenantID int64, projectName string) {
 			return
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
-		output, err := s.pushExecutor.Deploy(withPushCommand(withAPIStore(ctx, s.Store), pushCommand{CentralURL: centralURL, Project: projectName, Version: d.Version, ServerID: binding.ServerID, PullToken: user.Token, DeploymentID: strconv.FormatInt(d.ID, 10), IdempotencyKey: d.IdempotencyKey, TargetTag: pushTargetTag(projectName, binding.ServerID), HookEnv: p.environment}), host, binding, d.Version, nil)
+		output, err := s.pushExecutor.Deploy(withPushCommand(withAPIStore(ctx, s.Store), pushCommand{CentralURL: centralURL, Project: projectName, Version: d.Version, ServerID: binding.ServerID, PullToken: user.Token, DeploymentID: strconv.FormatInt(d.ID, 10), IdempotencyKey: d.IdempotencyKey, TargetTag: pushTargetTag(projectName, binding.ServerID), RecoveryServerID: binding.ServerID, RecoveryRunID: request.RecoveryAcknowledgements[binding.ServerID], HookEnv: p.environment}), host, binding, d.Version, nil)
 		cancel()
 		status := "success"
 		if err != nil {

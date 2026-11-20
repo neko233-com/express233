@@ -101,6 +101,35 @@ func TestBuildPushDeployScriptRequiresDeclaredRunnerFeature(t *testing.T) {
 	}
 }
 
+func TestBuildPushDeployScriptForwardsRecoveryAcknowledgementToOneTarget(t *testing.T) {
+	command := pushCommand{
+		CentralURL:       "https://express.example.invalid",
+		Project:          "game",
+		Version:          "1.0.0",
+		ServerID:         "320001",
+		RecoveryServerID: "320001",
+		RecoveryRunID:    "20261120205713-2268828",
+	}
+	binding := store.PushServerBinding{ServerID: "320001", RemoteRoot: "/srv/game"}
+	script, err := buildPushDeployScript(command, binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "safe-deploy.sh --backup --acknowledge-recovery '20261120205713-2268828' --server-id '320001'"
+	if !strings.Contains(script, want) {
+		t.Fatalf("recovery acknowledgement was not target-scoped: %s", script)
+	}
+	command.RecoveryServerID = "320002"
+	if _, err := buildPushDeployScript(command, binding); err == nil {
+		t.Fatal("recovery acknowledgement for a different server_id was accepted")
+	}
+	command.RecoveryServerID = "320001"
+	command.RecoveryRunID = "$(touch /tmp/forbidden)"
+	if _, err := buildPushDeployScript(command, binding); err == nil {
+		t.Fatal("invalid recovery run_id was accepted")
+	}
+}
+
 func TestBuildPushDeployScriptForwardsQuotedHookEnvironment(t *testing.T) {
 	command := pushCommand{CentralURL: "https://express.example.com", Project: "game", Version: "1.0.0", ServerID: "1001", HookEnv: map[string]string{"RESTART_MODE": "force", "LITERAL": "line one\n$(touch /tmp/forbidden)'end", "VERSION": "untrusted"}}
 	script, err := buildPushDeployScript(command, store.PushServerBinding{ServerID: "1001", RemoteRoot: "/opt/game"})

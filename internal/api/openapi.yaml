@@ -776,6 +776,12 @@ paths:
                 all_project_targets: { type: boolean, default: false, description: 为 true 时忽略标签并部署当前项目全部绑定目标；不能同时传 server_ids 或 tags }
                 dry_run: { type: boolean, default: false, description: 仅解析与核对目标；不连接 SSH 或修改远端。成功只表示预演通过。 }
                 idempotency_key: { type: string, minLength: 8, maxLength: 128 }
+                recovery_acknowledgements:
+                  type: object
+                  minProperties: 1
+                  maxProperties: 1
+                  additionalProperties: { type: string, pattern: '^[0-9]{14}-[1-9][0-9]*$' }
+                  description: 仅租户管理员可用。必须与一个显式 server_ids 项目一一对应，且不能用于 dry_run 或全项目部署。提交前必须人工核验该目标的运行进程、版本、健康、配置与持久化状态；控制器只把 run_id 传给 safe-deploy.sh，不代替核验。
       responses:
         "200": { description: 相同幂等键已存在，返回原执行且不重复发布 }
         "201": { description: 已创建发布任务 }

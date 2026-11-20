@@ -204,3 +204,92 @@ func TestDirectPushDeploymentCanFollowAllCurrentProjectTargets(t *testing.T) {
 		t.Fatalf("preview must not report a deployed version: %q", nodes[0].CurrentVersion)
 	}
 }
+
+func TestRecoveryAcknowledgementRequiresTenantAdminAndIsSnapshotted(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	users, _ := st.ListUsers(1)
+	project, err := st.CreateProject(1, users[0].ID, "recovery-ack-api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateVersion(1, project.ID, project.Name, "1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.WriteVersionFile(1, project.Name, "1.0.0", "game.bin", strings.NewReader("release")); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PublishVersion(1, project.ID, "1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	host, err := st.CreatePushHost(store.PushHost{TenantID: 1, Name: "node", Address: "127.0.0.1", Username: "root", AuthMode: "agent"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreatePushServerBinding(store.PushServerBinding{TenantID: 1, HostID: host.ID, ProjectName: project.Name, ServerID: "320001", Labels: "audit", RemoteRoot: "/srv/game"}); err != nil {
+		t.Fatal(err)
+	}
+	operator, err := st.CreateUser(1, "recovery-operator", "operator-password", store.RoleOperator, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AddProjectMember(project.ID, operator.ID, store.ProjectRoleAdmin); err != nil {
+		t.Fatal(err)
+	}
+	server := New(st)
+	server.pushDraining.Store(true)
+	ts := httptest.NewServer(server.Router())
+	defer ts.Close()
+	requestBody := `{"version":"1.0.0","server_ids":["320001"],"tags":["audit"],"recovery_acknowledgements":{"320001":"20261120205713-2268828"}}`
+	post := func(cookies []*http.Cookie, wantStatus int) *http.Response {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/api/projects/%d/push-deployments", ts.URL, project.ID), strings.NewReader(requestBody))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", "recovery-ack-request-001")
+		for _, cookie := range cookies {
+			req.AddCookie(cookie)
+		}
+		response, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != wantStatus {
+			defer response.Body.Close()
+			t.Fatalf("status=%d want=%d", response.StatusCode, wantStatus)
+		}
+		return response
+	}
+	operatorCookies := login(t, ts, "recovery-operator", "operator-password")
+	operatorResponse := post(operatorCookies, http.StatusBadRequest)
+	_ = operatorResponse.Body.Close()
+	rootCookies := login(t, ts, "root", "root")
+	adminResponse := post(rootCookies, http.StatusCreated)
+	defer adminResponse.Body.Close()
+	var deployment store.PushDeployment
+	if err := json.NewDecoder(adminResponse.Body).Decode(&deployment); err != nil {
+		t.Fatal(err)
+	}
+	if deployment.Status != "queued" {
+		t.Fatalf("recovery deployment status: %+v", deployment)
+	}
+	storedDeployment, err := st.GetPushDeploymentByID(deployment.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(storedDeployment.Targets) != 1 || storedDeployment.Targets[0].ServerID != "320001" {
+		t.Fatalf("recovery deployment escaped the frozen single target: %+v", storedDeployment.Targets)
+	}
+	var selector createPushDeploymentRequest
+	if err := json.Unmarshal([]byte(deployment.Selector), &selector); err != nil {
+		t.Fatal(err)
+	}
+	if selector.RecoveryAcknowledgements["320001"] != "20261120205713-2268828" {
+		t.Fatalf("recovery acknowledgement missing from immutable selector: %+v", selector)
+	}
+}

@@ -31,6 +31,7 @@ type sshPushExecutor struct{ credentials *pushCredentialCipher }
 type pushCommand struct {
 	CentralURL, Project, Version, ServerID, PullToken string
 	DeploymentID, IdempotencyKey, TargetTag           string
+	RecoveryServerID, RecoveryRunID                   string
 	HookEnv                                           map[string]string
 }
 type pushCommandContextKey struct{}
@@ -214,6 +215,13 @@ func buildPushDeployScript(command pushCommand, binding store.PushServerBinding)
 	if binding.SkipBackup {
 		backupFlag = ""
 	}
+	recoveryFlag := ""
+	if command.RecoveryRunID != "" {
+		if command.RecoveryServerID == "" || command.RecoveryServerID != command.ServerID || command.ServerID != binding.ServerID || !safeRecoveryRunID.MatchString(command.RecoveryRunID) {
+			return "", fmt.Errorf("invalid target-scoped recovery acknowledgement")
+		}
+		recoveryFlag = "--acknowledge-recovery " + shellQuote(command.RecoveryRunID) + " "
+	}
 	keys := make([]string, 0, len(command.HookEnv))
 	for key := range command.HookEnv {
 		if !validPushHookEnvName(key) || strings.IndexByte(command.HookEnv[key], 0) >= 0 {
@@ -234,7 +242,7 @@ func buildPushDeployScript(command pushCommand, binding store.PushServerBinding)
 		"command -v safe-deploy.sh >/dev/null 2>&1 || { echo 'safe-deploy.sh is required on the target'; exit 127; }\n" +
 		"test \"$(safe-deploy.sh --capabilities)\" = 'express233.safe-deploy/v2' || { echo 'safe-deploy.sh v2 is required; no deployment started'; exit 78; }\n" +
 		featureCheck +
-		environment + "EXPRESS233_SERVER=" + shellQuote(command.CentralURL) + " EXPRESS233_TOKEN=" + shellQuote(command.PullToken) + " EXPRESS233_PROJECT=" + shellQuote(command.Project) + " EXPRESS233_SERVER_ID=" + shellQuote(command.ServerID) + " VERSION=" + shellQuote(command.Version) + " EXPRESS233_TAGS=" + shellQuote(strings.Join(splitCSV(binding.ContentTags), ",")) + " GAME_ROOT=" + shellQuote(binding.RemoteRoot) + " EXPRESS233_DEPLOYMENT_ID=" + shellQuote(command.DeploymentID) + " EXPRESS233_IDEMPOTENCY_KEY=" + shellQuote(command.IdempotencyKey) + " EXPRESS233_TARGET_TAG=" + shellQuote(command.TargetTag) + " safe-deploy.sh " + backupFlag + "--server-id " + shellQuote(command.ServerID) + "\n", nil
+		environment + "EXPRESS233_SERVER=" + shellQuote(command.CentralURL) + " EXPRESS233_TOKEN=" + shellQuote(command.PullToken) + " EXPRESS233_PROJECT=" + shellQuote(command.Project) + " EXPRESS233_SERVER_ID=" + shellQuote(command.ServerID) + " VERSION=" + shellQuote(command.Version) + " EXPRESS233_TAGS=" + shellQuote(strings.Join(splitCSV(binding.ContentTags), ",")) + " GAME_ROOT=" + shellQuote(binding.RemoteRoot) + " EXPRESS233_DEPLOYMENT_ID=" + shellQuote(command.DeploymentID) + " EXPRESS233_IDEMPOTENCY_KEY=" + shellQuote(command.IdempotencyKey) + " EXPRESS233_TARGET_TAG=" + shellQuote(command.TargetTag) + " safe-deploy.sh " + backupFlag + recoveryFlag + "--server-id " + shellQuote(command.ServerID) + "\n", nil
 }
 
 func validPushHookEnvName(name string) bool {
