@@ -1,5 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
 import { ChevronDown, ChevronRight, File, Folder, Plus, Search, Upload } from "lucide-react";
+import { Link } from "react-router";
 import { query, request, useResource } from "../api";
 import { useConsole } from "../app";
 import { Code } from "../code";
@@ -24,11 +25,11 @@ import {
   useAction,
   useFeedback,
 } from "../ui";
-import { ValidationResult } from "./publish";
 import { useWorkspace } from "./workspace";
 
 export function Versions() {
-  const { versions, latest, version, canWrite, createVersion, selectVersion } = useWorkspace();
+  const { versions, latest, version, missingVersion, canWrite, createVersion, selectVersion } =
+    useWorkspace();
   const [search, setSearch] = useState("");
   const create = useAction();
   const filtered = versions.filter((row) =>
@@ -106,24 +107,18 @@ export function Versions() {
           <VersionDetail key={version.version} version={version} />
         ) : (
           <Card>
-            <Empty>创建版本后上传程序、配置文件或归档。</Empty>
+            <Empty>
+              {missingVersion
+                ? `版本 ${missingVersion} 已删除或不可用。请从列表选择其他版本。`
+                : canWrite
+                  ? "创建版本后上传程序、配置文件或归档。"
+                  : "当前项目暂无版本。"}
+            </Empty>
           </Card>
         )}
       </div>
-      <div className="two-col inspector">
+      <div className="inspector">
         <Retention />
-        <Disclosure title="最近版本活动" badge={<Badge>{versions.length} 个版本</Badge>}>
-          {!versions.length && <p className="hint">暂无版本</p>}
-          <ol className="activity-list">
-            {versions.slice(0, 8).map((row) => (
-              <li key={row.id}>
-                <code>{row.version}</code>
-                <VersionBadge status={row.status} />
-                <span>{dateLabel(row.published_at || row.created_at)}</span>
-              </li>
-            ))}
-          </ol>
-        </Disclosure>
       </div>
     </>
   );
@@ -214,7 +209,7 @@ function Retention() {
           />
           <span>个已发布版本</span>
         </div>
-        <p className="hint">草稿和仍被部署或交付节点引用的版本会保留。</p>
+        <p className="hint">草稿，以及正在排队或执行的 SSH 部署使用的版本会保留。</p>
         {canWrite && (
           <Button
             type="submit"
@@ -234,19 +229,17 @@ function VersionDetail({ version }: { version: Version }) {
   const {
     activePath,
     busy,
-    busyKind,
     canWrite,
     invalidateChecks,
     latest,
     open,
+    panelLink,
     progress,
     project,
-    publish,
     reloadVersions,
     target,
     upload,
-    validate,
-    validation,
+    versionsLoading,
   } = useWorkspace();
   const [tags, setTags] = useState("");
   const input = useRef<HTMLInputElement>(null);
@@ -254,26 +247,8 @@ function VersionDetail({ version }: { version: Version }) {
   const { confirm } = useFeedback();
   const published = version.status === "published";
   const editable = canWrite && !published;
-  const blocked = busy || action.busy;
+  const blocked = busy || action.busy || versionsLoading;
   const disabled = !editable || blocked;
-
-  function review(endpoint: "submit-review" | "reject") {
-    if (!activePath) return;
-    void action.run(async () => {
-      if (
-        endpoint === "reject" &&
-        !(await confirm({
-          title: "驳回版本",
-          message: `驳回 ${version.version} 并退回修改。`,
-          confirmText: "驳回",
-        }))
-      )
-        return;
-      await request(activePath + "/" + endpoint, { method: "POST" });
-      invalidateChecks();
-      reloadVersions();
-    });
-  }
   return (
     <div
       className="card version-detail"
@@ -305,7 +280,7 @@ function VersionDetail({ version }: { version: Version }) {
             {version.published_at && <> · 发布 {dateLabel(version.published_at)}</>}
           </div>
         </div>
-        <div className="toolbar">
+        <div className="toolbar" data-testid="workspace-next-card">
           {editable && (
             <Button tone="primary" small disabled={disabled} onClick={() => input.current?.click()}>
               <Upload size={15} aria-hidden="true" />
@@ -320,6 +295,24 @@ function VersionDetail({ version }: { version: Version }) {
             >
               下载
             </a>
+          )}
+          {!published && (
+            <Link
+              className="btn btn-secondary btn-sm"
+              data-testid="workspace-next"
+              to={panelLink("publish")}
+            >
+              {canWrite ? "检查并发布" : "查看发布状态"}
+            </Link>
+          )}
+          {version === latest && (
+            <Link
+              className="btn btn-primary btn-sm"
+              data-testid="workspace-next"
+              to={panelLink("delivery")}
+            >
+              部署上线
+            </Link>
           )}
           {canWrite && (
             <Button
@@ -390,49 +383,6 @@ function VersionDetail({ version }: { version: Version }) {
           {editable && <TagBatch />}
         </div>
       </Disclosure>
-      <div className="toolbar version-actions">
-        {!published && (
-          <Button
-            small
-            onClick={() => void validate()}
-            data-testid="validate-version"
-            disabled={blocked}
-          >
-            {busyKind === "validate" ? "正在检查…" : "发布前检查"}
-          </Button>
-        )}
-        {editable && (version.status === "draft" || version.status === "rejected") && (
-          <Button small disabled={blocked} onClick={() => review("submit-review")}>
-            提交审批
-          </Button>
-        )}
-        {editable && version.status === "pending_review" && (
-          <Button small tone="danger" disabled={blocked} onClick={() => review("reject")}>
-            驳回
-          </Button>
-        )}
-        {editable && (
-          <Button
-            small
-            tone="primary"
-            data-testid="publish-version"
-            disabled={blocked || version.status === "rejected"}
-            onClick={() => void publish()}
-          >
-            {busyKind === "publish" ? "正在发布…" : "正式发布"}
-          </Button>
-        )}
-        {version === latest && (
-          <Button small onClick={() => open("delivery")}>
-            部署上线
-          </Button>
-        )}
-      </div>
-      <ValidationResult
-        result={validation}
-        checking={busyKind === "validate"}
-        testId="validate-result"
-      />
       {published && target && (
         <Disclosure title="拉取命令">
           <Code

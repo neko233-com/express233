@@ -1,7 +1,7 @@
 import { Activity, createContext, lazy, Suspense, useContext, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router";
-import { Info, Settings2 } from "lucide-react";
-import { ApiError, errorMessage, request, uploadFile, useResource } from "../api";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
+import { Folder, Settings2 } from "lucide-react";
+import { ApiError, errorMessage, query, request, uploadFile, useResource } from "../api";
 import { NotFound, useConsole } from "../app";
 import {
   type Project,
@@ -10,7 +10,7 @@ import {
   type VersionFile,
   versionPath,
 } from "../types";
-import { Badge, Button, ResourceNotice, useAction, useFeedback } from "../ui";
+import { Button, ResourceNotice, useAction, useFeedback } from "../ui";
 import { Publish } from "./publish";
 import { Versions } from "./versions";
 
@@ -20,6 +20,9 @@ const ServerConfigs = lazy(() =>
 const Preview = lazy(() => import("./preview").then((module) => ({ default: module.Preview })));
 const Diff = lazy(() => import("./preview").then((module) => ({ default: module.VersionDiff })));
 const Delivery = lazy(() => import("./delivery").then((module) => ({ default: module.Delivery })));
+const Automation = lazy(() =>
+  import("./automation").then((module) => ({ default: module.Automation })),
+);
 const Cluster = lazy(() => import("./cluster").then((module) => ({ default: module.Cluster })));
 const Team = lazy(() => import("./team").then((module) => ({ default: module.Team })));
 const DeployScript = lazy(() =>
@@ -27,15 +30,16 @@ const DeployScript = lazy(() =>
 );
 
 const panels = [
-  { key: "versions", label: "版本包", name: "版本", View: Versions },
+  { key: "versions", label: "版本包", name: "版本", View: Versions, needsVersions: true },
   { key: "config", label: "分服配置", View: ServerConfigs },
-  { key: "preview", label: "配置预览", name: "拉取预览", View: Preview },
-  { key: "publish", label: "发布版本", View: Publish },
+  { key: "preview", label: "配置预览", name: "拉取预览", View: Preview, needsVersions: true },
+  { key: "publish", label: "发布版本", View: Publish, needsVersions: true },
   { key: "delivery", label: "部署上线", View: Delivery },
-  { key: "diff", label: "差异", View: Diff },
+  { key: "automation", label: "高级发布", View: Automation },
+  { key: "diff", label: "版本对比", name: "差异", View: Diff, needsVersions: true },
   { key: "cluster", label: "集群节点", View: Cluster },
+  { key: "deploy", label: "部署脚本", View: DeployScript, needsVersions: true },
   { key: "team", label: "团队", View: Team },
-  { key: "deploy", label: "部署脚本", View: DeployScript },
 ] as const;
 
 type Panel = (typeof panels)[number]["key"];
@@ -47,6 +51,8 @@ interface Workspace {
   canWrite: boolean;
   versions: Version[];
   version?: Version;
+  missingVersion?: string;
+  versionsLoading: boolean;
   latest?: Version;
   activePath?: string;
   files: VersionFile[];
@@ -62,6 +68,7 @@ interface Workspace {
   invalidateChecks: () => void;
   serverIDs: string[];
   refreshServerIDs: () => void;
+  panelLink: (tab: Panel, params?: Record<string, string | number | undefined>) => string;
   open: (tab: Panel) => void;
   selectVersion: (version: string) => void;
   createVersion: (version: string) => Promise<void>;
@@ -69,6 +76,8 @@ interface Workspace {
   validation?: Validation;
   validate: () => Promise<void>;
   publish: () => Promise<void>;
+  review: (endpoint: "submit-review" | "reject") => Promise<void>;
+  canRetryPublish: boolean;
   busy: boolean;
   busyKind: string;
   upload: (files: File[], tags: string[]) => Promise<void>;
@@ -81,10 +90,12 @@ const noServerIDs: string[] = [];
 
 export function ProjectWorkspace() {
   const { projectId, tab = "versions" } = useParams();
-  const { projects, projectsLoading } = useConsole();
+  const { projects, projectsLoading, projectsError, refreshProjects } = useConsole();
   const project = projects.find((p) => String(p.id) === projectId);
   const panel = panels.find((entry) => entry.key === tab);
   if (!project && projectsLoading) return <ResourceNotice loading />;
+  if (!project && projectsError)
+    return <ResourceNotice error={projectsError} retry={refreshProjects} />;
   if (!project || !panel) return <NotFound />;
   return <ProjectScreen key={project.id} project={project} panel={panel} />;
 }
@@ -94,13 +105,16 @@ function ProjectScreen({ project, panel }: { project: Project; panel: (typeof pa
   const canWrite = session.is_admin || project.my_role === "admin";
   const projectPath = `/api/projects/${project.id}`;
   const versionsResource = useResource<Version[] | null>(projectPath + "/versions");
-  const serverIDs = useResource<{ server_ids: string[] }>("/api/server-ids");
+  const serverIDs = useResource<{ server_ids: string[] }>(
+    ["preview", "diff", "deploy"].includes(panel.key) ? "/api/server-ids" : undefined,
+  );
   const navigate = useNavigate();
   const [search] = useSearchParams();
   const [created, setCreated] = useState<Version>();
   const [target, setServer] = useState("");
   const [confirmation, setConfirmation] = useState<ConfirmedPreview>();
   const [check, setCheck] = useState<VersionStatus>();
+  const [publishRetryVersion, setPublishRetryVersion] = useState<string>();
   const [revision, setRevision] = useState(0);
   const [busyKind, setBusyKind] = useState("");
   const [progress, setProgress] = useState("");
@@ -113,16 +127,29 @@ function ProjectScreen({ project, panel }: { project: Project; panel: (typeof pa
     created && !fetched.some((row) => row.version === created.version)
       ? [created, ...fetched]
       : fetched;
-  const version = versions.find((row) => row.version === search.get("version")) ?? versions[0];
+  const requestedVersion = search.get("version");
+  const version = requestedVersion
+    ? versions.find((row) => row.version === requestedVersion)
+    : versions[0];
+  const missingVersion =
+    !version && requestedVersion && !versionsResource.loading && !versionsResource.error
+      ? requestedVersion
+      : undefined;
   const latest = versions
     .filter((row) => row.status === "published")
     .toSorted(
       (a, b) => (b.published_at || "").localeCompare(a.published_at || "") || b.id - a.id,
     )[0];
   const activePath = version && versionPath(project.id, version.version);
-  const filesResource = useResource<VersionFile[] | null>(activePath && activePath + "/file-tags");
+  const filesResource = useResource<VersionFile[] | null>(
+    activePath && (panel.key === "versions" || panel.key === "publish")
+      ? activePath + "/file-tags"
+      : undefined,
+  );
   const files = filesResource.data ?? noFiles;
   const validation = check?.version === version?.version ? check?.result : undefined;
+  const canRetryPublish =
+    version?.status === "published" && version.version === publishRetryVersion;
   const confirmed = Boolean(
     confirmation && confirmation.version === version?.version && confirmation.target === target,
   );
@@ -138,12 +165,15 @@ function ProjectScreen({ project, panel }: { project: Project; panel: (typeof pa
     setServer(value);
   }
 
+  function panelLink(tab: Panel, params?: Record<string, string | number | undefined>) {
+    return query(`/projects/${project.id}/${tab}`, {
+      version: requestedVersion || version?.version,
+      ...params,
+    });
+  }
+
   function open(tab: Panel) {
-    if (tab === panel.key) return;
-    void navigate(
-      `/projects/${project.id}/${tab}` +
-        (version ? "?version=" + encodeURIComponent(version.version) : ""),
-    );
+    if (tab !== panel.key) void navigate(panelLink(tab));
   }
 
   function selectVersion(name: string) {
@@ -192,26 +222,59 @@ function ProjectScreen({ project, panel }: { project: Project; panel: (typeof pa
     if (
       !activePath ||
       !version ||
+      versionsResource.loading ||
       !canWrite ||
-      !["draft", "pending_review"].includes(version.status)
+      !(canRetryPublish || ["draft", "pending_review"].includes(version.status))
     )
       return;
     await action.run(async () => {
       if (
         !(await confirm({
-          title: "正式发布",
-          confirmText: "发布",
-          message: `项目：${project.name}\n版本：${version.version}\n发布会锁定版本内容，并触发已开启的自动发布规则。`,
+          title: canRetryPublish ? "重试发布通知" : "正式发布",
+          confirmText: canRetryPublish ? "重试" : "发布",
+          message: `项目：${project.name}\n版本：${version.version}\n${canRetryPublish ? "重新通知已启用的 Hook 和自动跟随的 Pull 节点。" : "发布将锁定版本内容，并通知已启用的 Hook 和自动跟随的 Pull 节点。"}`,
         }))
       )
         return;
       setBusyKind("publish");
       try {
         await request(activePath + "/publish", { method: "POST" });
-        reloadVersions();
-        toast(`版本 ${version.version} 已发布`);
+        setPublishRetryVersion((current) => (current === version.version ? undefined : current));
+        toast(canRetryPublish ? "发布通知已提交" : `版本 ${version.version} 已发布`);
+      } catch (error) {
+        if (
+          error instanceof ApiError &&
+          error.status === 500 &&
+          error.message.includes("retry this publish request")
+        ) {
+          setPublishRetryVersion(version.version);
+        }
+        throw error;
       } finally {
+        reloadVersions();
         setBusyKind("");
+      }
+    });
+  }
+
+  async function review(endpoint: "submit-review" | "reject") {
+    if (!activePath || !version || !canWrite || versionsResource.loading) return;
+    await action.run(async () => {
+      if (
+        endpoint === "reject" &&
+        !(await confirm({
+          title: "驳回版本",
+          message: `驳回 ${version.version} 并退回修改。`,
+          confirmText: "驳回",
+        }))
+      )
+        return;
+      try {
+        await request(activePath + "/" + endpoint, { method: "POST" });
+        invalidateChecks();
+        toast(endpoint === "reject" ? "已驳回版本" : "已提交审批");
+      } finally {
+        reloadVersions();
       }
     });
   }
@@ -263,6 +326,8 @@ function ProjectScreen({ project, panel }: { project: Project; panel: (typeof pa
     canWrite,
     versions,
     version,
+    missingVersion,
+    versionsLoading: versionsResource.loading,
     latest,
     activePath,
     files,
@@ -280,6 +345,7 @@ function ProjectScreen({ project, panel }: { project: Project; panel: (typeof pa
     invalidateChecks,
     serverIDs: serverIDs.data?.server_ids ?? noServerIDs,
     refreshServerIDs: serverIDs.refresh,
+    panelLink,
     open,
     selectVersion,
     createVersion,
@@ -287,6 +353,8 @@ function ProjectScreen({ project, panel }: { project: Project; panel: (typeof pa
     validation,
     validate,
     publish,
+    review,
+    canRetryPublish,
     busy: action.busy,
     busyKind,
     upload,
@@ -296,6 +364,10 @@ function ProjectScreen({ project, panel }: { project: Project; panel: (typeof pa
   return (
     <WorkspaceContext value={context}>
       <div id="projectWorkspace">
+        <Link className="workspace-home muted-link" to="/" data-testid="navigate-back">
+          <Folder size={15} aria-hidden="true" />
+          项目工作区
+        </Link>
         <header className="workspace-heading">
           <div>
             <h1 id="curProject" data-testid="cur-project">
@@ -347,27 +419,31 @@ function ProjectScreen({ project, panel }: { project: Project; panel: (typeof pa
         </header>
         <nav className="project-tabs" aria-label="项目工作区">
           {panels.map((entry) => (
-            <button
-              type="button"
+            <Link
               key={entry.key}
-              className={`project-tab ${entry.key === panel.key ? "active" : ""}`}
+              to={panelLink(
+                entry.key,
+                entry.key === panel.key ? Object.fromEntries(search) : undefined,
+              )}
+              className={`project-tab${entry.key === panel.key ? " active" : ""}${entry.key === "automation" ? " project-tab-secondary" : ""}`}
               data-ptab={entry.key}
               aria-label={"name" in entry ? entry.name : entry.label}
               aria-current={entry.key === panel.key ? "page" : undefined}
-              onClick={() => open(entry.key)}
             >
               {entry.label}
-            </button>
+            </Link>
           ))}
         </nav>
         {versionsResource.error && (
           <ResourceNotice error={versionsResource.error} retry={reloadVersions} />
         )}
-        {versionsResource.loading && versionsResource.data === undefined && !created ? (
+        {"needsVersions" in panel &&
+        versionsResource.loading &&
+        versionsResource.data === undefined &&
+        !created ? (
           <ResourceNotice loading />
         ) : (
           <>
-            {panel.key !== "delivery" && <NextStep panel={panel.key} />}
             <Activity mode={panel.key === "config" ? "visible" : "hidden"}>
               <div className="ptab-panel" id="ptab-config">
                 <Suspense fallback={<ResourceNotice loading />}>
@@ -386,46 +462,6 @@ function ProjectScreen({ project, panel }: { project: Project; panel: (typeof pa
         )}
       </div>
     </WorkspaceContext>
-  );
-}
-
-function NextStep({ panel }: { panel: Panel }) {
-  const { canWrite, version, files, filesLoading, validation, open, busy, busyKind } =
-    useWorkspace();
-  const published = version?.status === "published";
-  const step: { title: string; action: string; tab: Panel; focus?: string } = !version
-    ? { title: "创建第一个版本", action: "创建版本", tab: "versions", focus: "newVersion" }
-    : published
-      ? { title: `${version.version} 已发布`, action: "前往部署", tab: "delivery" }
-      : validation?.ok === false
-        ? { title: "发布前检查未通过", action: "查看问题", tab: "publish" }
-        : !files.length
-          ? { title: "上传版本文件", action: "上传文件", tab: "versions", focus: "fileInput" }
-          : { title: "版本文件已就绪", action: "检查并发布", tab: "publish" };
-  return (
-    <section className="workspace-next" aria-label="下一步" data-testid="workspace-next-card">
-      <Info size={17} aria-hidden="true" />
-      <strong id="workspaceNextTitle">
-        {busyKind === "upload" ? "正在上传版本文件" : step.title}
-      </strong>
-      {!canWrite && !published && <Badge>只读</Badge>}
-      <Button
-        small
-        tone="secondary"
-        data-testid="workspace-next"
-        disabled={busy || filesLoading || (!canWrite && !published)}
-        onClick={() => {
-          open(step.tab);
-          if (panel === step.tab && step.focus) {
-            const input = document.getElementById(step.focus);
-            if (step.focus === "fileInput") input?.click();
-            else input?.focus();
-          }
-        }}
-      >
-        {busyKind === "upload" ? "正在上传…" : step.action}
-      </Button>
-    </section>
   );
 }
 

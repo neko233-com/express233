@@ -5,6 +5,7 @@ import {
   BookOpen,
   Box,
   ChartNoAxesColumnIncreasing,
+  ChevronRight,
   Database,
   FileCode2,
   Folder,
@@ -26,7 +27,9 @@ import {
 } from "./api";
 import { type Project, type Version, formText, versionPath } from "./types";
 import {
+  Badge,
   Button,
+  Card,
   Empty,
   FeedbackProvider,
   Field,
@@ -175,7 +178,9 @@ function Login({
 interface ConsoleState {
   session: Session;
   projects: Project[];
+  visibleProjects: Project[];
   projectsLoading: boolean;
+  projectsError?: string;
   updateProject: (value: Project) => void;
   refreshProjects: () => void;
   canCreateProject: boolean;
@@ -211,7 +216,8 @@ function Shell({ session, onLogout }: { session: Session; onLogout: () => void }
   const navigate = useNavigate();
   const location = useLocation();
   const matchedProject = useMatch("/projects/:projectId/*");
-  const [workspace, setWorkspace] = useState("/");
+  const activeProjectId = matchedProject?.params.projectId;
+  const activeProjectLink = useRef<HTMLAnchorElement>(null);
   const main = useRef<HTMLElement>(null);
   const action = useAction();
   const logout = useAction();
@@ -219,19 +225,21 @@ function Shell({ session, onLogout }: { session: Session; onLogout: () => void }
   const canCreateProject = session.is_admin || session.role === "operator";
 
   const fetched = projectsResource.data ?? emptyProjects;
-  const projects = [
-    ...fetched.map((project) => recent.find((local) => local.id === project.id) ?? project),
-    ...recent.filter((project) => !fetched.some((server) => server.id === project.id)),
-  ].toSorted((a, b) => a.name.localeCompare(b.name));
-  const visibleProjects = projects.filter((project) =>
-    project.name.toLowerCase().includes(search.trim().toLowerCase()),
+  const byID = new Map(fetched.map((project) => [project.id, project]));
+  for (const project of recent) byID.set(project.id, project);
+  const projects = Array.from(byID.values()).sort((a, b) => a.name.localeCompare(b.name));
+  const term = search.trim().toLowerCase();
+  const visibleProjects = projects.filter((project) => project.name.toLowerCase().includes(term));
+  const activeProjectVisible = visibleProjects.some(
+    (project) => String(project.id) === activeProjectId,
   );
 
   useEffect(() => {
     main.current?.scrollTo({ top: 0 });
-    if (location.pathname.startsWith("/projects/"))
-      setWorkspace(location.pathname + location.search);
-  }, [location.pathname, location.search]);
+  }, [location.pathname]);
+  useEffect(() => {
+    if (activeProjectVisible) activeProjectLink.current?.scrollIntoView({ block: "nearest" });
+  }, [activeProjectId, activeProjectVisible]);
 
   function updateProject(value: Project) {
     setRecent((items) => [...items.filter((item) => item.id !== value.id), value]);
@@ -262,7 +270,9 @@ function Shell({ session, onLogout }: { session: Session; onLogout: () => void }
       value={{
         session,
         projects,
+        visibleProjects,
         projectsLoading: projectsResource.loading,
+        projectsError: projectsResource.error,
         updateProject,
         refreshProjects,
         canCreateProject,
@@ -315,27 +325,33 @@ function Shell({ session, onLogout }: { session: Session; onLogout: () => void }
               retry={refreshProjects}
             />
             <ul className="project-list" data-testid="project-list">
-              {visibleProjects.map((project) => (
-                <li key={project.id}>
-                  <NavLink
-                    to={`/projects/${project.id}/versions`}
-                    className={`project-item ${matchedProject?.params.projectId === String(project.id) ? "selected" : ""}`}
-                    title={project.name}
-                  >
-                    <Box size={16} aria-hidden="true" />
-                    <span>{project.name}</span>
-                  </NavLink>
-                </li>
-              ))}
+              {visibleProjects.map((project) => {
+                const active = activeProjectId === String(project.id);
+                return (
+                  <li key={project.id}>
+                    <Link
+                      to={`/projects/${project.id}/versions`}
+                      className={`project-item${active ? " selected" : ""}`}
+                      aria-current={active ? "true" : undefined}
+                      ref={active ? activeProjectLink : undefined}
+                      title={project.name}
+                    >
+                      <Box size={16} aria-hidden="true" />
+                      <span>{project.name}</span>
+                    </Link>
+                  </li>
+                );
+              })}
             </ul>
-            {!visibleProjects.length && !projectsResource.loading && (
-              <div className="sidebar-empty">{search ? "未找到匹配项目" : "暂无项目"}</div>
+            {!visibleProjects.length && !projectsResource.loading && !projectsResource.error && (
+              <div className="sidebar-empty">{term ? "未找到匹配项目" : "暂无项目"}</div>
             )}
           </div>
           <nav className="sidebar-nav" aria-label="控制台">
             <Link
-              to={workspace}
+              to="/"
               data-global="workspace"
+              aria-current={location.pathname === "/" ? "page" : undefined}
               className={`sidebar-nav-item ${location.pathname === "/" || matchedProject ? "active" : ""}`}
             >
               <Folder size={16} aria-hidden="true" />
@@ -387,7 +403,7 @@ function Shell({ session, onLogout }: { session: Session; onLogout: () => void }
         </aside>
         <main className="main" ref={main} id="main-content">
           <div className="main-inner">
-            {location.pathname !== "/" && (
+            {location.pathname !== "/" && !matchedProject && (
               <Button
                 tone="ghost"
                 small
@@ -456,17 +472,69 @@ export function useConsole() {
 }
 
 export function Home() {
-  const { canCreateProject, projects, updateProject } = useConsole();
+  const {
+    session,
+    canCreateProject,
+    projects,
+    visibleProjects,
+    projectsLoading,
+    projectsError,
+    updateProject,
+    refreshProjects,
+  } = useConsole();
   const { busy, run } = useAction();
   const navigate = useNavigate();
   const { confirm, toast } = useFeedback();
+  if (projectsLoading || projectsError || projects.length) {
+    return (
+      <>
+        <PageHeader title="项目工作区">
+          {projects.length > 0 && (
+            <span className="hint">
+              {visibleProjects.length === projects.length
+                ? `${projects.length} 个项目`
+                : `${visibleProjects.length} / ${projects.length} 个项目`}
+            </span>
+          )}
+        </PageHeader>
+        <ResourceNotice
+          loading={projectsLoading && !projects.length}
+          error={projectsError}
+          retry={refreshProjects}
+        />
+        {projects.length > 0 && (
+          <Card>
+            <ul className="project-directory" data-testid="project-directory">
+              {visibleProjects.map((project) => (
+                <li key={project.id}>
+                  <Link to={`/projects/${project.id}/versions`}>
+                    <Box size={16} aria-hidden="true" />
+                    <strong>{project.name}</strong>
+                    <Badge>
+                      {session.is_admin || project.my_role === "admin" ? "管理员" : "只读"}
+                    </Badge>
+                    <ChevronRight size={16} aria-hidden="true" />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            {!visibleProjects.length && <Empty>未找到匹配项目。</Empty>}
+          </Card>
+        )}
+      </>
+    );
+  }
   return (
     <>
-      <PageHeader title="项目工作区" description="管理版本包、分服配置与交付目标。" />
+      <PageHeader title="项目工作区" />
       <div className="home-empty card">
         <Folder size={30} aria-hidden="true" />
-        <h2>{projects.length ? "选择一个项目" : "从一个服务开始"}</h2>
-        <p>从侧栏选择项目，或创建一个项目并上传版本文件。</p>
+        <h2>暂无项目</h2>
+        <p>
+          {canCreateProject
+            ? "在侧栏新建项目，再上传第一个版本包。"
+            : "加入项目后，可在这里查看版本与交付记录。"}
+        </p>
         <div className="toolbar">
           {canCreateProject && (
             <Button

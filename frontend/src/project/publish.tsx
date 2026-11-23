@@ -1,9 +1,10 @@
 import { Check, CircleAlert } from "lucide-react";
+import { Link } from "react-router";
 import type { Validation } from "../types";
-import { Badge, Button, Card, Empty } from "../ui";
+import { Button, Card, Empty, Field, ResourceNotice, VersionBadge } from "../ui";
 import { useWorkspace } from "./workspace";
 
-export function ValidationResult({
+function ValidationResult({
   result,
   checking,
   testId,
@@ -40,8 +41,15 @@ export function ValidationResult({
 
 export function Publish() {
   const {
-    project,
+    versions,
     version,
+    latest,
+    missingVersion,
+    versionsLoading,
+    files,
+    filesLoading,
+    filesError,
+    refreshFiles,
     confirmed,
     target,
     busy,
@@ -49,90 +57,144 @@ export function Publish() {
     validation,
     validate,
     publish,
+    review,
+    canRetryPublish,
     canWrite,
-    open,
+    panelLink,
+    selectVersion,
   } = useWorkspace();
-  if (!version)
-    return (
-      <Card title="发布版本包">
-        <Empty>先在版本包工作区选择一个版本。</Empty>
-        <Button onClick={() => open("versions")}>选择版本</Button>
-      </Card>
-    );
-  const published = version.status === "published";
+  const published = version?.status === "published";
+  const allowPublish = version?.status === "draft" || version?.status === "pending_review";
+  const blocked = busy || versionsLoading;
   return (
-    <div className="two-col publish-grid" data-testid="publish-flow-panel">
-      <Card title="发布版本包" description="检查制品与配置，然后锁定版本。">
-        <dl className="checklist">
-          <div>
-            <dt>版本</dt>
-            <dd id="publishVersionCheck">{version.version}</dd>
+    <div className="publish-flow" data-testid="publish-flow-panel">
+      <Card title="发布版本包" actions={version && <VersionBadge status={version.status} />}>
+        {versions.length > 0 && (
+          <div className="toolbar publish-version-select">
+            <Field label="版本">
+              <select
+                id="publishVersionCheck"
+                className="input"
+                value={version?.version ?? ""}
+                disabled={blocked}
+                onChange={(event) => selectVersion(event.currentTarget.value)}
+              >
+                {!version && (
+                  <option value="" disabled>
+                    选择版本
+                  </option>
+                )}
+                {versions.map((row) => (
+                  <option key={row.id} value={row.version}>
+                    {row.version}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Link className="muted-link" to={panelLink("versions")}>
+              查看版本文件
+            </Link>
           </div>
-          <div>
-            <dt>分服配置</dt>
-            <dd id="publishConfigCheck">
-              {target ? `当前配置：${target}` : "按需配置 · 无分服差异时可跳过"}
-            </dd>
-          </div>
-          <div>
-            <dt>配置预览</dt>
-            <dd id="publishPreviewCheck">
-              {confirmed ? "配置预览已确认" : "可选 · 检查替换后的文件"}
-            </dd>
-          </div>
-        </dl>
-        <ValidationResult
-          result={validation}
-          checking={busyKind === "validate"}
-          testId="flow-validate-result"
-        />
-      </Card>
-      <Card title="确认版本">
-        <dl className="checklist">
-          <div>
-            <dt>项目</dt>
-            <dd>{project.name}</dd>
-          </div>
-          <div>
-            <dt>版本</dt>
-            <dd>
-              <code>{version.version}</code>
-            </dd>
-          </div>
-          <div>
-            <dt>状态</dt>
-            <dd>
-              <Badge kind={published ? "ok" : "neutral"}>{version.status}</Badge>
-            </dd>
-          </div>
-        </dl>
-        <p className="hint">
-          {published
-            ? "已发布版本可供目标拉取和部署。"
-            : "发布后锁定文件，并触发已开启的自动发布规则。"}
-        </p>
-        <div className="toolbar">
-          {!published && (
-            <Button id="btnFlowValidate" disabled={busy} onClick={() => void validate()}>
-              发布前检查
-            </Button>
-          )}
-          {!published && canWrite && (
-            <Button
-              id="btnFlowPublish"
-              tone="primary"
-              disabled={busy || version.status === "rejected" || validation?.ok === false}
-              onClick={() => void publish()}
-            >
-              {busyKind === "publish" ? "正在发布…" : "正式发布"}
-            </Button>
-          )}
-          {published && (
-            <Button id="btnPublishedDeploy" tone="primary" onClick={() => open("delivery")}>
-              进入部署
-            </Button>
-          )}
-        </div>
+        )}
+        {!version ? (
+          <Empty>
+            {missingVersion
+              ? `版本 ${missingVersion} 已删除或不可用。`
+              : "请先在版本包工作区创建版本。"}{" "}
+            {!versions.length && <Link to={panelLink("versions")}>前往版本包</Link>}
+          </Empty>
+        ) : (
+          <>
+            <dl className="checklist">
+              <div>
+                <dt>版本文件</dt>
+                <dd>
+                  <ResourceNotice loading={filesLoading} error={filesError} retry={refreshFiles} />
+                  {!filesLoading && !filesError && `${files.length} 个文件`}
+                </dd>
+              </div>
+              <div>
+                <dt>分服配置</dt>
+                <dd id="publishConfigCheck">
+                  <Link to={panelLink("config")}>{target || "按需设置"}</Link>
+                </dd>
+              </div>
+              <div>
+                <dt>配置预览</dt>
+                <dd id="publishPreviewCheck">
+                  <Link to={panelLink("preview")}>
+                    {confirmed ? `${target} 已确认` : "查看预览（可选）"}
+                  </Link>
+                </dd>
+              </div>
+            </dl>
+            <div data-testid="validate-result">
+              <ValidationResult
+                result={published ? undefined : validation}
+                checking={busyKind === "validate"}
+                testId="flow-validate-result"
+              />
+            </div>
+            <p className="hint spaced">
+              {published ? (
+                "已发布版本可供目标拉取和部署。"
+              ) : (
+                <>
+                  发布会锁定版本文件，并通知已启用的{" "}
+                  <Link to={panelLink("automation", { section: "hooks" })}>Hook</Link> 和自动跟随的{" "}
+                  <Link to={panelLink("cluster")}>Pull 节点</Link>。
+                </>
+              )}
+            </p>
+            <div className="toolbar">
+              {!published && (
+                <Button
+                  id="btnFlowValidate"
+                  data-testid="validate-version"
+                  disabled={blocked}
+                  onClick={() => void validate()}
+                >
+                  {busyKind === "validate" ? "正在检查…" : "发布前检查"}
+                </Button>
+              )}
+              {canWrite && (version.status === "draft" || version.status === "rejected") && (
+                <Button disabled={blocked} onClick={() => void review("submit-review")}>
+                  提交审批
+                </Button>
+              )}
+              {canWrite && version.status === "pending_review" && (
+                <Button tone="danger" disabled={blocked} onClick={() => void review("reject")}>
+                  驳回
+                </Button>
+              )}
+              {!published && canWrite && (
+                <Button
+                  id="btnFlowPublish"
+                  data-testid="publish-version"
+                  tone="primary"
+                  disabled={blocked || !allowPublish || validation?.ok === false}
+                  onClick={() => void publish()}
+                >
+                  {busyKind === "publish" ? "正在发布…" : "正式发布"}
+                </Button>
+              )}
+              {published && (
+                <Link
+                  id="btnPublishedDeploy"
+                  className="btn btn-primary"
+                  to={panelLink(version === latest ? "delivery" : "automation")}
+                >
+                  {version === latest ? "进入部署" : "历史版本部署"}
+                </Link>
+              )}
+              {canRetryPublish && canWrite && (
+                <Button disabled={blocked} onClick={() => void publish()}>
+                  重试发布通知
+                </Button>
+              )}
+            </div>
+          </>
+        )}
       </Card>
     </div>
   );

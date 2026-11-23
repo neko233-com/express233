@@ -91,6 +91,15 @@ export interface Deployment {
   targets?: PushTarget[];
 }
 
+export const previewNote = "仅核对目标，未连接 SSH，未变更服务器";
+
+export function deploymentFeedback(deployment: Deployment) {
+  if (deployment.replayed) return `已接续执行 #${deployment.id}`;
+  return isPreview(deployment)
+    ? `预演 #${deployment.id} 已记录 · ${previewNote}`
+    : `部署 #${deployment.id} 已进入串行队列`;
+}
+
 export function usePolling(active: boolean, wait: number, refresh: () => void) {
   const tick = useEffectEvent(refresh);
   useEffect(() => {
@@ -120,16 +129,20 @@ export function deploymentStatus(status: string, dryRun: boolean) {
   const labels: Record<string, string> = dryRun
     ? { queued: "等待预演", running: "预演中", success: "预演通过", failed: "预演失败" }
     : { queued: "等待串行执行", running: "部署中", success: "部署成功", failed: "部署失败" };
+  if (status === "skipped") return "未执行";
+  if (status === "unknown") return "状态未知，需核验";
   return labels[status] ?? status;
 }
 
-export function hookPayload(hook: Hook, enabled: boolean) {
-  return {
-    name: hook.name,
-    task_id: hook.task_id,
-    debounce_seconds: hook.debounce_seconds,
-    enabled,
-  };
+export function deploymentTone(status: string, dryRun: boolean) {
+  if (status === "failed") return "danger";
+  if (status === "unknown" || status === "skipped") return "warn";
+  if (status === "success") return dryRun ? "info" : "ok";
+  return "neutral";
+}
+
+export function activeDeployment(deployment: Deployment) {
+  return deployment.status === "queued" || deployment.status === "running";
 }
 
 export async function submitDeployment(
